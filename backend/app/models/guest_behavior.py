@@ -41,3 +41,18 @@ class GuestSearchHistory(Base):
     search_filters = Column(JSON, nullable=True)
     search_results_count = Column(Integer, default=0)
     searched_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class GuestProfileHint(Base):
+    """
+    Giới tính/năm sinh khách tự khai (không cần tài khoản) — dùng để có gợi ý theo
+    cohort giống user đã đăng nhập. Xóa khi merge phiên guest vào user thật lúc đăng nhập
+    (không tự ghi đè hồ sơ user).
+    """
+
+    __tablename__ = "guest_profile_hints"
+
+    session_id = Column(String(64), primary_key=True)
+    gender = Column(String(10), nullable=False)
+    birth_year = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

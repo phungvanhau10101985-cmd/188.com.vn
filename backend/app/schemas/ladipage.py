@@ -36,6 +36,11 @@ class LadipageCreate(BaseModel):
     include_material: bool = True
     include_faq: bool = True
     products_limit: int = Field(12, ge=1, le=60)
+    material_filter: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Ladipage danh mục: lọc SP theo chất liệu trong category",
+    )
     material_image_source: MaterialImageSource = Field(
         default="product",
         description="Ladipage 1 SP: product = chọn ảnh SP (mặc định); ai = Gemini tạo ảnh chất liệu",
@@ -51,6 +56,7 @@ class LadipageUpdate(BaseModel):
     meta_description: Optional[str] = Field(None, max_length=1000)
     products_limit: Optional[int] = Field(None, ge=1, le=60)
     product_ids: Optional[List[int]] = None
+    material_filter: Optional[str] = Field(None, max_length=100)
 
 
 class LadipageResponse(BaseModel):
@@ -68,6 +74,7 @@ class LadipageResponse(BaseModel):
     include_material: bool
     include_faq: bool
     products_limit: int
+    material_filter: Optional[str] = None
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -79,6 +86,9 @@ class LadipageResponse(BaseModel):
 class LadipageDetailResponse(LadipageResponse):
     sections: List[LadipageSectionResponse] = Field(default_factory=list)
     resolved_product_ids: List[int] = Field(default_factory=list)
+    category_catalog_path: Optional[str] = None
+    category_seo_path: Optional[str] = None
+    seo_collision_warning: Optional[str] = None
 
 
 class LadipageListResponse(BaseModel):
@@ -113,14 +123,42 @@ class LadipageSeoResponse(BaseModel):
     meta_description: str
 
 
+class LadipageCategoryMaterialItem(BaseModel):
+    material: str
+    count: int
+
+
+class LadipageCategoryMaterialsResponse(BaseModel):
+    category_id: int
+    items: List[LadipageCategoryMaterialItem] = Field(default_factory=list)
+
+
 class LadipagePublicResponse(BaseModel):
     id: int
     slug: str
     title: str
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
+    material_filter: Optional[str] = None
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
+    category_catalog_path: Optional[str] = None
+    category_seo_path: Optional[str] = None
     sections: List[LadipageSectionResponse] = Field(default_factory=list)
     resolved_product_ids: List[int] = Field(default_factory=list)
+
+
+class LadipageRelatedItem(BaseModel):
+    id: int
+    slug: str
+    title: str
+    material_filter: Optional[str] = None
+    path: str
+    meta_title: Optional[str] = None
+
+
+class LadipageRelatedResponse(BaseModel):
+    items: List[LadipageRelatedItem] = Field(default_factory=list)
 
 
 class LadipageSitemapItem(BaseModel):

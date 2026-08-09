@@ -7,6 +7,7 @@ import {
   adminProductAPI,
   ladipageAdminAPI,
   type AdminProduct,
+  type LadipageCategoryMaterialItem,
   type LadipageDetail,
   type LadipageRegenerateTarget,
   type LadipageSection,
@@ -82,6 +83,9 @@ export default function AdminLadipageEditPage() {
   const [slugDraft, setSlugDraft] = useState('');
   const [metaTitleDraft, setMetaTitleDraft] = useState('');
   const [metaDescriptionDraft, setMetaDescriptionDraft] = useState('');
+  const [materialFilterDraft, setMaterialFilterDraft] = useState('');
+  const [materialOptions, setMaterialOptions] = useState<LadipageCategoryMaterialItem[]>([]);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<AdminProduct[]>([]);
   const [productsLoadStatus, setProductsLoadStatus] = useState<'idle' | 'loading' | 'ready'>('idle');
   const [savingProducts, setSavingProducts] = useState(false);
@@ -107,6 +111,7 @@ export default function AdminLadipageEditPage() {
       setSlugDraft(detail.slug);
       setMetaTitleDraft(detail.meta_title || '');
       setMetaDescriptionDraft(detail.meta_description || '');
+      setMaterialFilterDraft(detail.material_filter || '');
       setLoadStatus('ready');
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -117,6 +122,37 @@ export default function AdminLadipageEditPage() {
   useEffect(() => {
     if (Number.isFinite(ladipageId)) load();
   }, [ladipageId, load]);
+
+  useEffect(() => {
+    if (!ladipage || ladipage.source_type !== 'category' || !ladipage.category_id) {
+      setMaterialOptions([]);
+      setMaterialsLoading(false);
+      return;
+    }
+    const savedFilter = (ladipage.material_filter || '').trim();
+    let alive = true;
+    setMaterialsLoading(true);
+    ladipageAdminAPI
+      .listCategoryMaterials(ladipage.category_id)
+      .then((res) => {
+        if (!alive) return;
+        const items = res.items || [];
+        if (savedFilter && !items.some((m) => m.material === savedFilter)) {
+          setMaterialOptions([{ material: savedFilter, count: 0 }, ...items]);
+        } else {
+          setMaterialOptions(items);
+        }
+      })
+      .catch(() => {
+        if (alive) setMaterialOptions(savedFilter ? [{ material: savedFilter, count: 0 }] : []);
+      })
+      .finally(() => {
+        if (alive) setMaterialsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [ladipage?.id, ladipage?.source_type, ladipage?.category_id, ladipage?.material_filter]);
 
   useEffect(() => {
     if (!ladipage || ladipage.source_type !== 'products') {
@@ -267,7 +303,16 @@ export default function AdminLadipageEditPage() {
         setMetaTitleDraft(updated.meta_title || '');
         setMetaDescriptionDraft(updated.meta_description || '');
         if (!opts?.silent) {
-          pushToast({ title: 'AI đã tạo SEO', variant: 'success', durationMs: 2500 });
+          if (updated.seo_collision_warning) {
+            pushToast({
+              title: 'AI đã tạo SEO (đã chỉnh USP)',
+              description: updated.seo_collision_warning,
+              variant: 'success',
+              durationMs: 5000,
+            });
+          } else {
+            pushToast({ title: 'AI đã tạo SEO', variant: 'success', durationMs: 2500 });
+          }
         }
       } catch (err) {
         if (!opts?.silent) {
@@ -358,6 +403,21 @@ export default function AdminLadipageEditPage() {
       pushToast({ title: 'Slug không hợp lệ', description: 'Slug cần ít nhất 3 ký tự.', variant: 'error', durationMs: 3500 });
       return;
     }
+    if (
+      ladipage.source_type === 'category' &&
+      ladipage.include_material &&
+      !materialFilterDraft.trim()
+    ) {
+      pushToast({
+        title: 'Thiếu chất liệu',
+        description: 'Ladipage danh mục có phần Chất liệu cần chọn lọc chất liệu.',
+        variant: 'error',
+        durationMs: 3500,
+      });
+      return;
+    }
+    const prevMaterial = (ladipage.material_filter || '').trim();
+    const nextMaterial = materialFilterDraft.trim();
     setSavingMeta(true);
     try {
       const updated = await ladipageAdminAPI.update(ladipage.id, {
@@ -366,10 +426,35 @@ export default function AdminLadipageEditPage() {
         slug,
         meta_title: metaTitleDraft.trim() || undefined,
         meta_description: metaDescriptionDraft.trim() || undefined,
+        ...(ladipage.source_type === 'category'
+          ? { material_filter: nextMaterial || '' }
+          : {}),
       });
       setLadipage((prev) => (prev ? { ...prev, ...updated } : prev));
       setSlugDraft(updated.slug);
-      pushToast({ title: 'Đã lưu', variant: 'success', durationMs: 2000 });
+      setMaterialFilterDraft(updated.material_filter || '');
+      setMetaTitleDraft(updated.meta_title || '');
+      setMetaDescriptionDraft(updated.meta_description || '');
+      if (updated.seo_collision_warning) {
+        pushToast({
+          title: 'Đã lưu — SEO đã chỉnh để tránh trùng danh mục',
+          description: updated.seo_collision_warning,
+          variant: 'success',
+          durationMs: 5000,
+        });
+      } else if (
+        ladipage.source_type === 'category' &&
+        prevMaterial.toLowerCase() !== nextMaterial.toLowerCase()
+      ) {
+        pushToast({
+          title: 'Đã lưu lọc chất liệu',
+          description: 'Grid SP đã đổi theo chất liệu mới. Nên tạo lại phần Chất liệu (AI) cho khớp.',
+          variant: 'success',
+          durationMs: 4500,
+        });
+      } else {
+        pushToast({ title: 'Đã lưu', variant: 'success', durationMs: 2000 });
+      }
     } catch (err) {
       pushToast({ title: 'Lưu thất bại', description: errorMessage(err), variant: 'error', durationMs: 3500 });
     } finally {
@@ -626,6 +711,37 @@ export default function AdminLadipageEditPage() {
           rows={2}
           className="w-full rounded-md border border-gray-300 p-2 text-sm outline-none focus:border-orange-400"
         />
+        {ladipage.source_type === 'category' && (
+          <div className="mt-3">
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Lọc chất liệu trong danh mục
+              {ladipage.include_material ? ' (bắt buộc)' : ' (tuỳ chọn)'}
+              {ladipage.category_name ? ` — ${ladipage.category_name}` : ''}
+            </label>
+            {materialsLoading ? (
+              <div className="h-10 animate-pulse rounded-md bg-gray-100" />
+            ) : (
+              <select
+                value={materialFilterDraft}
+                onChange={(e) => setMaterialFilterDraft(e.target.value)}
+                className="w-full rounded-md border border-gray-300 p-2 text-sm outline-none focus:border-orange-400"
+              >
+                <option value="">
+                  {materialOptions.length ? '— Không lọc / chọn chất liệu —' : '— Không có chất liệu —'}
+                </option>
+                {materialOptions.map((m) => (
+                  <option key={m.material} value={m.material}>
+                    {m.material}
+                    {m.count > 0 ? ` (${m.count} SP)` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              Grid chỉ lấy SP cùng chất liệu. Đổi chất liệu xong hãy tạo lại section Chất liệu nếu cần.
+            </p>
+          </div>
+        )}
         <div className="mt-2 flex justify-end">
           <button
             type="button"
@@ -637,6 +753,21 @@ export default function AdminLadipageEditPage() {
           </button>
         </div>
       </div>
+
+      {ladipage.source_type === 'category' && ladipage.seo_collision_warning ? (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {ladipage.seo_collision_warning}. Hệ thống đã cố tách USP khỏi trang danh mục/cluster.
+          {ladipage.category_seo_path ? (
+            <>
+              {' '}
+              Trang SEO chính:{' '}
+              <a href={ladipage.category_seo_path} className="font-medium underline" target="_blank" rel="noreferrer">
+                {ladipage.category_seo_path}
+              </a>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mb-6 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import type { Product } from '@/types/api';
 import type { LadipageSection } from '@/lib/admin-api';
 import HeroSection from './HeroSection';
@@ -24,6 +25,12 @@ import type {
 interface PublicLadipageViewProps {
   slug: string;
   title?: string;
+  /** Lọc chất liệu admin chọn (ladipage danh mục). */
+  materialFilter?: string | null;
+  /** Link về trang SEO chính (cluster hoặc /danh-muc). */
+  categorySeoPath?: string | null;
+  categoryCatalogPath?: string | null;
+  categoryName?: string | null;
   sections: LadipageSection[];
   resolvedProductIds: number[];
   /** Sản phẩm đã fetch server-side — hiển thị ngay trong HTML cho SEO. */
@@ -36,6 +43,11 @@ interface PublicLadipageViewProps {
  */
 export default function PublicLadipageView({
   slug,
+  title,
+  materialFilter,
+  categorySeoPath,
+  categoryCatalogPath,
+  categoryName,
   sections,
   resolvedProductIds,
   initialProducts,
@@ -61,8 +73,53 @@ export default function PublicLadipageView({
     scrollToProducts();
   };
 
+  const crumbLabel = (title || '').trim() || 'Bộ sưu tập';
+  const materialLabel = (materialFilter || '').trim();
+  const catalogHref = (categorySeoPath || categoryCatalogPath || '').trim();
+  const catalogLabel = (categoryName || '').trim() || 'Xem toàn bộ danh mục';
+
   return (
     <div className="mx-auto max-w-6xl px-4 pb-24 md:pb-8">
+      <nav className="mb-3 text-sm text-gray-500" aria-label="Breadcrumb">
+        <ol className="flex flex-wrap items-center gap-x-1">
+          <li>
+            <Link href="/" className="hover:text-[#ea580c]">
+              Trang chủ
+            </Link>
+          </li>
+          {catalogHref ? (
+            <li className="flex items-center gap-x-1">
+              <span className="mx-1 text-gray-300" aria-hidden="true">
+                /
+              </span>
+              <Link href={catalogHref} className="hover:text-[#ea580c]">
+                {catalogLabel}
+              </Link>
+            </li>
+          ) : null}
+          <li className="flex items-center gap-x-1" aria-current="page">
+            <span className="mx-1 text-gray-300" aria-hidden="true">
+              /
+            </span>
+            <span className="line-clamp-1 text-gray-700">{crumbLabel}</span>
+          </li>
+        </ol>
+      </nav>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {materialLabel ? (
+          <p className="inline-flex items-center rounded-full border border-orange-200 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-800">
+            Chất liệu: {materialLabel}
+          </p>
+        ) : null}
+        {catalogHref ? (
+          <Link
+            href={catalogHref}
+            className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-medium text-gray-700 hover:border-orange-300 hover:text-orange-700"
+          >
+            Xem toàn bộ danh mục →
+          </Link>
+        ) : null}
+      </div>
       {sections.map((section) => {
         switch (section.section_type) {
           case 'hero': {

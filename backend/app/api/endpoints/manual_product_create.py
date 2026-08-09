@@ -22,6 +22,7 @@ from app.services.manual_product_create_service import (
     adopt_studio_images,
     approve_studio_image,
     create_and_start_job,
+    delete_manual_product_job,
     enqueue_manual_product_job,
     job_public_view,
     maybe_recover_interrupted_job,
@@ -329,6 +330,32 @@ def list_manual_product_jobs(
             )
         )
     return out
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+def delete_manual_product_job_endpoint(
+    job_id: str,
+    current_admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa phiên tạo sản phẩm đang dở trên server."""
+    admin_id = getattr(current_admin, "id", None)
+    try:
+        delete_manual_product_job(job_id, created_by=admin_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/jobs/{job_id}/discard", status_code=204)
+def discard_manual_product_job_endpoint(
+    job_id: str,
+    current_admin: AdminUser = Depends(require_module_permission("products")),
+):
+    """Xóa phiên dở — POST để tương thích proxy/deploy (không cần OTP step-up)."""
+    admin_id = getattr(current_admin, "id", None)
+    try:
+        delete_manual_product_job(job_id, created_by=admin_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/jobs/{job_id}", response_model=ManualProductJobOut)

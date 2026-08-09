@@ -87,6 +87,11 @@ export function buildProductImageOptionsFromProducts(products: LadipageProductIm
   return options;
 }
 
+/** URL mọi ảnh SP (gallery/màu/chi tiết) — so sánh với ảnh chất liệu pick từ SP. */
+export function collectProductImageUrls(product: LadipageProductImageSource): string[] {
+  return buildProductImageOptionsFromProducts([product]).map((opt) => opt.url);
+}
+
 /** URL ảnh hero carousel: ảnh hero đã chọn trước, sau đó gallery SP (dedupe). */
 export function buildHeroCarouselUrlsFromProduct(
   product: LadipageProductImageSource,

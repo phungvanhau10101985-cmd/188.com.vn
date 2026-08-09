@@ -33,7 +33,7 @@ import TrustCtaSection from './TrustCtaSection';
 import FaqSection from './FaqSection';
 import LadipageTrustStrip from './LadipageTrustStrip';
 import ProductBuyModal from './ProductBuyModal';
-import { buildHeroCarouselUrlsFromProduct } from '@/lib/ladipage-utils';
+import { buildHeroCarouselUrlsFromProduct, collectProductImageUrls } from '@/lib/ladipage-utils';
 import type {
   FaqSectionData,
   HeroSectionData,
@@ -260,7 +260,11 @@ export default function SingleProductLadipageView({
       )}
       {materialSection && (
         <SectionErrorBoundary>
-          <MaterialSection data={materialSection.data as MaterialSectionData} />
+          <MaterialSection
+            data={materialSection.data as MaterialSectionData}
+            singleProductMode
+            productImageUrls={collectProductImageUrls(product)}
+          />
         </SectionErrorBoundary>
       )}
       <div className="border-t border-gray-100 pt-2">
@@ -328,6 +332,7 @@ export default function SingleProductLadipageView({
           <SectionErrorBoundary>
             <HeroSection
               data={heroData}
+              headlineAs="h2"
               carouselImages={heroCarouselImages}
               ctaSlot={
                 <button

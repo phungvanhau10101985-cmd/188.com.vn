@@ -1357,6 +1357,35 @@ class MigrationManager:
             "vps_backup_runs", VpsBackupRun
         )
 
+        from app.models.ladipage import Ladipage, LadipageSection
+
+        results['ladipages_create'] = self._create_table_if_not_exists("ladipages", Ladipage)
+        results['ladipages_sync'] = self._sync_table_columns("ladipages", Ladipage)
+        results['ladipage_sections_create'] = self._create_table_if_not_exists(
+            "ladipage_sections", LadipageSection
+        )
+        results['ladipage_sections_sync'] = self._sync_table_columns(
+            "ladipage_sections", LadipageSection
+        )
+
+        from app.models.guest_behavior import GuestProfileHint
+
+        results['guest_profile_hints_create'] = self._create_table_if_not_exists(
+            "guest_profile_hints", GuestProfileHint
+        )
+        results['guest_profile_hints_sync'] = self._sync_table_columns(
+            "guest_profile_hints", GuestProfileHint
+        )
+
+        from app.models.guest_cohort_view_pool_cache import GuestCohortPoolCache
+
+        results['guest_cohort_view_pool_cache_create'] = self._create_table_if_not_exists(
+            "guest_cohort_view_pool_cache", GuestCohortPoolCache
+        )
+        results['guest_cohort_view_pool_cache_sync'] = self._sync_table_columns(
+            "guest_cohort_view_pool_cache", GuestCohortPoolCache
+        )
+
         return results
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:

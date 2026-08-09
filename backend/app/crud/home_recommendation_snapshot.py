@@ -7,11 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.crud.home_recommendation_sources import resolve_recommendation_sources
 from app.crud.personalized_feed import get_personalized_home_products
-from app.crud.user import (
-    get_products_same_shop_as_recent_views,
-    get_products_viewed_by_same_age_gender,
-)
 from app.models.guest_home_recommendation_snapshot import GuestHomeRecommendationSnapshot
 from app.models.home_recommendation_snapshot import UserHomeRecommendationSnapshot
 from app.models.user import User
@@ -167,22 +164,20 @@ def build_home_recommendation_snapshot(
     """
     if user is not None:
         uid = user.id
-        shop_products, shop_total, shop_seed = get_products_same_shop_as_recent_views(
-            db, user_id=uid, limit=HOME_MIX_INITIAL_LIMIT, offset=0, seed=None
+        sources = resolve_recommendation_sources(
+            db,
+            user_id=uid,
+            guest_session_id=None,
+            shop_limit=HOME_MIX_INITIAL_LIMIT,
+            cohort_limit=HOME_COHORT_SNAPSHOT_LIMIT,
         )
-        cohort_products: List[Any] = []
-        cohort_mode = "requires_login"
-        if user.date_of_birth and user.gender:
-            cohort_products, cohort_mode = get_products_viewed_by_same_age_gender(
-                db, uid, limit=HOME_COHORT_SNAPSHOT_LIMIT
-            )
         recommendation = _build_recommendation_payload(
             db,
-            shop_products=shop_products,
-            shop_total=shop_total,
-            shop_seed=shop_seed,
-            cohort_products=cohort_products,
-            cohort_mode=cohort_mode,
+            shop_products=sources["shop_products"],
+            shop_total=sources["shop_total"],
+            shop_seed=sources["shop_seed"],
+            cohort_products=sources["cohort_products"],
+            cohort_mode=sources["cohort_mode"],
             user=user,
             serialize_products=serialize_products,
         )
@@ -197,21 +192,20 @@ def build_home_recommendation_snapshot(
         version_key = home_snapshot_version_key(user)
     elif guest_session_id:
         sid = guest_session_id.strip()
-        shop_products, shop_total, shop_seed = get_products_same_shop_as_recent_views(
+        sources = resolve_recommendation_sources(
             db,
             user_id=None,
             guest_session_id=sid,
-            limit=HOME_MIX_INITIAL_LIMIT,
-            offset=0,
-            seed=None,
+            shop_limit=HOME_MIX_INITIAL_LIMIT,
+            cohort_limit=HOME_COHORT_SNAPSHOT_LIMIT,
         )
         recommendation = _build_recommendation_payload(
             db,
-            shop_products=shop_products,
-            shop_total=shop_total,
-            shop_seed=shop_seed,
-            cohort_products=[],
-            cohort_mode="requires_login",
+            shop_products=sources["shop_products"],
+            shop_total=sources["shop_total"],
+            shop_seed=sources["shop_seed"],
+            cohort_products=sources["cohort_products"],
+            cohort_mode=sources["cohort_mode"],
             user=None,
             serialize_products=serialize_products,
         )

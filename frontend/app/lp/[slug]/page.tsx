@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound, redirect } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import {
   getPublicLadipage,
   getProductByIdForSeo,
@@ -9,6 +9,7 @@ import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import {
   absoluteLadipageImage,
   buildFaqPageJsonLd,
+  buildLadipageBreadcrumbJsonLd,
   faqItemsFromSections,
   heroImageFromSections,
 } from '@/lib/ladipage-seo';
@@ -47,19 +48,69 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const lp = await getPublicLadipage(slug);
   if (!lp) return { title: 'Không tìm thấy trang', robots: { index: false, follow: true } };
 
-  const canonical = `${SITE_URL}/lp/${lp.slug}`;
   const isSingleProduct = lp.resolved_product_ids.length === 1;
   const product = isSingleProduct ? await getProductByIdForSeo(lp.resolved_product_ids[0]) : null;
+  const productSeg = product ? productPathSlugFromApi(product.slug, product.product_id) : '';
+  const productCanonicalPath = productSeg
+    ? `/products/${encodeURIComponent(productSeg.replace(/\//g, '-'))}`
+    : null;
 
+  // 1 SP: canonical về PDP, noindex /lp để gom tín hiệu SEO về trang sản phẩm.
+  if (isSingleProduct && productCanonicalPath) {
+    const title = lp.meta_title || product?.meta_title || product?.name || lp.title;
+    const rawDescription =
+      lp.meta_description ||
+      product?.description ||
+      `${lp.title}. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
+    const description = truncateDescriptionAtSentence(rawDescription, 160);
+    const image =
+      absoluteLadipageImage(product?.main_image) ||
+      absoluteLadipageImage(product?.images?.[0]) ||
+      heroImageFromSections(lp.sections);
+    const absoluteCanonical = `${SITE_URL}${productCanonicalPath}`;
+
+    return {
+      title,
+      description,
+      alternates: { canonical: productCanonicalPath },
+      openGraph: {
+        type: 'website',
+        locale: 'vi_VN',
+        url: absoluteCanonical,
+        siteName: '188.COM.VN',
+        title,
+        description: description.slice(0, 200).trim(),
+        images: image ? [{ url: image, width: 1200, height: 630, alt: title }] : undefined,
+      },
+      twitter: {
+        card: 'summary_large_image',
+        title,
+        description: description.slice(0, 200).trim(),
+        images: image ? [image] : undefined,
+      },
+      robots: {
+        index: false,
+        follow: true,
+        googleBot: { index: false, follow: true },
+      },
+      ...(product
+        ? {
+            other: {
+              'product:price:amount': String(product.price),
+              'product:price:currency': 'VND',
+              'product:availability': (product.available ?? 0) > 0 ? 'in stock' : 'out of stock',
+            },
+          }
+        : {}),
+    };
+  }
+
+  const canonical = `${SITE_URL}/lp/${lp.slug}`;
   const title = lp.meta_title || lp.title;
   const rawDescription =
-    lp.meta_description ||
-    (product ? product.description : undefined) ||
-    `${lp.title}. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
+    lp.meta_description || `${lp.title}. Mua sắm tại 188.com.vn - Xem là thích click là mê.`;
   const description = truncateDescriptionAtSentence(rawDescription, 160);
-  const image =
-    (product ? absoluteLadipageImage(product.main_image) || absoluteLadipageImage(product.images?.[0]) : '') ||
-    heroImageFromSections(lp.sections);
+  const image = heroImageFromSections(lp.sections);
 
   return {
     title,
@@ -85,15 +136,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       follow: true,
       googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1 },
     },
-    ...(product
-      ? {
-          other: {
-            'product:price:amount': String(product.price),
-            'product:price:currency': 'VND',
-            'product:availability': (product.available ?? 0) > 0 ? 'in stock' : 'out of stock',
-          },
-        }
-      : {}),
   };
 }
 
@@ -113,8 +155,10 @@ export default async function LadipagePublicPage({ params, searchParams }: Props
   }
 
   const pageUrl = `/lp/${lp.slug}`;
+  const pageTitle = lp.meta_title || lp.title;
   const faqItems = faqItemsFromSections(lp.sections);
   const faqJsonLd = buildFaqPageJsonLd(faqItems, pageUrl);
+  const breadcrumbJsonLd = buildLadipageBreadcrumbJsonLd(pageTitle, pageUrl);
   const isSingleProduct = lp.resolved_product_ids.length === 1;
 
   if (isSingleProduct) {
@@ -122,7 +166,8 @@ export default async function LadipagePublicPage({ params, searchParams }: Props
     if (product) {
       const seg = productPathSlugFromApi(product.slug, product.product_id);
       if (seg) {
-        redirect(`/products/${encodeURIComponent(seg.replace(/\//g, '-'))}${querySuffix}`);
+        // 308: gom canonical lâu dài về PDP (giữ query ads).
+        permanentRedirect(`/products/${encodeURIComponent(seg.replace(/\//g, '-'))}${querySuffix}`);
       }
     }
   }
@@ -132,7 +177,7 @@ export default async function LadipagePublicPage({ params, searchParams }: Props
     listProducts.length > 0
       ? buildProductListJsonLd({
           pageUrl,
-          pageTitle: lp.meta_title || lp.title,
+          pageTitle,
           pageDescription: lp.meta_description || undefined,
           products: listProducts,
         })
@@ -140,12 +185,17 @@ export default async function LadipagePublicPage({ params, searchParams }: Props
 
   return (
     <main className="py-4">
+      <JsonLdScript data={breadcrumbJsonLd} />
       {listJsonLd ? <JsonLdScript data={listJsonLd} /> : null}
       {faqJsonLd ? <JsonLdScript data={faqJsonLd} /> : null}
       <LadipageLandingMarketingTracker products={listProducts} listName={lp.title} />
       <PublicLadipageView
         slug={lp.slug}
         title={lp.title}
+        materialFilter={lp.material_filter}
+        categorySeoPath={lp.category_seo_path}
+        categoryCatalogPath={lp.category_catalog_path}
+        categoryName={lp.category_name}
         sections={lp.sections}
         resolvedProductIds={lp.resolved_product_ids}
         initialProducts={listProducts}

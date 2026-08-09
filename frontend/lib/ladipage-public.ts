@@ -15,8 +15,49 @@ export interface LadipagePublicDetail {
   title: string;
   meta_title?: string | null;
   meta_description?: string | null;
+  material_filter?: string | null;
+  category_id?: number | null;
+  category_name?: string | null;
+  category_catalog_path?: string | null;
+  category_seo_path?: string | null;
   sections: LadipageSection[];
   resolved_product_ids: number[];
+}
+
+export interface LadipageRelatedItem {
+  id: number;
+  slug: string;
+  title: string;
+  material_filter?: string | null;
+  path: string;
+  meta_title?: string | null;
+}
+
+/** Ladipage danh mục đã publish — link chéo từ danh mục/cluster. */
+export async function listRelatedPublishedLadipages(opts: {
+  categoryId?: number;
+  categoryPath?: string;
+  clusterSlug?: string;
+  limit?: number;
+  excludeId?: number;
+}): Promise<LadipageRelatedItem[]> {
+  try {
+    const sp = new URLSearchParams();
+    if (opts.categoryId) sp.set('category_id', String(opts.categoryId));
+    if (opts.categoryPath) sp.set('category_path', opts.categoryPath);
+    if (opts.clusterSlug) sp.set('cluster_slug', opts.clusterSlug);
+    if (opts.limit) sp.set('limit', String(opts.limit));
+    if (opts.excludeId) sp.set('exclude_id', String(opts.excludeId));
+    const res = await fetch(`${getApiBaseUrl()}/ladipages/public/related?${sp.toString()}`, {
+      next: { revalidate: 600 },
+      headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { items?: LadipageRelatedItem[] };
+    return Array.isArray(data.items) ? data.items : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Ladipage 1 SP đã publish — null nếu không có. */

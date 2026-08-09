@@ -36,7 +36,7 @@ from app.services.ladipage_bootstrap import (
     fill_ladipage_ai_content,
     publish_ladipage,
 )
-from app.services.manual_product_create_job_store import load_job, persist_job
+from app.services.manual_product_create_job_store import delete_job, load_job, persist_job
 
 logger = logging.getLogger(__name__)
 
@@ -561,6 +561,54 @@ def _commercial_look_brief(
     )
 
 
+def _shot_style_session_label(shot_style: str) -> str:
+    if shot_style == "outdoor":
+        return "phong cảnh / ngoài trời"
+    if shot_style == "lifestyle":
+        return "lifestyle trong nhà"
+    return "studio chuyên nghiệp (nền sạch)"
+
+
+def _studio_commercial_look_from_state(state: Dict[str, Any]) -> str:
+    """Bối cảnh + người mẫu đã chọn lúc bắt đầu phiên Studio — dùng cho mọi ảnh."""
+    payload = dict(state.get("payload") or {})
+    studio = dict(state.get("studio") or {})
+    plan = dict(studio.get("plan") or {})
+    gender_txt = (payload.get("gender") or "").strip() or "unisex"
+    presence = _effective_model_presence(payload, plan.get("model_presence") or payload.get("model_presence"))
+    scene = _resolve_shot_style(plan.get("shot_style") or payload.get("shot_style"))
+    model_gender = _resolve_model_gender(plan.get("model_gender") or payload.get("model_gender"))
+    model_age_group = _resolve_model_age_group(plan.get("model_age_group") or payload.get("model_age_group"))
+    model_ethnicity = _resolve_model_ethnicity(
+        plan.get("model_ethnicity") or payload.get("model_ethnicity")
+    )
+    product_kind = _studio_product_kind_from_state(state)
+    return _commercial_look_brief(
+        model_presence=presence,
+        shot_style=scene,
+        gender_txt=gender_txt,
+        model_gender=model_gender,
+        model_age_group=model_age_group,
+        model_ethnicity=model_ethnicity,
+        product_kind=product_kind,
+    )
+
+
+def _ensure_studio_shoot_context_in_prompt(prompt: str, look_brief: str) -> str:
+    """Ghép bối cảnh đã khóa — tránh DeepSeek/Gemini đổi studio ↔ trong nhà ↔ ngoài trời."""
+    base = (prompt or "").strip()
+    look = (look_brief or "").strip()
+    if not look:
+        return base
+    marker = "LOCKED SHOOT SETTINGS"
+    if marker in base or look[:48].lower() in base.lower():
+        return base
+    return (
+        f"{base} {marker} (same for every image in this product session — "
+        f"do NOT switch indoor/outdoor/studio): {look}"
+    ).strip()
+
+
 _GALLERY_ANGLES = [
     "3/4 angled hero that shows depth and shape",
     "clean side / profile commercial angle",
@@ -733,6 +781,52 @@ def _append_admin_notes_to_prompt(base: str, notes: str, product_kind: str) -> s
         f"{base}"
     )
 
+_STUDIO_GALLERY_SIMPLE_PROMPT = (
+    "Create a new e-commerce photo of the exact same product as the attached reference, "
+    "but from a different camera angle and composition. "
+    "Keep the same product design, colors, print, and all details. "
+    "Do not copy the reference photo's viewing angle, crop, or pose."
+)
+
+_STUDIO_DETAIL_SIMPLE_PROMPT = (
+    "Create a new product detail close-up of the exact same product as the attached reference, "
+    "but from a different angle or zoom/crop. "
+    "Keep the same product design, colors, print, and all details. "
+    "Do not copy the reference photo's viewing angle or framing."
+)
+
+
+def _simple_gallery_detail_prompt(kind: str) -> str:
+    kind_n = (kind or "").strip()
+    if kind_n == "detail":
+        return _STUDIO_DETAIL_SIMPLE_PROMPT
+    return _STUDIO_GALLERY_SIMPLE_PROMPT
+
+
+_STUDIO_GALLERY_DIFF_REF_BRIEF = (
+    "CRITICAL for gallery: attached reference is PRODUCT IDENTITY ONLY — same design, colors, print, materials. "
+    "You MUST produce a CLEARLY DIFFERENT photograph from the reference: different camera angle, crop/framing, "
+    "model pose/stance, and composition. Do NOT copy or closely mimic the reference photo's viewing angle, "
+    "pose staging, or layout. Each gallery image must look like a distinct catalog shot."
+)
+
+_STUDIO_DETAIL_DIFF_REF_BRIEF = (
+    "CRITICAL for detail: reference is product identity only. Create a DIFFERENT macro close-up — "
+    "new zoom/crop/focus area — not the same framing or angle as the full reference photo."
+)
+
+_STUDIO_COLOR_PHOTO_BRIEF = (
+    "GENERATE a professional e-commerce catalog photograph from the admin product sample. "
+    "Match the SAME viewing angle, crop/framing, product orientation, and how the item is worn or displayed "
+    "as in the attached reference photo (same pose staging when the sample shows a person). "
+    "Product identity (design, color, cut, print) must follow the sample exactly. "
+    "Use clean studio/lifestyle background per shoot settings below — do NOT copy messy backgrounds, "
+    "hangers, beds, or clutter from the upload. "
+    "Output one clean, coherent catalog image. "
+    "On regenerate/retry: keep the SAME composition and angle rules — only improve quality; "
+    "do not invent a new pose or camera angle unless the admin uploads a different reference."
+)
+
 _STUDIO_NEW_PHOTO_BRIEF = (
     "GENERATE A COMPLETELY NEW professional e-commerce photograph from scratch — "
     "NOT an edit, collage, overlay, or copy-paste of the reference upload. "
@@ -865,7 +959,8 @@ def _studio_color_match_brief(
     lines = [
         sample_line,
         f"Colorway label «{cname}» is a hint only; follow the uploaded sample if it conflicts.",
-        "Do NOT paste, trace, photocomposite, or 'extend' the reference photo. Do NOT keep the reference background or hanger shot.",
+        "Match the admin reference viewing angle, crop, and product staging; render as a clean new catalog photo.",
+        "Do NOT paste, trace, or photocomposite the reference pixels. Do NOT keep the reference background or hanger shot.",
         "Each colorway may use a DIFFERENT product sample upload — do not assume the same product template as other colorways unless the upload shows it.",
     ]
     if is_bag:
@@ -1004,6 +1099,9 @@ def _init_studio(payload: Dict[str, Any], *, product_key: str) -> Dict[str, Any]
         "material_image": "",
         "material_callouts": [],
         "material_body": "",
+        "compose_intents_used": {},
+        "color_user_prompt": "",
+        "last_ref_urls": {},
         "current_slot": None,
         "can_publish": False,
         "next_actions": ["color"],
@@ -1108,15 +1206,16 @@ def _merge_color_slot_refs(
     picked = [str(u).strip() for u in (selected or []) if str(u).strip()]
     attach = (attach_url or "").strip()
     if color_index <= 0:
-        merged: List[str] = []
+        approved = set(_approved_color_urls(studio))
+        # Upload mới: chỉ dùng attach — không ghép ref cũ từ lần trước / picker.
         if attach:
-            merged.append(attach)
-        for u in picked:
-            if u not in merged:
-                merged.append(u)
-        if not merged:
-            raise ValueError("Ảnh màu đầu: upload ảnh mẫu sản phẩm cho màu này.")
-        return merged[:3]
+            return [attach]
+        product_refs = [u for u in picked if u and u not in approved]
+        if product_refs:
+            return [product_refs[0]]
+        if picked:
+            return [picked[0]]
+        raise ValueError("Ảnh màu đầu: upload ảnh mẫu sản phẩm cho màu này.")
     face = _first_approved_color_url(studio)
     if not face:
         raise ValueError("Cần duyệt ảnh màu #1 trước khi tạo màu tiếp theo.")
@@ -1153,14 +1252,31 @@ def _merge_customer_orig_refs(
         return _merge_color_slot_refs(
             studio, selected, attach_url=attach_url, color_index=color_index
         )
-    pool = studio.get("ref_pool") or []
-    orig = [
-        str(item.get("url") or "").strip()
-        for item in pool
-        if isinstance(item, dict) and (item.get("kind") or "") == "ref"
-    ]
-    orig = [u for u in orig if u]
-    return (selected or orig)[:3]
+    picked = [str(u).strip() for u in (selected or []) if str(u).strip()]
+    return picked[:3]
+
+
+def _studio_color_user_prompt(studio: Dict[str, Any]) -> str:
+    return str(studio.get("color_user_prompt") or "").strip()
+
+
+def _sync_color_user_prompt(
+    studio: Dict[str, Any],
+    admin_prompt: str,
+    *,
+    color_index: int = 0,
+) -> str:
+    """
+    Prompt tuỳ chọn dùng chung cho mọi ảnh màu trong phiên Studio.
+    Màu #1: lưu prompt (kể cả rỗng) làm chuẩn cho Tạo lại và màu #2+.
+    Màu #2+: luôn dùng prompt đã lưu — không bắt nhập lại.
+    """
+    explicit = (admin_prompt or "").strip()
+    saved = _studio_color_user_prompt(studio)
+    if color_index <= 0:
+        studio["color_user_prompt"] = explicit
+        return explicit
+    return saved
 
 
 def _slot_label(slot: Dict[str, Any]) -> str:
@@ -1186,9 +1302,290 @@ _DEFAULT_MATERIAL_CALLOUTS_BY_TYPE = {
     "household": ["Chất lượng cao", "Bền, chắc chắn", "Dễ vệ sinh"],
 }
 
+_GENERIC_MATERIAL_CALLOUT_PHRASES = frozenset(
+    {
+        "sang trong dang cap",
+        "mem mai tu nhien",
+        "thoang khi mat lanh",
+        "chat luong cao",
+        "mem mai thoa mai",
+        "ben theo thoi gian",
+        "dang dong tien",
+        "cao cap",
+        "tien dung",
+        "thoi trang",
+        "dam bao chat luong",
+    }
+)
+
+_MATERIAL_KEYWORD_CALLOUTS: List[Tuple[Tuple[str, ...], List[str]]] = [
+    (
+        ("lụa", "lua", "silk", "soie", "tơ tằm", "to tam"),
+        ["Óng ánh chuẩn lụa thật", "Mát lạnh hiếm có tự nhiên", "Càng dùng càng lên màu đẹp"],
+    ),
+    (
+        ("da bò", "da bo", "da thật", "da that", "leather", "calfskin"),
+        ["Vân da độc bản tự nhiên", "Càng dùng càng lên màu", "Bền đẹp theo thời gian dùng"],
+    ),
+    (
+        ("da pu", "pu leather", "simili"),
+        ["Mặt da đều màu sắc nét", "Chống nước chống bám bẩn", "Giữ dáng bền lâu"],
+    ),
+    (
+        ("cotton", "vải cotton", "vai cotton", "100% cotton"),
+        ["Thấm hút vượt trội tự nhiên", "Mềm mại chuẩn cotton nguyên chất", "Thoáng khí suốt ngày dài"],
+    ),
+    (
+        ("linen", "lanh", "vải lanh", "vai lanh"),
+        ["Vân lanh thô mộc tự nhiên", "Thoáng mát vượt trội cả ngày", "Nhẹ nhàng chuẩn linen cao cấp"],
+    ),
+    (
+        ("polyester", "poly", "vải poly"),
+        ["Giữ form không nhăn cả ngày", "Bền màu qua nhiều lần giặt", "Nhẹ đẹp bền lâu"],
+    ),
+    (
+        ("nylon", "ni lông"),
+        ["Nhẹ bền vượt trội tự nhiên", "Khô nhanh không thấm nước", "Bền đẹp theo năm tháng"],
+    ),
+    (
+        ("spandex", "elastane", "co giãn"),
+        ["Co giãn 4 chiều linh hoạt", "Ôm form chuẩn từng đường nét", "Bền đàn hồi không xổ dão"],
+    ),
+    (
+        ("len", "wool", "lông cừu"),
+        ["Giữ ấm tự nhiên vượt trội", "Mềm ấm chuẩn len nguyên chất", "Xốp nhẹ không bí bách"],
+    ),
+    (
+        ("nhung", "velvet"),
+        ["Bóng mượt sang trọng riêng có", "Mịn tay chuẩn nhung cao cấp", "Rũ đẹp form chuẩn dáng"],
+    ),
+    (
+        ("denim", "jean"),
+        ["Chắc bền qua nhiều năm dùng", "Giữ dáng chuẩn không xổ form", "Lên màu đẹp theo thời gian"],
+    ),
+    (
+        ("satin", "sa tanh"),
+        ["Bóng ánh sang trọng riêng có", "Mượt rũ chuẩn satin cao cấp", "Mềm mại trên từng đường may"],
+    ),
+    (
+        ("organza", "organdy"),
+        ["Mỏng nhẹ trong suốt tinh tế", "Giữ phom cứng cáp tự nhiên", "Thêu hoa sắc nét nổi khối"],
+    ),
+    (
+        ("kaki", "khaki"),
+        ["Đứng phom chuẩn dáng tự nhiên", "Chống nhăn bền form cả ngày", "Dày dặn bền đẹp lâu dài"],
+    ),
+    (
+        ("ren", "lace", "đăng ten", "dang ten"),
+        ["Hoa văn tinh xảo sắc nét", "Mềm mại nữ tính riêng có", "Thêu nổi khối tinh tế"],
+    ),
+    (
+        ("voan", "chiffon"),
+        ["Mỏng nhẹ bay bổng tự nhiên", "Rũ mềm chuẩn chiffon cao cấp", "Thoáng mát dịu nhẹ trên da"],
+    ),
+    (
+        ("modal",), ["Mềm mịn vượt trội tự nhiên", "Thấm hút nhanh khô thoáng", "Co giãn nhẹ ôm dáng"],
+    ),
+    (
+        ("tencel",), ["Mềm mịn chuẩn tencel cao cấp", "Thấm hút vượt trội tự nhiên", "Thoáng khí mềm mại trên da"],
+    ),
+    (
+        ("cashmere", "len cashmere"),
+        ["Mềm mịn hiếm có tự nhiên", "Giữ ấm vượt trội nhẹ tênh", "Sang trọng riêng chuẩn cashmere"],
+    ),
+    (
+        ("da lộn", "da lon", "suede"),
+        ["Nhung mịn chuẩn da lộn thật", "Ấm áp mềm tay tự nhiên", "Sang trọng riêng có bền đẹp"],
+    ),
+    (
+        ("canvas", "vải bố"),
+        ["Dày dặn chắc bền lâu dài", "Giữ dáng chuẩn không xổ form", "Bền đẹp qua nhiều năm dùng"],
+    ),
+    (
+        ("gấm", "gam", "brocade"),
+        ["Hoa văn dệt nổi tinh xảo", "Óng ánh sang trọng riêng có", "Dày dặn bền đẹp lâu dài"],
+    ),
+    (
+        ("gỗ", "go", "wood", "gỗ tự nhiên"),
+        ["Vân gỗ tự nhiên độc bản", "Chắc chắn bền theo năm tháng", "Càng dùng càng lên vân đẹp"],
+    ),
+    (
+        ("kim loại", "kim loai", "inox", "thép không gỉ", "thep khong gi", "stainless"),
+        ["Sáng bóng không gỉ theo năm", "Chắc chắn bền lực tự nhiên", "Dễ lau sáng như mới"],
+    ),
+    (
+        ("nhôm", "nhom", "aluminum", "aluminium"),
+        ["Nhẹ bền vượt trội tự nhiên", "Chống gỉ bền theo năm tháng", "Chắc chắn không lo cong vênh"],
+    ),
+    (
+        ("nhựa", "nhua", "plastic", "abs", "pp cao cấp"),
+        ["Nhẹ bền dễ vệ sinh", "Chịu lực tốt không nứt vỡ", "Bền màu theo thời gian dùng"],
+    ),
+    (
+        ("gốm", "gom", "sứ", "su", "ceramic", "porcelain"),
+        ["Men bóng mịn tự nhiên", "Giữ nhiệt tốt an toàn dùng", "Sang trọng riêng bền đẹp lâu"],
+    ),
+    (
+        ("thủy tinh", "thuy tinh", "kính", "kinh", "glass", "crystal"),
+        ["Trong suốt sắc nét tự nhiên", "Sáng bóng sang trọng riêng có", "Bền chắc dễ lau sáng"],
+    ),
+    (
+        ("silicone", "silicon"),
+        ["Mềm dẻo an toàn tự nhiên", "Chịu nhiệt tốt bền lâu dài", "Dễ vệ sinh không bám bẩn"],
+    ),
+    (
+        ("vàng", "vang", "gold", "18k", "24k"),
+        ["Ánh vàng sáng bóng tự nhiên", "Không xuống màu theo năm tháng", "Sang trọng riêng chuẩn vàng thật"],
+    ),
+    (
+        ("bạc", "bac", "silver"),
+        ["Ánh bạc sáng bóng tự nhiên", "Không xuống màu bền lâu dài", "Sang trọng riêng chuẩn bạc thật"],
+    ),
+    (
+        ("mây", "may", "tre", "rattan", "bamboo"),
+        ["Đan tay tinh xảo tự nhiên", "Nhẹ bền chắc theo năm tháng", "Mộc mạc sang trọng riêng có"],
+    ),
+]
+
+
+def _short_material_label(material: str, max_words: int = 3) -> str:
+    words = [w for w in (material or "").strip().split() if w]
+    return " ".join(words[:max_words]) if words else ""
+
+
+def _dynamic_material_callouts(material: str) -> List[str]:
+    """Fallback cho chất liệu không nằm trong danh sách từ khóa — vẫn gắn đúng tên chất liệu,
+    tránh câu chung chung dùng được cho mọi loại."""
+    label = _short_material_label(material)
+    if not label:
+        return list(_DEFAULT_MATERIAL_CALLOUTS)
+    return [
+        f"Chuẩn {label} nguyên bản",
+        f"Cảm nhận rõ chất {label}",
+        f"Bền đẹp đúng chất {label}",
+    ]
+
+
+def _normalize_material_callout_phrase(text: str) -> str:
+    import unicodedata
+
+    s = (text or "").strip().lower().replace("đ", "d").replace("Đ", "d")
+    s = unicodedata.normalize("NFD", s)
+    return "".join(ch for ch in s if unicodedata.category(ch) != "Mn")
+
+
+def _is_generic_material_callout(text: str) -> bool:
+    norm = _normalize_material_callout_phrase(text)
+    if not norm:
+        return True
+    if norm in _GENERIC_MATERIAL_CALLOUT_PHRASES:
+        return True
+    for generic in _GENERIC_MATERIAL_CALLOUT_PHRASES:
+        if len(generic) >= 12 and generic in norm:
+            return True
+    return False
+
+
+def _callouts_are_too_generic(callouts: List[str]) -> bool:
+    cleaned = [str(c).strip() for c in callouts if str(c).strip()]
+    if len(cleaned) < 2:
+        return True
+    generic_count = sum(1 for c in cleaned if _is_generic_material_callout(c))
+    return generic_count >= max(2, len(cleaned) - 1)
+
+
+def _fallback_callouts_for_material(material: str, product_type: str = "apparel") -> List[str]:
+    norm = _normalize_material_callout_phrase(material)
+    if norm:
+        for keywords, callouts in _MATERIAL_KEYWORD_CALLOUTS:
+            if any(kw in norm for kw in keywords):
+                return list(callouts)
+        # Chất liệu đa dạng không nằm trong danh sách từ khóa trên — vẫn gắn đúng tên
+        # chất liệu admin đã khai báo, không rơi về câu chung chung dùng cho mọi loại.
+        return _dynamic_material_callouts(material)
+    return _default_material_callouts(product_type)
+
 
 def _default_material_callouts(product_type: str = "apparel") -> List[str]:
     return list(_DEFAULT_MATERIAL_CALLOUTS_BY_TYPE.get(product_type, _DEFAULT_MATERIAL_CALLOUTS))
+
+
+def _material_hero_composition_brief(product_kind: str) -> str:
+    """Vùng nào trong khung hình nên là hero để khách nhìn thấy chất liệu trực quan nhất."""
+    kind = (product_kind or "").strip().lower()
+    if kind == "bag":
+        return (
+            "COMPOSITION: The hero zone (center ~65% of the square frame) must be the largest leather/fabric "
+            "panel on the bag — clear grain, stitching, and edge finish where shoppers judge quality. "
+            "Callout badges only in corners/margins; never cover the texture hero."
+        )
+    if kind == "shoes":
+        return (
+            "COMPOSITION: Hero zone = upper/vamp or side panel — the most intuitive place to see shoe material "
+            "(leather grain, suede nap, mesh weave). Sharpest focus there. Callouts in corners only."
+        )
+    if kind == "medicine":
+        return (
+            "COMPOSITION: Hero zone = front label and packaging surface — ingredient print and box/bottle finish "
+            "in sharp macro. Callouts along edges, not over the label hero."
+        )
+    if kind == "household":
+        return (
+            "COMPOSITION: Hero zone = the main touch surface customers feel daily (shell, coating, handle grip, "
+            "appliance panel finish). Callouts in margins only."
+        )
+    if kind == "accessory":
+        return (
+            "COMPOSITION: Hero zone = largest visible material panel (strap, clasp surround, main body surface) "
+            "with clearest texture. Callouts in corners only."
+        )
+    return (
+        "COMPOSITION: Hero zone (center ~65% of the square frame) = the most intuitive fabric area shoppers "
+        "touch and inspect — main bodice/torso panel, sleeve cuff, collar/neckline, skirt front, or largest flat "
+        "textile section with visible weave/grain and a soft fold for depth. Sharpest focus on this hero zone. "
+        "Callout badges only in corners/edges; never cover the material hero."
+    )
+
+
+def _simple_material_prompt(
+    *,
+    material_name: str = "",
+    material_callouts: Optional[List[str]] = None,
+    product_type: str = "apparel",
+) -> str:
+    """Prompt cố định ảnh chất liệu — cận cảnh rõ + nhãn ưu điểm đã khai báo."""
+    mat = (material_name or "").strip() or "material from the product"
+    callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
+    if not callouts or _callouts_are_too_generic(callouts):
+        callouts = _fallback_callouts_for_material(mat, product_type)
+    benefits = "; ".join(callouts)
+    composition = _material_hero_composition_brief(product_type)
+    if product_type == "medicine":
+        focus = (
+            "Focus on packaging surface, label print, and ingredient/quality cues in sharp macro detail."
+        )
+    elif product_type == "household":
+        focus = "Focus on surface finish, build quality, and tactile material detail in sharp macro detail."
+    elif product_type == "bag":
+        focus = "Focus on leather/fabric grain, stitching, edge paint, and hardware surround in sharp macro detail."
+    elif product_type == "shoes":
+        focus = "Focus on upper leather/suede/mesh texture and construction seams in sharp macro detail."
+    else:
+        focus = (
+            "Focus on fabric weave, grain, stitching, and tactile texture in sharp macro detail."
+        )
+    return (
+        "Create a premium e-commerce material close-up of the exact same product as the attached reference. "
+        "Show the real material/finish/texture in maximum clarity and finest detail so shoppers can evaluate quality. "
+        f"{composition} "
+        f"{focus} "
+        "Square 1:1 layout, macro close-up, soft studio lighting, clean neutral background, shallow depth of field. "
+        "Do not copy the reference photo's exact angle or crop — pick the angle that best reveals material in the hero zone. "
+        f"Declared material: {mat}. "
+        "Print EXACTLY these Vietnamese callout labels on the image (verbatim — do NOT rewrite into generic luxury "
+        "marketing phrases, and do NOT shorten or paraphrase them). Each label already blends a real, specific "
+        f"trait of this declared material with a premium/exclusive feel, to help shoppers decide to buy now: {benefits}."
+    )
 
 
 def _studio_ladipage_context(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -1212,7 +1609,7 @@ def _resolve_studio_material_copy(
     """DeepSeek: ưu điểm chất liệu + callout in trên ảnh."""
     material = (material or "").strip()
     product_type = _resolve_product_type((state.get("payload") or {}).get("product_type"))
-    fallback_callouts = _default_material_callouts(product_type)
+    fallback_callouts = _fallback_callouts_for_material(material, product_type)
     if not material:
         return {"body": "", "callouts": fallback_callouts}
     try:
@@ -1220,9 +1617,12 @@ def _resolve_studio_material_copy(
             _studio_ladipage_context(state),
             material,
             custom_instruction=(notes or "").strip() or None,
+            strict_material_callouts=True,
         )
         if data and isinstance(data.get("callouts"), list) and data.get("callouts"):
             callouts = [str(x).strip() for x in data["callouts"] if str(x).strip()][:3]
+            if _callouts_are_too_generic(callouts):
+                callouts = fallback_callouts
             return {
                 "body": str(data.get("body") or "").strip(),
                 "callouts": callouts or fallback_callouts,
@@ -1267,14 +1667,18 @@ def _build_studio_slot_prompt(
     if "«màu chính»" in notes:
         notes = ""  # tương thích ngược: bỏ placeholder cũ nếu còn sót từ phiên bản trước
 
-    # Gallery / chi tiết / chất liệu: bắt buộc ý admin — DeepSeek chuẩn hóa trước khi gửi Gemini (xem worker).
-    if kind in ("gallery", "detail", "material"):
-        if not notes:
-            raise ValueError(
-                "Gallery, ảnh chi tiết và ảnh chất liệu bắt buộc nhập nội dung prompt — "
-                "chỉ dùng prompt do admin nhập."
-            )
-        return notes
+    # Gallery / chi tiết: prompt cố định — chỉ đổi góc ảnh so với ref.
+    if kind in ("gallery", "detail"):
+        return _simple_gallery_detail_prompt(kind)
+
+    # Chất liệu: prompt cố định — cận cảnh rõ + ưu điểm đã khai báo.
+    if kind == "material":
+        callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
+        return _simple_material_prompt(
+            material_name=material_txt,
+            material_callouts=callouts,
+            product_type=product_kind,
+        )
 
     if kind == "color":
         cname = (slot.get("name") or "").strip() or "màu chính"
@@ -1282,16 +1686,8 @@ def _build_studio_slot_prompt(
         color_brief = _studio_color_match_brief(
             state, slot, cname=cname, color_index=color_idx, product_kind=product_kind
         )
-        attempt = int(slot.get("attempt") or 1)
         variation = ""
-        if color_idx == 0 and attempt > 1:
-            variation = (
-                f" Regeneration attempt #{attempt}: MUST show a clearly DIFFERENT model identity "
-                "(different face, hair, pose, stance, expression) while keeping the same "
-                "configured age group, gender, and ethnicity — do NOT reuse the same person likeness "
-                "as previous generations in this session."
-            )
-        elif color_idx >= 1:
+        if color_idx >= 1:
             if product_kind == "bag":
                 variation = (
                     " MODEL FACE LOCK: Image #2 is the approved Color #1 catalog photo — copy ONLY that model's "
@@ -1364,7 +1760,7 @@ def _build_studio_slot_prompt(
                     "obey them together with the product-sample neckline — never invent a collar the sample lacks."
                 )
         base = (
-            f"{_STUDIO_NEW_PHOTO_BRIEF} "
+            f"{_STUDIO_COLOR_PHOTO_BRIEF} "
             f"{scene_line} "
             f"{color_brief}{variation} "
             f"{fidelity} {color_preserve} "
@@ -1409,10 +1805,272 @@ def _build_studio_slot_prompt(
     return base
 
 
+def _normalize_compose_intent(text: Any) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+def _studio_used_compose_intents(studio: Dict[str, Any], kind: str) -> List[str]:
+    used = studio.get("compose_intents_used") or {}
+    if not isinstance(used, dict):
+        return []
+    items = used.get((kind or "").strip()) or []
+    return [str(x).strip() for x in items if str(x).strip()]
+
+
+def _record_compose_intent(studio: Dict[str, Any], kind: str, intent: str) -> None:
+    kind_n = (kind or "").strip()
+    intent_s = (intent or "").strip()
+    if not intent_s or kind_n not in ("gallery", "detail"):
+        return
+    used = dict(studio.get("compose_intents_used") or {})
+    bucket = list(used.get(kind_n) or [])
+    norm = _normalize_compose_intent(intent_s)
+    if norm and not any(_normalize_compose_intent(x) == norm for x in bucket):
+        bucket.append(intent_s)
+    used[kind_n] = bucket
+    studio["compose_intents_used"] = used
+
+
+def _gallery_compose_variants(
+    *,
+    product_kind: str,
+    has_model: bool,
+) -> List[str]:
+    if has_model:
+        by_kind = {
+            "bag": [
+                "người mẫu cầm túi bằng một tay, góc 3/4 catalog, thể hiện form và quai túi",
+                "người mẫu mang túi trên vai, góc nghiêng thời trang, catalog chuyên nghiệp",
+                "người mẫu ôm túi trước ngực, góc chân dung catalog, thấy rõ họa tiết túi",
+                "người mẫu cầm túi trên cẳng tay, đi bộ nhẹ, góc máy hơi thấp catalog",
+            ],
+            "shoes": [
+                "người mẫu mang giày tự nhiên, góc 3/4 catalog, thấy rõ form và đế",
+                "người mẫu đi/bước nhẹ, góc nghiêng thời trang, thấy rõ giày trên chân",
+                "người mẫu ngồi ghế, chéo chân, zoom giày nổi bật, catalog chuyên nghiệp",
+                "người mẫu đứng một chân hơi nhấc, góc thấp, thấy rõ đế và upper",
+            ],
+            "apparel": [
+                "người mẫu đứng 3/4, tư thế thời trang tự nhiên, catalog chuyên nghiệp",
+                "người mẫu đứng nghiêng hoặc tay chống hông, góc máy đa dạng, catalog chuyên nghiệp",
+                "người mẫu đi bộ nhẹ, tư thế lifestyle trong studio, thấy rõ form áo/quần",
+                "người mẫu ngồi ghế hoặc dự tường, góc máy hơi cao, catalog chuyên nghiệp",
+            ],
+        }
+        return list(by_kind.get(product_kind, by_kind["apparel"]))
+    by_kind = {
+        "medicine": [
+            "góc packshot 3/4, nhãn và bao bì rõ nét, sản phẩm nổi bật trên nền studio",
+            "góc chụp hơi cao, bao bì thẳng đứng, nhãn đọc được, catalog chuyên nghiệp",
+            "góc nghiêng nhẹ, thấy rõ cạnh bên và nhãn phụ, nền studio sạch",
+            "cận vừa phải toàn bộ hộp/chai, bố cục cân giữa khung hình",
+        ],
+        "household": [
+            "góc catalog 3/4, sản phẩm nổi bật, tỷ lệ thật, nền studio sạch",
+            "góc chụp hơi cao, thể hiện form và chi tiết sử dụng, catalog chuyên nghiệp",
+            "góc nghiêng, thấy rõ chiều sâu/kết cấu sản phẩm, nền trung tính",
+            "đặt sản phẩm lệch trái khung hình, khoảng trống bên phải, catalog hiện đại",
+        ],
+    }
+    if product_kind in by_kind:
+        return list(by_kind[product_kind])
+    return [
+        "sản phẩm đặt/treo catalog chuyên nghiệp, góc 3/4, nền studio sạch",
+        "góc chụp hơi cao, bố cục cân đối, sản phẩm nổi bật trên nền trung tính",
+        "góc nghiêng nhẹ, thấy rõ chi tiết thiết kế, catalog chuyên nghiệp",
+        "bố cục lệch trái, sản phẩm chiếm 2/3 khung hình, nền studio sạch",
+    ]
+
+
+def _detail_compose_variants(product_kind: str) -> List[str]:
+    by_kind = {
+        "bag": [
+            "cận cảnh khóa và phần cứng túi, macro rõ nét",
+            "cận cảnh quai túi và đường may viền, macro rõ nét",
+            "cận cảnh vân da/vải và logo túi, macro rõ nét",
+            "cận cảnh ngăn túi hoặc chi tiết đáy túi, macro rõ nét",
+        ],
+        "shoes": [
+            "cận cảnh đế giày và họa tiết đế, macro rõ nét",
+            "cận cảnh logo và chất liệu upper, macro rõ nét",
+            "cận cảnh dây buộc/miệng giày và điểm nhấn thiết kế, macro rõ nét",
+            "cận cảnh gót giày và đường may, macro rõ nét",
+        ],
+        "medicine": [
+            "cận cảnh nhãn thành phần chính, chữ đọc được, macro rõ nét",
+            "cận cảnh mặt trước bao bì và logo thương hiệu, macro rõ nét",
+            "cận cảnh nắp/hộp và chi tiết bảo quản in trên nhãn, macro rõ nét",
+            "cận cảnh cạnh bên bao bì, thấy dung tích/thông tin phụ, macro rõ nét",
+        ],
+        "household": [
+            "cận cảnh bề mặt và kết cấu sản phẩm, macro rõ nét",
+            "cận cảnh logo/thương hiệu và chi tiết hoàn thiện, macro rõ nét",
+            "cận cảnh nút bấm/cần gạt hoặc chi tiết sử dụng, macro rõ nét",
+            "cận cảnh góc cạnh và độ dày vật liệu, macro rõ nét",
+        ],
+    }
+    return list(
+        by_kind.get(
+            product_kind,
+            [
+                "cận cảnh đường may và khuy áo, macro rõ nét",
+                "cận cảnh cổ áo/vạt áo và chi tiết cắt may, macro rõ nét",
+                "cận cảnh logo/thêu và họa tiết vải, macro rõ nét",
+                "cận cảnh tay áo/la bàn và chất liệu vải, macro rõ nét",
+            ],
+        )
+    )
+
+
+def _compose_variant_pool(
+    state: Dict[str, Any],
+    *,
+    kind: str,
+) -> List[str]:
+    kind_n = (kind or "").strip()
+    payload = dict(state.get("payload") or {})
+    product_type = _resolve_product_type(payload.get("product_type"))
+    product_kind = _studio_product_kind_from_state(state)
+    studio = dict(state.get("studio") or {})
+    plan = dict(studio.get("plan") or {})
+    presence = _effective_model_presence(payload, plan.get("model_presence") or payload.get("model_presence"))
+    has_model = presence == "model" and product_type not in _NON_WEARABLE_PRODUCT_TYPES
+    if kind_n == "gallery":
+        return _gallery_compose_variants(product_kind=product_kind, has_model=has_model)
+    if kind_n == "detail":
+        return _detail_compose_variants(product_kind)
+    return []
+
+
+def _pick_unique_compose_intent(
+    state: Dict[str, Any],
+    *,
+    kind: str,
+    index: int = 0,
+    attempt: int = 1,
+    exclude: Optional[List[str]] = None,
+) -> str:
+    """Chọn ý compose gallery/chi tiết chưa dùng — tránh trùng prompt giữa các ảnh."""
+    kind_n = (kind or "").strip()
+    variants = _compose_variant_pool(state, kind=kind_n)
+    if not variants:
+        return _default_studio_admin_intent(state, kind=kind_n, index=index, attempt=attempt)
+
+    studio = dict(state.get("studio") or {})
+    used_norms = {_normalize_compose_intent(x) for x in _studio_used_compose_intents(studio, kind_n)}
+    for item in exclude or []:
+        used_norms.add(_normalize_compose_intent(item))
+
+    start = max(0, int(index or 0)) + max(0, int(attempt or 1) - 1)
+    for offset in range(len(variants) * 3):
+        candidate = variants[(start + offset) % len(variants)]
+        if _normalize_compose_intent(candidate) not in used_norms:
+            return candidate
+
+    base = variants[start % len(variants)]
+    return f"{base} — biến thể {index + 1} (lần {attempt})"
+
+
+def _validate_unique_compose_intent(
+    studio: Dict[str, Any],
+    *,
+    kind: str,
+    user_prompt: str,
+    slot: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Gallery/chi tiết: mỗi ảnh phải có prompt khác ảnh đã duyệt (và khác lần tạo ngay trước)."""
+    kind_n = (kind or "").strip()
+    if kind_n not in ("gallery", "detail"):
+        return
+    intent = (user_prompt or "").strip()
+    if not intent:
+        return
+    norm = _normalize_compose_intent(intent)
+    used = _studio_used_compose_intents(studio, kind_n)
+    for prev in used:
+        if _normalize_compose_intent(prev) == norm:
+            raise ValueError(
+                "Prompt trùng với ảnh gallery/chi tiết đã tạo trước — mỗi ảnh cần góc/tư thế khác nhau. "
+                f"Đã dùng: «{prev[:72]}{'…' if len(prev) > 72 else ''}»"
+            )
+    slot = dict(slot or {})
+    last = (slot.get("resolved_compose_intent") or "").strip()
+    if last and _normalize_compose_intent(last) == norm:
+        raise ValueError(
+            "Prompt trùng lần tạo ngay trước — đổi góc/tư thế hoặc xóa prompt để AI gợi ý ý mới."
+        )
+
+
+def _default_studio_admin_intent(
+    state: Dict[str, Any],
+    *,
+    kind: str,
+    index: int = 0,
+    attempt: int = 1,
+) -> str:
+    """Ý admin mặc định khi để trống — DeepSeek/Gemini tự tối ưu góc/zoom/bố cục."""
+    kind_n = (kind or "").strip()
+    if kind_n in ("gallery", "detail"):
+        return _simple_gallery_detail_prompt(kind_n)
+
+    payload = dict(state.get("payload") or {})
+    product_type = _resolve_product_type(payload.get("product_type"))
+
+    if kind_n == "material":
+        studio = dict(state.get("studio") or {})
+        callouts = studio.get("material_callouts") or []
+        return _simple_material_prompt(
+            material_name=(payload.get("material") or "").strip(),
+            material_callouts=callouts,
+            product_type=product_type,
+        )
+
+    return ""
+
+
+def _resolve_studio_admin_intent(
+    state: Dict[str, Any],
+    *,
+    kind: str,
+    user_prompt: Any = "",
+    index: int = 0,
+    attempt: int = 1,
+    slot: Optional[Dict[str, Any]] = None,
+) -> str:
+    kind_n = (kind or "").strip()
+    if kind_n in ("gallery", "detail"):
+        return _simple_gallery_detail_prompt(kind_n)
+    if kind_n == "material":
+        slot_d = dict(slot or {})
+        studio = dict(state.get("studio") or {})
+        payload = dict(state.get("payload") or {})
+        product_type = _resolve_product_type(payload.get("product_type"))
+        callouts = slot_d.get("material_callouts") or studio.get("material_callouts") or []
+        return _simple_material_prompt(
+            material_name=(payload.get("material") or "").strip(),
+            material_callouts=callouts,
+            product_type=product_type,
+        )
+    custom = str(user_prompt or "").strip()
+    if custom:
+        return custom
+    return _default_studio_admin_intent(state, kind=kind_n, index=index, attempt=attempt)
+
+
 def _suggested_prompt_for_phase(state: Dict[str, Any], *, kind: str, name: str = "", index: int = 0) -> str:
-    # Gallery/chi tiết/chất liệu không dùng prompt hệ thống — admin phải tự nhập.
-    if (kind or "").strip() in ("gallery", "detail", "material"):
-        return ""
+    kind_n = (kind or "").strip()
+    if kind_n in ("gallery", "detail"):
+        return _simple_gallery_detail_prompt(kind_n)
+    if kind_n == "material":
+        payload = dict(state.get("payload") or {})
+        studio = dict(state.get("studio") or {})
+        product_type = _resolve_product_type(payload.get("product_type"))
+        callouts = studio.get("material_callouts") or []
+        return _simple_material_prompt(
+            material_name=(payload.get("material") or "").strip(),
+            material_callouts=callouts,
+            product_type=product_type,
+        )
     slot = {"kind": kind, "name": name, "index": index, "user_prompt": ""}
     try:
         return _build_studio_slot_prompt(state, slot)
@@ -1436,7 +2094,8 @@ def _refine_gallery_detail_prompt_deepseek(
     warnings: List[str] = []
     intent = (admin_intent or "").strip()
     if not intent:
-        return "", ["pose_prompt: thiếu ý admin."]
+        intent = _default_studio_admin_intent(state, kind=kind)
+        warnings.append("pose_prompt: admin để trống — dùng góc/zoom mặc định do AI tối ưu.")
 
     payload = dict(state.get("payload") or {})
     product_type = _resolve_product_type(payload.get("product_type"))
@@ -1452,6 +2111,16 @@ def _refine_gallery_detail_prompt_deepseek(
     )
     gender = (payload.get("gender") or "").strip() or "không rõ"
     material = (payload.get("material") or "").strip() or "theo ảnh mẫu"
+    look_brief = _studio_commercial_look_from_state(state)
+    shot_style = _resolve_shot_style(
+        (state.get("studio") or {}).get("plan", {}).get("shot_style")
+        or payload.get("shot_style")
+    )
+    shot_label = _shot_style_session_label(shot_style)
+    shoot_lock_vi = (
+        f"Bối cảnh/ánh sáng ĐÃ CHỌN LÚC BẮT ĐẦU ({shot_label}) — BẮT BUỘC giữ cho MỌI ảnh trong phiên, "
+        f"KHÔNG đổi studio ↔ trong nhà ↔ ngoài trời: {look_brief}"
+    )
     kind_n = (kind or "").strip()
     if kind_n == "gallery":
         kind_label = "ảnh gallery catalog"
@@ -1471,6 +2140,7 @@ def _refine_gallery_detail_prompt_deepseek(
                 material_name=material,
                 material_callouts=material_callouts,
                 product_type=product_type,
+                look_brief=look_brief,
             ),
             warnings,
         )
@@ -1498,12 +2168,14 @@ def _refine_gallery_detail_prompt_deepseek(
             "QUY TẮC BẮT BUỘC trong prompt:\n"
             "1) Giữ NGUYÊN đúng sản phẩm từ ảnh tham khảo đính kèm (kiểu, màu, họa tiết, logo/chữ trên SP…).\n"
             f"{label_rule}"
-            "2) Zoom cận cảnh bề mặt/kết cấu chất liệu thật của sản phẩm; ánh sáng studio, nền trung tính sang trọng.\n"
+            "2) Zoom cận cảnh bề mặt/kết cấu chất liệu thật của sản phẩm; "
+            "dùng đúng bối cảnh/ánh sáng đã chọn lúc bắt đầu (studio / trong nhà / ngoài trời).\n"
             f"3) In trực tiếp trên ảnh các nhãn callout tiếng Việt ngắn (badges) nêu ưu điểm: {callout_str}. "
             "Bố cục đẹp, không che vùng chất liệu chính.\n"
-            "4) CHỈ được điều chỉnh theo ý admin: góc zoom / mức cận cảnh / bố cục / ánh sáng — không đổi SP.\n"
+            "4) CHỈ được điều chỉnh theo ý admin: góc zoom / mức cận cảnh / bố cục — không đổi SP, không đổi bối cảnh.\n"
             "5) Không watermark, không chữ tiếng Trung, không logo hãng khác. Photorealistic.\n"
             f"{no_model_rule}\n"
+            f"{shoot_lock_vi}\n"
             f"Tên SP (gợi ý): {pname}\n"
             f"Chất liệu chính: {material}\n"
             f"Ý admin (góc/zoom/bố cục): {intent}\n\n"
@@ -1524,6 +2196,16 @@ def _refine_gallery_detail_prompt_deepseek(
             if product_type == "medicine"
             else ""
         )
+        ref_compose_rule = (
+            "5) TUYỆT ĐỐI KHÔNG copy góc máy / crop / tư thế / bố cục của ảnh tham khảo — "
+            "ảnh output phải khác hẳn ảnh ref (chỉ giữ đúng sản phẩm).\n"
+            if kind_n == "gallery"
+            else (
+                "5) TUYỆT ĐỐI KHÔNG copy crop/góc macro của ảnh ref — chọn vùng cận cảnh/zoom khác hẳn.\n"
+                if kind_n == "detail"
+                else ""
+            )
+        )
         user = (
             f"NHIỆM VỤ: Viết MỘT prompt tiếng Anh ngắn (1–3 câu) để tạo {kind_label}.\n"
             "QUY TẮC BẮT BUỘC trong prompt:\n"
@@ -1532,12 +2214,14 @@ def _refine_gallery_detail_prompt_deepseek(
             "(không đổi SP, không bịa biến thể khác).\n"
             f"{label_rule2}"
             f"{wear_rule}"
-            "3) Không copy background ảnh gốc; ảnh catalog chuyên nghiệp, photorealistic.\n"
-            "4) Không watermark, không text phụ, không giá.\n\n"
+            f"{ref_compose_rule}"
+            "3) Không copy background của ảnh ref; dùng đúng bối cảnh/ánh sáng đã chọn lúc bắt đầu — photorealistic.\n"
+            "4) Không watermark, không text phụ, không giá.\n"
+            f"{shoot_lock_vi}\n"
             f"Tên SP (gợi ý): {pname}\n"
             f"Giới tính shopper: {gender}\n"
             f"Chất liệu (gợi ý): {material}\n"
-            f"Ý admin (góc máy / bối cảnh): {intent}\n\n"
+            f"Ý compose AI (góc/tư thế KHÁC ref): {intent}\n\n"
             'Trả JSON: {"prompt":"..."}'
         )
     api_url = (settings.DEEPSEEK_API_URL or "").strip() or "https://api.deepseek.com/v1/chat/completions"
@@ -1570,6 +2254,7 @@ def _refine_gallery_detail_prompt_deepseek(
                     material_name=material,
                     material_callouts=material_callouts,
                     product_type=product_type,
+                    look_brief=look_brief,
                 ),
                 warnings,
             )
@@ -1591,12 +2276,13 @@ def _refine_gallery_detail_prompt_deepseek(
                     material_name=material,
                     material_callouts=material_callouts,
                     product_type=product_type,
+                    look_brief=look_brief,
                 ),
                 warnings,
             )
         if len(refined) > 2000:
             refined = refined[:2000].strip()
-        return refined, warnings
+        return _ensure_studio_shoot_context_in_prompt(refined, look_brief), warnings
     except Exception as exc:
         warnings.append(f"pose_prompt: {exc}")
         return (
@@ -1607,6 +2293,7 @@ def _refine_gallery_detail_prompt_deepseek(
                 material_name=material,
                 material_callouts=material_callouts,
                 product_type=product_type,
+                look_brief=look_brief,
             ),
             warnings,
         )
@@ -1620,6 +2307,7 @@ def _fallback_gallery_detail_prompt(
     material_name: str = "",
     material_callouts: Optional[List[str]] = None,
     product_type: str = "apparel",
+    look_brief: str = "",
 ) -> str:
     """Fallback khi DeepSeek lỗi: vẫn siết giữ nguyên SP, chỉ đổi pose/cách dùng hoặc góc chất liệu."""
     kind_n = (kind or "").strip()
@@ -1636,25 +2324,42 @@ def _fallback_gallery_detail_prompt(
         callout_str = "; ".join(callouts)
         mat = (material_name or "").strip() or "material"
         no_model = " NO human model, NO hands — product-only." if is_non_wearable else ""
+        look = (look_brief or "").strip()
+        lighting = look or "studio lighting and a neutral elegant background"
         return (
             f"Edit the attached product photo into a premium close-up of «{mat}» for «{product_name}». "
             f"Keep the EXACT same product — identical design, color, print, materials.{label_lock}{no_model} "
-            "Zoom into the real surface/texture/label with studio lighting and a neutral elegant background. "
+            f"Zoom into the real surface/texture/label with {lighting}. "
             f"Overlay short Vietnamese callout badges highlighting: {callout_str}. "
             f"Composition/zoom preference: {admin_intent}. "
             "Square layout, sharp, professional, no watermark, no Chinese text."
         )
     shot = "catalog gallery photo" if kind_n == "gallery" else "product detail close-up photo"
+    diff_ref_line = (
+        _STUDIO_GALLERY_DIFF_REF_BRIEF + " "
+        if kind_n == "gallery"
+        else (_STUDIO_DETAIL_DIFF_REF_BRIEF + " " if kind_n == "detail" else "")
+    )
+    look = (look_brief or "").strip()
     if is_non_wearable:
         usage_line = (
             f"ONLY change the camera angle / composition / context staging (NO human model, NO hands): {admin_intent}. "
         )
-        style_line = "Photorealistic commercial product photography, clean background, no watermark, no extra text."
+        style_line = (
+            f"{look_brief} Photorealistic commercial product photography, no watermark, no extra text."
+            if look_brief
+            else "Photorealistic commercial product photography, clean background, no watermark, no extra text."
+        )
     else:
         usage_line = f"ONLY change the model's pose/stance and how the product is worn or used: {admin_intent}. "
-        style_line = "Photorealistic commercial fashion photography, clean background, no watermark, no extra text."
+        style_line = (
+            f"{look_brief} Photorealistic commercial fashion photography, no watermark, no extra text."
+            if look_brief
+            else "Photorealistic commercial fashion photography, clean background, no watermark, no extra text."
+        )
     return (
         f"Create a premium e-commerce {shot} of «{product_name}». "
+        f"{diff_ref_line}"
         "Keep the EXACT same product from the attached reference images — identical design, color, print, logo, "
         f"materials, hardware, and construction. Do NOT redesign or substitute the product.{label_lock} "
         f"{usage_line}"
@@ -1731,6 +2436,11 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
             kind="color",
             pool_id=f"color-{idx}",
         )
+        up = (slot.get("user_prompt") or "").strip()
+        if idx == 0:
+            studio["color_user_prompt"] = up
+        elif not _studio_color_user_prompt(studio) and up:
+            studio["color_user_prompt"] = up
     elif kind == "main":
         studio["main_image"] = url
         _add_to_ref_pool(studio, url=url, label="Ảnh chính", kind="main", pool_id="main-0")
@@ -1742,6 +2452,10 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
         _add_to_ref_pool(
             studio, url=url, label=f"Gallery {i + 1}", kind="gallery", pool_id=f"gallery-{i}"
         )
+        resolved = (
+            (slot.get("resolved_compose_intent") or slot.get("user_prompt") or "").strip()
+        )
+        _record_compose_intent(studio, "gallery", resolved)
     elif kind == "detail":
         gallery = list(studio.get("gallery") or [])
         gallery.append(url)
@@ -1750,6 +2464,10 @@ def _commit_approved_slot(studio: Dict[str, Any], slot: Dict[str, Any]) -> None:
         _add_to_ref_pool(
             studio, url=url, label=f"Chi tiết {i + 1}", kind="detail", pool_id=f"detail-{i}"
         )
+        resolved = (
+            (slot.get("resolved_compose_intent") or slot.get("user_prompt") or "").strip()
+        )
+        _record_compose_intent(studio, "detail", resolved)
     elif kind == "material":
         studio["material_image"] = url
         callouts = slot.get("material_callouts") or studio.get("material_callouts") or []
@@ -2613,7 +3331,7 @@ def _apply_studio_material_image_to_ladipage(
             continue
         data = dict(section.data or {})
         data["image_url"] = url
-        data["image_source"] = "product"
+        data["image_source"] = "ai"
         data["image_object_position"] = str(data.get("image_object_position") or "").strip() or "50% 50%"
         if mat:
             data["material"] = mat
@@ -2755,6 +3473,7 @@ def _run_generate_studio_slot(job_id: str) -> None:
         slot = dict(studio.get("current_slot") or {})
         if not slot.get("kind"):
             raise RuntimeError("Không có slot ảnh để tạo.")
+        kind = str(slot.get("kind") or "").strip()
         product_key = (studio.get("product_key") or state.get("product_key") or "").strip()
         if not product_key:
             product_key = new_manual_product_id()
@@ -2763,7 +3482,6 @@ def _run_generate_studio_slot(job_id: str) -> None:
         image_model_choice = _resolve_studio_image_model_choice(kind, plan.get("image_model"))
         model_id, model_size, model_label = _resolve_manual_ai_image_model(image_model_choice)
         aspect_ratio = _normalize_studio_aspect_ratio(plan.get("aspect_ratio"))
-        kind = str(slot.get("kind") or "").strip()
         attempt = int(slot.get("attempt") or 0) + 1
         slot["attempt"] = attempt
         label = _slot_label(slot)
@@ -2847,36 +3565,16 @@ def _run_generate_studio_slot(job_id: str) -> None:
             )
         prompt = _build_studio_slot_prompt({**state, "studio": studio}, slot)
         if kind in ("gallery", "detail", "material"):
-            admin_intent = str(slot.get("user_prompt") or "").strip()
-            refine_hint = (
-                "giữ nguyên SP, chỉ đổi góc/zoom/bố cục chất liệu"
+            slot["resolved_compose_intent"] = prompt
+            studio["current_slot"] = slot
+            msg = (
+                f"Đang tạo {label} — cận cảnh chất liệu + ưu điểm (Gemini)…"
                 if kind == "material"
-                else "giữ nguyên SP, chỉ đổi tư thế/cách dùng"
+                else f"Đang tạo {label} — góc ảnh khác ref (Gemini)…"
             )
             _job_update(
                 job_id,
-                message=f"DeepSeek đang chuẩn hóa prompt {label} ({refine_hint})…",
-                progress=32,
-                studio={**studio, "current_slot": slot},
-            )
-            refined, pose_warnings = _refine_gallery_detail_prompt_deepseek(
-                admin_intent,
-                kind=kind,
-                state={**state, "studio": studio},
-                material_callouts=slot.get("material_callouts") if kind == "material" else None,
-            )
-            if pose_warnings:
-                warnings_state = list(state.get("warnings") or [])
-                warnings_state.extend(pose_warnings)
-                state = {**state, "warnings": warnings_state}
-                _job_update(job_id, warnings=warnings_state)
-            if refined:
-                slot["refined_prompt"] = refined
-                studio["current_slot"] = slot
-                prompt = refined
-            _job_update(
-                job_id,
-                message=f"Đang tạo {label} (Gemini)…",
+                message=msg,
                 progress=38,
                 studio=studio,
             )
@@ -3475,11 +4173,6 @@ def start_studio_generate(
         color_name = (name or "").strip()
         # Tên màu để trống: worker _resolve_studio_color_name đọc từ ảnh mẫu (Gemini vision).
         admin_prompt = (prompt or "").strip()
-        if kind_n in ("gallery", "detail", "material") and not admin_prompt:
-            raise ValueError(
-                "Gallery / ảnh chi tiết / ảnh chất liệu bắt buộc nhập nội dung prompt "
-                "(chỉ dùng prompt do admin nhập)."
-            )
 
         if kind_n == "color":
             idx = len([c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")])
@@ -3492,12 +4185,18 @@ def start_studio_generate(
         else:
             idx = 0
 
+        if kind_n in ("gallery", "detail", "material"):
+            admin_prompt = ""
+
         selected = [str(u).strip() for u in (ref_urls or []) if str(u).strip()]
         attach = (attach_url or "").strip()
         color_index = 0
         if kind_n == "color":
             color_index = len(
                 [c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")]
+            )
+            admin_prompt = _sync_color_user_prompt(
+                studio, admin_prompt, color_index=color_index
             )
             selected = _merge_customer_orig_refs(
                 studio,
@@ -3589,23 +4288,21 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
             raise ValueError("Chưa có ảnh để duyệt — bấm Tạo lại trước.")
         kind = (slot.get("kind") or "color").strip()
         _commit_approved_slot(studio, slot)
-        # Gợi ý mốc tiếp theo hành vi người dùng
-        if kind == "color":
-            studio["phase"] = "color"
-        elif kind == "main":
-            studio["phase"] = "gallery"
-        elif kind == "gallery":
-            studio["phase"] = (
-                "gallery"
-                if _studio_gallery_count(studio) < STUDIO_MIN_GALLERY_IMAGES
-                else ("material" if not _studio_has_material_image(studio) else "detail")
-            )
-        elif kind == "detail":
-            studio["phase"] = "detail"
-        elif kind == "material":
-            studio["phase"] = "material"
-        else:
-            studio["phase"] = "gallery"
+        # Giữ đúng mục vừa duyệt — admin tự chuyển tab khi muốn (không auto nhảy mục khác).
+        _phase_for_kind = {
+            "color": "color",
+            "main": "gallery",
+            "gallery": "gallery",
+            "detail": "detail",
+            "material": "material",
+        }
+        studio["phase"] = _phase_for_kind.get(kind, "color")
+        if kind in ("gallery", "detail", "material"):
+            picked_refs = [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()][:3]
+            if picked_refs:
+                last_refs = dict(studio.get("last_ref_urls") or {})
+                last_refs[kind] = picked_refs
+                studio["last_ref_urls"] = last_refs
         studio["current_slot"] = None
         _refresh_studio_hints(state, studio)
         n_colors = _studio_color_count(studio)
@@ -3620,9 +4317,7 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
         elif kind == "color":
             msg = (
                 f"Đã duyệt màu ({n_colors}/{STUDIO_MIN_COLOR_IMAGES}). "
-                f"Tiếp: gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}), "
-                f"ảnh chất liệu ({1 if _studio_has_material_image(studio) else 0}/{STUDIO_MIN_MATERIAL_IMAGES}). "
-                "Ảnh chi tiết tuỳ chọn."
+                "Tiếp tục thêm màu hoặc chuyển tab gallery/chất liệu khi muốn."
             )
         elif kind == "material":
             msg = (
@@ -3637,13 +4332,14 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
             msg = (
                 f"Đã duyệt gallery ({n_gallery}/{STUDIO_MIN_GALLERY_IMAGES}). "
                 + (
-                    "Đủ gallery — tiếp ảnh chất liệu (bắt buộc) hoặc ảnh chi tiết (tuỳ chọn)."
-                    if not missing and _studio_gallery_count(studio) >= STUDIO_MIN_GALLERY_IMAGES
-                    else (
-                        "Đủ điều kiện đăng — có thể thêm ảnh chi tiết (tuỳ chọn)."
-                        if not missing
-                        else f"Còn thiếu: {', '.join(missing)}."
-                    )
+                    "Đủ gallery tối thiểu — tiếp tục thêm gallery hoặc chuyển tab khi muốn."
+                    if _studio_gallery_count(studio) >= STUDIO_MIN_GALLERY_IMAGES
+                    else "Tiếp tục thêm gallery hoặc chuyển tab khi muốn."
+                )
+                + (
+                    " Đủ điều kiện đăng."
+                    if not missing
+                    else f" Còn thiếu: {', '.join(missing)}."
                 )
             )
         elif kind == "detail":
@@ -3820,7 +4516,8 @@ def replace_studio_images(
         if url and url not in picked:
             picked.append(url)
     if not picked:
-        raise ValueError("Chọn ít nhất 1 ảnh để lưu.")
+        if kind_n != "detail":
+            raise ValueError("Chọn ít nhất 1 ảnh để lưu.")
     if kind_n == "material":
         picked = picked[:1]
     else:
@@ -3875,13 +4572,17 @@ def replace_studio_images(
         _refresh_studio_hints(state, studio)
         missing = _studio_publish_missing(studio)
         label = "gallery" if kind_n == "gallery" else ("chi tiết" if kind_n == "detail" else "chất liệu")
+        if kind_n == "detail" and not picked:
+            action_msg = "Đã bỏ qua ảnh chi tiết."
+        else:
+            action_msg = f"Đã chọn lại {len(picked)} ảnh {label}."
         state.update(
             {
                 "studio": studio,
                 "status": "awaiting_input",
                 "step": "awaiting_input",
                 "message": (
-                    f"Đã chọn lại {len(picked)} ảnh {label}."
+                    action_msg
                     + (
                         " Đủ điều kiện đăng — bấm «Đăng sản phẩm»."
                         if not missing
@@ -3923,7 +4624,15 @@ def regenerate_studio_image(
         model_for_plan = "pro" if kind_slot == "material" else image_model
         _patch_studio_ai_plan(studio, image_model=model_for_plan, aspect_ratio=aspect_ratio)
         if prompt is not None:
-            slot["user_prompt"] = str(prompt).strip()
+            if kind_slot == "color":
+                color_index = int(slot.get("index") or 0)
+                slot["user_prompt"] = _sync_color_user_prompt(
+                    studio, str(prompt).strip(), color_index=color_index
+                )
+            elif kind_slot not in ("gallery", "detail", "material"):
+                slot["user_prompt"] = str(prompt).strip()
+        elif kind_slot == "color" and not str(slot.get("user_prompt") or "").strip():
+            slot["user_prompt"] = _studio_color_user_prompt(studio)
         slot_attach = str(slot.get("attach_url") or attach_url or "").strip()
         if ref_urls is not None:
             picked = [str(u).strip() for u in ref_urls if str(u).strip()][:3]
@@ -3957,12 +4666,10 @@ def regenerate_studio_image(
                     color_index=color_index,
                     attach_url=str(attach_url).strip(),
                 )
-        kind_slot = (slot.get("kind") or "").strip()
-        if kind_slot in ("gallery", "detail", "material") and not str(slot.get("user_prompt") or "").strip():
-            raise ValueError(
-                "Gallery / ảnh chi tiết / ảnh chất liệu bắt buộc nhập nội dung prompt "
-                "(chỉ dùng prompt do admin nhập)."
-            )
+        if kind_slot in ("gallery", "detail"):
+            slot["user_prompt"] = _simple_gallery_detail_prompt(kind_slot)
+        elif kind_slot == "material":
+            slot["user_prompt"] = ""
         slot["url"] = None
         studio["current_slot"] = slot
         label = _slot_label(slot)
@@ -4032,3 +4739,14 @@ def publish_studio_job(job_id: str) -> Dict[str, Any]:
         persist_job(job_id, state)
     enqueue_manual_product_job(job_id, worker_action="publish")
     return load_job(job_id) or state
+
+
+def delete_manual_product_job(job_id: str, *, created_by: Optional[int] = None) -> None:
+    """Xóa phiên tạo SP dở trên server (chỉ admin tạo phiên hoặc không lọc owner)."""
+    state = load_job(job_id)
+    if not state:
+        raise ValueError("Không tìm thấy phiên tạo sản phẩm")
+    if created_by is not None and state.get("created_by") not in (None, created_by):
+        raise ValueError("Không có quyền xóa phiên này")
+    if not delete_job(job_id):
+        raise ValueError("Không xóa được phiên — thử lại")

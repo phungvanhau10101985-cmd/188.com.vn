@@ -17,7 +17,9 @@ const STEPS_MANUAL = ['Chế độ', 'Thuộc tính', 'Ảnh', 'Đăng'] as cons
 const STEPS_AI = ['Chế độ', 'Thuộc tính', 'Cài đặt Studio', 'Studio ảnh'] as const;
 
 type ColorRow = { key: string; name: string; img: string };
-type StudioSelectionKind = 'gallery' | 'detail' | 'material';
+type PublishSelectionKind = 'gallery' | 'detail';
+
+const PUBLISH_SELECTION_ORDER: PublishSelectionKind[] = ['gallery', 'detail'];
 
 type ProductType = 'apparel' | 'shoes' | 'accessory' | 'medicine' | 'household';
 
@@ -63,10 +65,33 @@ function colorFieldLabel(t: ProductType): string {
   return 'Màu sắc';
 }
 
-const STUDIO_DEEPSEEK_PROMPT_KINDS = new Set<string>(['gallery', 'detail', 'material']);
+function shotStyleLabel(value: string | undefined | null): string {
+  const v = (value || '').trim();
+  if (v === 'lifestyle') return 'Lifestyle trong nhà';
+  if (v === 'outdoor') return 'Phong cảnh / ngoài trời';
+  return 'Studio chuyên nghiệp (nền sạch)';
+}
 
-function studioNeedsDeepSeekPrompt(kind: string | undefined | null): boolean {
-  return STUDIO_DEEPSEEK_PROMPT_KINDS.has((kind || '').trim());
+function lockedStudioShotStyle(job: ManualProductJob | null): string {
+  const fromPlan = job?.studio?.plan?.shot_style;
+  const fromPayload = job?.payload?.shot_style;
+  return shotStyleLabel(fromPlan || fromPayload);
+}
+
+function studioKindFromSlot(
+  kind: string | undefined | null,
+): 'color' | 'gallery' | 'detail' | 'material' {
+  const k = (kind || '').trim();
+  if (k === 'gallery' || k === 'detail' || k === 'material') return k;
+  if (k === 'main') return 'gallery';
+  return 'color';
+}
+
+function studioShowsPromptField(kind: string | undefined | null, prompt = ''): boolean {
+  const k = (kind || '').trim();
+  if (k === 'gallery' || k === 'detail' || k === 'material') return false;
+  if (k === 'color') return Boolean(prompt.trim());
+  return true;
 }
 
 function newColorRow(partial?: Partial<ColorRow>): ColorRow {
@@ -254,6 +279,70 @@ function applyJobPayloadToDraft(job: ManualProductJob, draft: ProductCreateDraft
   };
 }
 
+function studioLastRefUrls(
+  studio: ManualProductJob['studio'] | null | undefined,
+  kind: 'color' | 'gallery' | 'detail' | 'material',
+): string[] {
+  const raw = kind === 'color' ? undefined : studio?.last_ref_urls?.[kind];
+  if (!Array.isArray(raw)) return [];
+  return raw.map((u) => String(u || '').trim()).filter(Boolean).slice(0, REF_PICKER_MAX);
+}
+
+function publishSelectionUrls(
+  studio: ManualProductJob['studio'] | null | undefined,
+  kind: PublishSelectionKind,
+): string[] {
+  if (kind === 'gallery') return (studio?.images || []).filter(Boolean);
+  return (studio?.gallery || []).filter(Boolean);
+}
+
+function isPublishKindLocked(
+  kind: PublishSelectionKind,
+  unconfirmedKind: PublishSelectionKind | null,
+): boolean {
+  if (!unconfirmedKind) return false;
+  return PUBLISH_SELECTION_ORDER.indexOf(kind) > PUBLISH_SELECTION_ORDER.indexOf(unconfirmedKind);
+}
+
+/** Ảnh đã tạo trong Studio (ẩn ảnh khách upload / ảnh gốc ref) — chọn làm gallery/chi tiết. */
+function collectPublishSelectableImageItems(
+  studio: ManualProductJob['studio'] | null | undefined,
+): { url: string; label: string }[] {
+  const items = new Map<string, { url: string; label: string }>();
+  const add = (url: string | null | undefined, label: string) => {
+    const value = (url || '').trim();
+    if (!value || items.has(value)) return;
+    items.set(value, { url: value, label });
+  };
+  (studio?.ref_pool || []).forEach((item) => {
+    const kind = (item.kind || '').trim();
+    if (kind === 'ref') return;
+    const label =
+      kind === 'material'
+        ? item.label || 'Ảnh chất liệu'
+        : item.label || 'Ảnh Studio';
+    add(item.url, label);
+  });
+  (studio?.colors || []).forEach((color, index) =>
+    add(color?.img, color?.name?.trim() || `Ảnh màu ${index + 1}`),
+  );
+  (studio?.images || []).forEach((url, index) => add(url, `Gallery ${index + 1}`));
+  (studio?.gallery || []).forEach((url, index) => add(url, `Ảnh chi tiết ${index + 1}`));
+  add(studio?.material_image, 'Ảnh chất liệu');
+  return [...items.values()];
+}
+
+function findUnconfirmedPublishKind(
+  studio: ManualProductJob['studio'] | null | undefined,
+  signatures: Partial<Record<PublishSelectionKind, string>>,
+): PublishSelectionKind | null {
+  for (const kind of PUBLISH_SELECTION_ORDER) {
+    const sig = publishSelectionUrls(studio, kind).join('|');
+    if (signatures[kind] !== sig) return kind;
+  }
+  return null;
+}
+
 function syncStudioFormFromJob(job: ManualProductJob) {
   const phaseRaw = job.studio?.phase || 'color';
   const phase = phaseRaw === 'main' ? 'gallery' : phaseRaw;
@@ -284,9 +373,16 @@ function syncStudioFormFromJob(job: ManualProductJob) {
     formRefUrls:
       job.status === 'awaiting_approval' && slot
         ? syncRefUrlsFromJob(job)
-        : studioDefaultRefUrls(pool, formKindResolved, colorIdx),
+        : studioLastRefUrls(job.studio, formKindResolved).length
+          ? studioLastRefUrls(job.studio, formKindResolved)
+          : studioDefaultRefUrls(pool, formKindResolved, colorIdx),
     formColorName,
-    formPrompt: (slot?.user_prompt || '').trim(),
+    formPrompt:
+      formKindResolved === 'color'
+        ? job.status === 'awaiting_approval' && slot?.kind === 'color'
+          ? (slot?.user_prompt || job.studio?.color_user_prompt || '').trim()
+          : (job.studio?.color_user_prompt || '').trim()
+        : '',
     formAttachUrl: (slot?.attach_url || '').trim(),
   };
 }
@@ -335,15 +431,18 @@ function colorSlotIndex(studio: ManualProductJob['studio'], slot?: { index?: num
   return Math.max(0, Number(slot?.index ?? 0) || 0);
 }
 
-/** Chỉ giữ URL có trong pool; màu #2+ luôn giữ ảnh màu #1 (khuôn mặt). */
+/** Chỉ giữ URL có trong pool (+ ảnh mẫu vừa upload nếu có). */
 function sanitizeFormRefUrls(
   urls: string[],
   pool: ManualProductRefPoolItem[],
   kind: 'color' | 'gallery' | 'detail' | 'material',
   colorIndex = 0,
   studio?: ManualProductJob['studio'],
+  attachUrl = '',
 ): string[] {
   const poolSet = new Set(pool.map((p) => p.url).filter(Boolean));
+  const attach = (attachUrl || '').trim();
+  if (attach) poolSet.add(attach);
   const filtered = urls.filter((u) => poolSet.has(u));
   if (kind === 'color' && colorIndex >= 1) {
     const face = firstApprovedColorUrl(studio || null);
@@ -353,7 +452,33 @@ function sanitizeFormRefUrls(
     return filtered.slice(0, REF_PICKER_MAX);
   }
   if (filtered.length) return filtered.slice(0, REF_PICKER_MAX);
-  return studioDefaultRefUrls(pool, kind, colorIndex);
+  if (attach) return [attach];
+  return [];
+}
+
+function refsAfterNewStudioAttach(
+  prevRefs: string[],
+  opts: { colorIndex?: number; lockedFaceUrl?: string },
+): string[] {
+  const face = (opts.lockedFaceUrl || '').trim();
+  if ((opts.colorIndex ?? 0) >= 1 && face) {
+    return prevRefs.filter((u) => u === face);
+  }
+  return [];
+}
+
+function studioRefPickerItems(
+  pool: ManualProductRefPoolItem[],
+  attachUrl: string,
+): ManualProductRefPoolItem[] {
+  const attach = (attachUrl || '').trim();
+  if (!attach || pool.some((p) => p.url === attach)) {
+    return pool;
+  }
+  return [
+    { id: 'attach-pending', url: attach, label: 'Mẫu SP mới', kind: 'ref' },
+    ...pool,
+  ];
 }
 
 function syncRefUrlsFromJob(fresh: ManualProductJob) {
@@ -364,13 +489,16 @@ function syncRefUrlsFromJob(fresh: ManualProductJob) {
       ? slot.kind
       : 'color';
   const idx = colorSlotIndex(fresh.studio, slot);
+  const attach = (slot?.attach_url || '').trim();
   const fromSlot = Array.isArray(slot?.ref_urls) ? slot!.ref_urls!.filter(Boolean) : [];
+  const merged = attach && !fromSlot.includes(attach) ? [attach, ...fromSlot] : fromSlot;
   return sanitizeFormRefUrls(
-    fromSlot,
+    merged.length ? merged : fromSlot,
     pool,
     kind as 'color' | 'gallery' | 'detail' | 'material',
     idx,
     fresh.studio,
+    attach,
   );
 }
 
@@ -513,6 +641,23 @@ function toggleRefUrl(prev: string[], url: string, max = REF_PICKER_MAX): string
   return [...prev, url];
 }
 
+/** Chọn ref mới → thay thế ref cũ (giữ locked), không cộng dồn ảnh trước. */
+function selectRefUrlReplace(
+  prev: string[],
+  url: string,
+  lockedUrls: string[],
+  max = REF_PICKER_MAX,
+): string[] {
+  const locked = lockedUrls.filter(Boolean);
+  const lockedSet = new Set(locked);
+  if (lockedSet.has(url)) return prev;
+  const userPrev = prev.filter((u) => !lockedSet.has(u));
+  if (userPrev.includes(url)) {
+    return [...locked];
+  }
+  return [...locked, url].slice(0, max);
+}
+
 function StudioRefPicker({
   items,
   selectedUrls,
@@ -520,6 +665,7 @@ function StudioRefPicker({
   disabled,
   compact = false,
   lockedUrls = [],
+  selectionMode = 'multi',
 }: {
   items: ManualProductRefPoolItem[];
   selectedUrls: string[];
@@ -527,6 +673,7 @@ function StudioRefPicker({
   disabled?: boolean;
   compact?: boolean;
   lockedUrls?: string[];
+  selectionMode?: 'multi' | 'replace';
 }) {
   const lockedSet = new Set(lockedUrls.filter(Boolean));
   const visibleSelected = selectedUrls.filter(
@@ -568,8 +715,19 @@ function StudioRefPicker({
               aria-label={checked ? `Bỏ chọn ${label}` : `Chọn ${label}`}
               onClick={() => {
                 if (isLocked) return;
-                const next = toggleRefUrl(selectedUrls, item.url);
-                onChange([...lockedUrls.filter(Boolean), ...next.filter((u) => !lockedSet.has(u))].slice(0, REF_PICKER_MAX));
+                const userNext =
+                  selectionMode === 'replace'
+                    ? selectRefUrlReplace(selectedUrls, item.url, lockedUrls.filter(Boolean))
+                    : toggleRefUrl(
+                        selectedUrls.filter((u) => !lockedSet.has(u)),
+                        item.url,
+                      );
+                onChange(
+                  [...lockedUrls.filter(Boolean), ...userNext.filter((u) => !lockedSet.has(u))].slice(
+                    0,
+                    REF_PICKER_MAX,
+                  ),
+                );
               }}
               className={`group relative text-left rounded-xl border-2 p-1.5 transition-all ${
                 compact ? 'w-[5.5rem]' : 'w-[7rem]'
@@ -779,11 +937,17 @@ export default function AdminManualProductCreatePage() {
   const [studioBusy, setStudioBusy] = useState(false);
   const [job, setJob] = useState<ManualProductJob | null>(null);
   const [imageSelectorOpen, setImageSelectorOpen] = useState(false);
-  const [imageSelectionKind, setImageSelectionKind] = useState<StudioSelectionKind>('gallery');
+  const [imageSelectionKind, setImageSelectionKind] = useState<PublishSelectionKind>('gallery');
   const [imageSelectionUrls, setImageSelectionUrls] = useState<string[]>([]);
+  // Gallery bắt buộc chọn; chi tiết tuỳ chọn. Màu + chất liệu mặc định theo Studio.
+  const [confirmedSelectionSignatures, setConfirmedSelectionSignatures] = useState<
+    Partial<Record<PublishSelectionKind, string>>
+  >({});
   const [draftReady, setDraftReady] = useState(false);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);
   const [serverSessions, setServerSessions] = useState<ManualProductJobSummary[]>([]);
+  const [confirmDeleteJobId, setConfirmDeleteJobId] = useState<string | null>(null);
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const steps = mode === 'ai' ? STEPS_AI : STEPS_MANUAL;
@@ -891,24 +1055,10 @@ export default function AdminManualProductCreatePage() {
             if (fresh.status === 'awaiting_approval') {
               setFormRefUrls(syncRefUrlsFromJob(fresh));
               const slot = fresh.studio?.current_slot;
-              if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+              if (slot?.user_prompt && slot?.kind === 'color') setFormPrompt(String(slot.user_prompt));
               if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
               if (slot?.name) setFormColorName(String(slot.name));
             } else if (fresh.status === 'awaiting_input' || fresh.status === 'awaiting_colors') {
-              const phase = fresh.studio?.phase || 'color';
-              setFormKind(
-                phase === 'gallery' || phase === 'detail' || phase === 'material'
-                  ? phase
-                  : phase === 'main'
-                    ? 'gallery'
-                    : 'color',
-              );
-              setFormPrompt('');
-              const pool = fresh.studio?.ref_pool || [];
-              const nextColorIdx = (fresh.studio?.colors || []).filter((c) =>
-                (c?.img || '').trim(),
-              ).length;
-              setFormRefUrls(studioDefaultRefUrls(pool, 'color', nextColorIdx));
               setFormAttachUrl('');
               setFormColorName('');
             }
@@ -999,7 +1149,7 @@ export default function AdminManualProductCreatePage() {
         setJob(fresh);
         if (fresh.status === 'awaiting_approval') {
           const slot = fresh.studio?.current_slot;
-          if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+          if (slot?.user_prompt && slot?.kind === 'color') setFormPrompt(String(slot.user_prompt));
           setFormRefUrls(syncRefUrlsFromJob(fresh));
           if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
           if (slot?.name) setFormColorName(String(slot.name));
@@ -1020,9 +1170,60 @@ export default function AdminManualProductCreatePage() {
     [applyDraftState, startPolling],
   );
 
+  const reloadServerSessions = useCallback(async () => {
+    try {
+      const rows = await manualProductCreateAPI.listJobs({ active: true, limit: 30 });
+      setServerSessions(rows);
+    } catch {
+      setServerSessions([]);
+    }
+  }, []);
+
+  const visibleServerSessions = useMemo(() => {
+    const currentId = job?.job_id;
+    if (!currentId) return serverSessions;
+    return serverSessions.filter((s) => s.job_id !== currentId);
+  }, [job?.job_id, serverSessions]);
+
+  const deleteServerSession = useCallback(
+    async (jobId: string) => {
+      setDeletingJobId(jobId);
+      setFormError('');
+      try {
+        await manualProductCreateAPI.deleteJob(jobId);
+        setServerSessions((prev) => prev.filter((s) => s.job_id !== jobId));
+        setConfirmDeleteJobId(null);
+        if (job?.job_id === jobId) {
+          stopPoll();
+          setJob(null);
+          setResumeNotice(null);
+          clearProductCreateDraft();
+        } else {
+          const local = loadProductCreateDraft();
+          if (local?.jobId === jobId) clearProductCreateDraft();
+        }
+        pushToast({ title: 'Đã xóa phiên tạo sản phẩm', variant: 'success' });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Không xóa được phiên';
+        setFormError(msg);
+        pushToast({ title: 'Không thể xóa phiên', description: msg, variant: 'error' });
+      } finally {
+        setDeletingJobId(null);
+      }
+    },
+    [job?.job_id, stopPoll],
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      try {
+        const rows = await manualProductCreateAPI.listJobs({ active: true, limit: 30 });
+        if (!cancelled) setServerSessions(rows);
+      } catch {
+        if (!cancelled) setServerSessions([]);
+      }
+
       const local = loadProductCreateDraft();
       if (local) {
         applyDraftState(local);
@@ -1033,13 +1234,6 @@ export default function AdminManualProductCreatePage() {
           );
         } else {
           setResumeNotice('Đã khôi phục bản nháp form — tiếp tục nhập liệu.');
-        }
-      } else {
-        try {
-          const rows = await manualProductCreateAPI.listJobs({ active: true, limit: 5 });
-          if (!cancelled && rows.length) setServerSessions(rows);
-        } catch {
-          /* ignore */
         }
       }
       if (!cancelled) setDraftReady(true);
@@ -1068,6 +1262,11 @@ export default function AdminManualProductCreatePage() {
     return () => window.removeEventListener('beforeunload', flush);
   }, [draftReady, draftSnapshot, job?.status]);
 
+  // Đổi sang phiên (job) khác — xoá xác nhận chọn ảnh cũ, admin phải chọn lại cho phiên mới.
+  useEffect(() => {
+    setConfirmedSelectionSignatures({});
+  }, [job?.job_id]);
+
   useEffect(() => {
     if (!draftReady || mode !== 'ai' || step !== 3 || !job?.job_id) return;
     let cancelled = false;
@@ -1078,15 +1277,13 @@ export default function AdminManualProductCreatePage() {
         setJob(fresh);
         if (fresh.status === 'awaiting_approval') {
           const slot = fresh.studio?.current_slot;
-          if (slot?.user_prompt) setFormPrompt(String(slot.user_prompt));
+          if (slot?.user_prompt && slot?.kind === 'color') setFormPrompt(String(slot.user_prompt));
           setFormRefUrls(syncRefUrlsFromJob(fresh));
           if (slot?.attach_url) setFormAttachUrl(String(slot.attach_url));
           if (slot?.name) setFormColorName(String(slot.name));
         } else if (fresh.status === 'awaiting_input' || fresh.status === 'awaiting_colors') {
           const studioSync = syncStudioFormFromJob(fresh);
-          setFormKind(studioSync.formKind);
           if (studioSync.formRefUrls.length) setFormRefUrls(studioSync.formRefUrls);
-          // Luôn đồng bộ (kể cả '') — không giữ tên màu cũ từ ảnh trước
           setFormColorName(studioSync.formColorName);
         }
         if (POLL_BUSY.has(fresh.status)) {
@@ -1104,10 +1301,10 @@ export default function AdminManualProductCreatePage() {
   function discardSavedSession() {
     clearProductCreateDraft();
     setResumeNotice(null);
-    setServerSessions([]);
     setJob(null);
     stopPoll();
     setFormError('');
+    void reloadServerSessions();
     applyDraftState({
       v: 1,
       savedAt: new Date().toISOString(),
@@ -1162,31 +1359,78 @@ export default function AdminManualProductCreatePage() {
     return face ? [face] : [];
   }, [studio]);
   const firstColorRef = useMemo(() => firstApprovedColorRow(studio), [studio]);
-  const sanitizedFormRefUrls = useMemo(() => {
-    const kindForSanitize =
+  const activeRefKind = useMemo((): 'color' | 'gallery' | 'detail' | 'material' => {
+    if (
       job?.status === 'awaiting_approval' &&
       (currentSlot?.kind === 'gallery' ||
         currentSlot?.kind === 'detail' ||
         currentSlot?.kind === 'material' ||
         currentSlot?.kind === 'color')
-        ? (currentSlot.kind as 'color' | 'gallery' | 'detail' | 'material')
-        : formKind;
+    ) {
+      return currentSlot.kind as 'color' | 'gallery' | 'detail' | 'material';
+    }
+    return formKind;
+  }, [job?.status, currentSlot?.kind, formKind]);
+  const activeColorIndex =
+    job?.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex;
+  const refPickerItems = useMemo(
+    () => studioRefPickerItems(studio?.ref_pool || [], formAttachUrl),
+    [studio?.ref_pool, formAttachUrl],
+  );
+  const sanitizedFormRefUrls = useMemo(() => {
     return sanitizeFormRefUrls(
       formRefUrls,
       studio?.ref_pool || [],
-      kindForSanitize,
-      job?.status === 'awaiting_approval' ? approvalColorIndex : pendingColorIndex,
+      activeRefKind,
+      activeColorIndex,
       studio,
+      formAttachUrl,
     );
   }, [
     formRefUrls,
     studio,
-    formKind,
-    job?.status,
-    currentSlot?.kind,
-    approvalColorIndex,
-    pendingColorIndex,
+    activeRefKind,
+    activeColorIndex,
+    formAttachUrl,
   ]);
+
+  const applyStudioAttachUpload = useCallback(
+    (url: string) => {
+      const next = (url || '').trim();
+      if (!next) return;
+      setFormAttachUrl(next);
+      // Chỉ ảnh mới — bỏ hết ref cũ (giữ khuôn mặt màu #2+ nếu có).
+      setFormRefUrls(() => {
+        const kept = refsAfterNewStudioAttach([], {
+          colorIndex: activeColorIndex,
+          lockedFaceUrl: firstColorRef.url,
+        }).filter((u) => u !== next);
+        return [next, ...kept].slice(0, REF_PICKER_MAX);
+      });
+    },
+    [activeColorIndex, firstColorRef.url],
+  );
+
+  const clearStudioAttach = useCallback(() => {
+    setFormAttachUrl((prevAttach) => {
+      const removed = (prevAttach || '').trim();
+      if (removed) {
+        setFormRefUrls((prev) => prev.filter((u) => u !== removed));
+      }
+      return '';
+    });
+  }, []);
+
+  const handleStudioRefPickerChange = useCallback(
+    (next: string[]) => {
+      setFormRefUrls(next);
+      const attach = formAttachUrl.trim();
+      if (attach && !next.includes(attach)) {
+        setFormAttachUrl('');
+      }
+    },
+    [formAttachUrl],
+  );
 
   useEffect(() => {
     if (!draftReady || !job || formKind !== 'color') return;
@@ -1223,21 +1467,34 @@ export default function AdminManualProductCreatePage() {
     };
   }, [studio]);
   const canPublish = studioPublishCheck.canPublish;
-  const studioSelectableImages = useMemo(() => {
-    const items = new Map<string, { url: string; label: string }>();
-    const add = (url: string | null | undefined, label: string) => {
-      const value = (url || '').trim();
-      if (value && !items.has(value)) items.set(value, { url: value, label });
-    };
-    (studio?.ref_pool || []).forEach((item) => add(item.url, item.label || 'Ảnh Studio'));
-    (studio?.colors || []).forEach((color, index) =>
-      add(color?.img, color?.name?.trim() || `Ảnh màu ${index + 1}`),
-    );
-    (studio?.images || []).forEach((url, index) => add(url, `Gallery ${index + 1}`));
-    (studio?.gallery || []).forEach((url, index) => add(url, `Ảnh chi tiết ${index + 1}`));
-    add(studio?.material_image, 'Ảnh chất liệu');
-    return [...items.values()];
-  }, [studio]);
+  // Gallery + chi tiết phải được admin xác nhận trước khi đăng (màu + chất liệu mặc định).
+  const unconfirmedSelectionKind = useMemo(
+    () => findUnconfirmedPublishKind(studio, confirmedSelectionSignatures),
+    [confirmedSelectionSignatures, studio],
+  );
+  const imageSelectionConfirmed = unconfirmedSelectionKind === null;
+  const showPublishImageSelector =
+    (canPublish && !imageSelectionConfirmed) || imageSelectorOpen;
+  const publishConfirmLabel = useMemo(() => {
+    if (studioBusy) return 'Đang lưu…';
+    if (imageSelectionKind === 'gallery') return 'Xác nhận gallery & chọn chi tiết';
+    return imageSelectionUrls.length === 0
+      ? 'Bỏ qua chi tiết & hiện nút Đăng'
+      : 'Xác nhận chi tiết & hiện nút Đăng';
+  }, [studioBusy, imageSelectionKind, imageSelectionUrls.length]);
+  // Đủ ảnh nhưng chưa xác nhận gallery/chi tiết → tự mở khung chọn đúng bước.
+  useEffect(() => {
+    if (!canPublish || imageSelectionConfirmed) return;
+    const kind = unconfirmedSelectionKind || 'gallery';
+    setImageSelectionKind(kind);
+    setImageSelectionUrls(publishSelectionUrls(studio, kind));
+    setImageSelectorOpen(true);
+  }, [canPublish, imageSelectionConfirmed, unconfirmedSelectionKind, studio]);
+
+  const studioSelectableImages = useMemo(
+    () => collectPublishSelectableImageItems(studio),
+    [studio],
+  );
 
   const progressLabel = useMemo(() => {
     if (!job) return '';
@@ -1483,16 +1740,6 @@ export default function AdminManualProductCreatePage() {
     let refs = overrides?.ref_urls ?? formRefUrls;
     refs = sanitizeFormRefUrls(refs, pool, kind, colorIdx, studio);
     const attach = overrides?.attach_url ?? formAttachUrl;
-    if (studioNeedsDeepSeekPrompt(kind) && !prompt) {
-      setFormError(
-        kind === 'gallery'
-          ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-          : kind === 'detail'
-            ? 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-            : 'Ảnh chất liệu bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
-      );
-      return;
-    }
     if (kind === 'color') {
       if (colorIdx === 0 && refs.length === 0 && !attach.trim()) {
         setFormError('Ảnh màu đầu: upload ảnh mẫu sản phẩm — AI tự đọc tên màu.');
@@ -1534,27 +1781,47 @@ export default function AdminManualProductCreatePage() {
 
   async function approveImage() {
     if (!job?.job_id) return;
+    const slot = job.studio?.current_slot;
+    const approvedKind = studioKindFromSlot(slot?.kind || formKind);
+    const colorIdx = colorSlotIndex(job.studio, slot);
+    const pool = job.studio?.ref_pool || [];
+    const slotRefs = Array.isArray(slot?.ref_urls) ? slot!.ref_urls!.filter(Boolean) : [];
+    const refsJustUsed = sanitizeFormRefUrls(
+      formRefUrls.length ? formRefUrls : slotRefs,
+      pool,
+      approvedKind,
+      colorIdx,
+      job.studio,
+      formAttachUrl || (slot?.attach_url || ''),
+    );
     setFormError('');
     setStudioBusy(true);
     try {
       const fresh = await manualProductCreateAPI.approveImage(job.job_id);
       setJob(fresh);
       setFormAttachUrl('');
-      const phase = fresh.studio?.phase || 'color';
-      setFormKind(
-        phase === 'gallery' || phase === 'detail' || phase === 'material'
-          ? phase
-          : phase === 'main'
-            ? 'gallery'
-            : 'color',
-      );
-      if (phase === 'material') {
-        setImageModel(STUDIO_MATERIAL_IMAGE_MODEL);
-      }
-      setFormPrompt('');
-      if (phase === 'color') {
+      setFormKind(approvedKind);
+      const freshPool = fresh.studio?.ref_pool || [];
+      const nextColorIdx = (fresh.studio?.colors || []).filter((c) => (c?.img || '').trim()).length;
+      if (approvedKind === 'color') {
         setFormColorName('');
         setFormRefUrls([]);
+        setFormPrompt((fresh.studio?.color_user_prompt || '').trim());
+      } else if (approvedKind === 'material') {
+        setImageModel(STUDIO_MATERIAL_IMAGE_MODEL);
+        setFormPrompt('');
+        setFormRefUrls(
+          refsJustUsed.length
+            ? sanitizeFormRefUrls(refsJustUsed, freshPool, approvedKind, 0, fresh.studio)
+            : studioDefaultRefUrls(freshPool, approvedKind, 0),
+        );
+      } else {
+        setFormPrompt('');
+        setFormRefUrls(
+          refsJustUsed.length
+            ? sanitizeFormRefUrls(refsJustUsed, freshPool, approvedKind, nextColorIdx, fresh.studio)
+            : studioDefaultRefUrls(freshPool, approvedKind, nextColorIdx),
+        );
       }
       setStudioBusy(false);
       if (POLL_BUSY.has(fresh.status)) {
@@ -1571,18 +1838,7 @@ export default function AdminManualProductCreatePage() {
     if (!job?.job_id) return;
     const slot = job.studio?.current_slot;
     const slotKind = (slot?.kind || '').trim();
-    if (studioNeedsDeepSeekPrompt(slotKind) && !formPrompt.trim()) {
-      setFormError(
-        slotKind === 'gallery'
-          ? 'Gallery bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-          : slotKind === 'detail'
-            ? 'Ảnh chi tiết bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).'
-            : 'Ảnh chất liệu bắt buộc nhập ý muốn tạo ảnh (DeepSeek sẽ chuẩn hóa prompt).',
-      );
-      return;
-    }
     setFormError('');
-    setStudioBusy(true);
     const colorIdx = colorSlotIndex(job.studio, slot);
     const pool = job.studio?.ref_pool || [];
     const refs = sanitizeFormRefUrls(
@@ -1594,6 +1850,24 @@ export default function AdminManualProductCreatePage() {
       colorIdx,
       job.studio,
     );
+    if (slotKind === 'color') {
+      if (colorIdx === 0 && refs.length === 0 && !formAttachUrl.trim()) {
+        setFormError('Tạo lại: upload ảnh mẫu SP hoặc chọn ít nhất 1 ảnh tham khảo.');
+        return;
+      }
+      if (colorIdx >= 1) {
+        const face = firstApprovedColorUrl(job.studio);
+        const userRefs = refs.filter((u) => u !== face);
+        if (userRefs.length === 0 && !formAttachUrl.trim()) {
+          setFormError('Tạo lại: upload ảnh mẫu SP mới hoặc chọn ref (ngoài khuôn mặt màu #1).');
+          return;
+        }
+      }
+    } else if (refs.length === 0 && !formAttachUrl.trim()) {
+      setFormError('Tạo lại: chọn ít nhất 1 ảnh tham khảo hoặc upload ảnh mẫu mới.');
+      return;
+    }
+    setStudioBusy(true);
     setFormRefUrls(refs);
     try {
       const fresh = await manualProductCreateAPI.regenerateImage(job.job_id, {
@@ -1612,62 +1886,105 @@ export default function AdminManualProductCreatePage() {
     }
   }
 
-  function currentSelectionForKind(kind: StudioSelectionKind): string[] {
-    if (kind === 'gallery') return (studio?.images || []).filter(Boolean);
-    if (kind === 'detail') return (studio?.gallery || []).filter(Boolean);
-    return studio?.material_image?.trim() ? [studio.material_image.trim()] : [];
+  function signatureFromStudio(studioObj: ManualProductJob['studio'], kind: PublishSelectionKind): string {
+    return publishSelectionUrls(studioObj, kind).join('|');
   }
 
-  function openImageSelector(kind: StudioSelectionKind = 'gallery') {
-    setImageSelectionKind(kind);
-    setImageSelectionUrls(currentSelectionForKind(kind));
+  function openImageSelector() {
+    setConfirmedSelectionSignatures({});
+    setImageSelectionKind('gallery');
+    setImageSelectionUrls(publishSelectionUrls(studio, 'gallery'));
     setImageSelectorOpen(true);
   }
 
-  function changeImageSelectionKind(kind: StudioSelectionKind) {
+  function changeImageSelectionKind(kind: PublishSelectionKind) {
+    if (isPublishKindLocked(kind, unconfirmedSelectionKind)) return;
     setImageSelectionKind(kind);
-    setImageSelectionUrls(currentSelectionForKind(kind));
+    setImageSelectionUrls(publishSelectionUrls(studio, kind));
   }
 
   function toggleImageSelection(url: string) {
     setImageSelectionUrls((previous) => {
       if (previous.includes(url)) return previous.filter((value) => value !== url);
-      if (imageSelectionKind === 'material') return [url];
       return [...previous, url];
     });
   }
 
-  async function saveImageSelection() {
-    if (!job?.job_id || imageSelectionUrls.length === 0) {
-      setFormError('Chọn ít nhất 1 ảnh để lưu.');
+  async function confirmPublishImageSelection() {
+    if (!job?.job_id) return;
+    if (imageSelectionKind === 'gallery') {
+      if (imageSelectionUrls.length < STUDIO_MIN_GALLERY_IMAGES) {
+        setFormError(`Chọn ít nhất ${STUDIO_MIN_GALLERY_IMAGES} ảnh gallery.`);
+        return;
+      }
+      setFormError('');
+      setStudioBusy(true);
+      try {
+        const fresh = await manualProductCreateAPI.selectImages(job.job_id, {
+          kind: 'gallery',
+          urls: imageSelectionUrls,
+        });
+        setJob(fresh);
+        const gallerySig = signatureFromStudio(fresh.studio, 'gallery');
+        setConfirmedSelectionSignatures((prev) => ({ ...prev, gallery: gallerySig }));
+        setImageSelectionKind('detail');
+        setImageSelectionUrls([]);
+        setImageSelectorOpen(true);
+        pushToast({
+          title: 'Đã chọn gallery',
+          description: 'Tiếp theo: chọn ảnh chi tiết (tuỳ chọn — có thể bỏ qua).',
+          variant: 'success',
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Không thể lưu gallery';
+        setFormError(msg);
+        pushToast({ title: 'Không thể lưu gallery', description: msg, variant: 'error' });
+      } finally {
+        setStudioBusy(false);
+      }
       return;
     }
-    setFormError('');
-    setStudioBusy(true);
-    try {
-      const fresh = await manualProductCreateAPI.selectImages(job.job_id, {
-        kind: imageSelectionKind,
-        urls: imageSelectionUrls,
-      });
-      setJob(fresh);
-      setImageSelectorOpen(false);
-      pushToast({
-        title: 'Đã lưu ảnh đã chọn',
-        description: `Đã cập nhật ảnh ${
-          imageSelectionKind === 'gallery'
-            ? 'gallery'
-            : imageSelectionKind === 'detail'
-              ? 'chi tiết'
-              : 'chất liệu'
-        }.`,
-        variant: 'success',
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Không thể lưu ảnh đã chọn';
-      setFormError(msg);
-      pushToast({ title: 'Không thể lưu lựa chọn', description: msg, variant: 'error' });
-    } finally {
-      setStudioBusy(false);
+
+    if (imageSelectionKind === 'detail') {
+      setFormError('');
+      setStudioBusy(true);
+      const skippingDetail = imageSelectionUrls.length === 0;
+      try {
+        const fresh = await manualProductCreateAPI.selectImages(job.job_id, {
+          kind: 'detail',
+          urls: imageSelectionUrls,
+        });
+        setJob(fresh);
+        setConfirmedSelectionSignatures((prev) => ({
+          ...prev,
+          detail: signatureFromStudio(fresh.studio, 'detail'),
+        }));
+        setImageSelectorOpen(false);
+        pushToast({
+          title: skippingDetail ? 'Đã bỏ qua ảnh chi tiết' : 'Đã chọn ảnh chi tiết',
+          description: 'Ảnh chất liệu mặc định theo Studio. Bấm «Đăng sản phẩm» để hoàn tất.',
+          variant: 'success',
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Không thể lưu ảnh chi tiết';
+        const needsBackendRestart =
+          skippingDetail && /ít nhất 1 ảnh/i.test(msg);
+        setFormError(
+          needsBackendRestart
+            ? `${msg} — restart backend cổng 8001 rồi thử bỏ qua lại.`
+            : msg,
+        );
+        pushToast({
+          title: skippingDetail ? 'Không thể bỏ qua chi tiết' : 'Không thể lưu chi tiết',
+          description: needsBackendRestart
+            ? 'Backend chưa cập nhật — restart uvicorn cổng 8001.'
+            : msg,
+          variant: 'error',
+        });
+      } finally {
+        setStudioBusy(false);
+      }
+      return;
     }
   }
 
@@ -1774,11 +2091,11 @@ export default function AdminManualProductCreatePage() {
         </div>
       ) : null}
 
-      {!resumeNotice && serverSessions.length > 0 ? (
+      {step === 0 && visibleServerSessions.length > 0 ? (
         <div className="bg-amber-50 border border-amber-200 text-amber-950 rounded-lg px-4 py-3 text-sm space-y-2">
           <p className="font-medium">Có phiên tạo sản phẩm đang dở trên server</p>
           <ul className="space-y-2">
-            {serverSessions.map((s) => (
+            {visibleServerSessions.map((s) => (
               <li
                 key={s.job_id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-100 bg-white/70 px-3 py-2"
@@ -1792,13 +2109,46 @@ export default function AdminManualProductCreatePage() {
                     {s.message ? ` · ${s.message}` : ''}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => resumeJobById(s.job_id, 'Đã khôi phục phiên từ server.')}
-                  className="shrink-0 text-sm font-medium px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  Tiếp tục
-                </button>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => resumeJobById(s.job_id, 'Đã khôi phục phiên từ server.')}
+                    disabled={Boolean(deletingJobId)}
+                    className="text-sm font-medium px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    Tiếp tục
+                  </button>
+                  {confirmDeleteJobId === s.job_id ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => deleteServerSession(s.job_id)}
+                        disabled={deletingJobId === s.job_id}
+                        className="text-sm font-medium px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {deletingJobId === s.job_id ? 'Đang xóa…' : 'Xác nhận xóa'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteJobId(null)}
+                        disabled={deletingJobId === s.job_id}
+                        className="text-sm font-medium px-2 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Huỷ
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteJobId(s.job_id)}
+                      disabled={Boolean(deletingJobId)}
+                      className="text-sm font-medium px-3 py-1.5 rounded-lg border border-red-200 bg-white text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      aria-label={`Xóa phiên ${s.product_name || s.material || s.job_id}`}
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
@@ -2355,6 +2705,11 @@ export default function AdminManualProductCreatePage() {
                 </p>
               ) : null}
 
+              <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                <span className="font-medium">Bối cảnh cố định:</span> {lockedStudioShotStyle(job)} — áp dụng
+                cho ảnh màu. Gallery/chi tiết: cùng sản phẩm ref, AI chỉ đổi góc ảnh.
+              </p>
+
               <div className="flex flex-wrap gap-2">
                 {(
                   [
@@ -2369,12 +2724,21 @@ export default function AdminManualProductCreatePage() {
                     type="button"
                     onClick={() => {
                       setFormKind(k);
-                      setFormPrompt('');
+                      if (k === 'color') {
+                        setFormPrompt((studio?.color_user_prompt || '').trim());
+                      } else {
+                        setFormPrompt('');
+                      }
                       const nextColorIdx =
                         k === 'color'
                           ? (studio?.colors || []).filter((c) => (c?.img || '').trim()).length
                           : 0;
-                      setFormRefUrls(studioDefaultRefUrls(studio?.ref_pool || [], k, nextColorIdx));
+                      const lastRefs = studioLastRefUrls(studio, k);
+                      setFormRefUrls(
+                        lastRefs.length
+                          ? lastRefs
+                          : studioDefaultRefUrls(studio?.ref_pool || [], k, nextColorIdx),
+                      );
                     }}
                     className={`text-xs px-3 py-1.5 rounded-full border ${
                       formKind === k
@@ -2389,19 +2753,22 @@ export default function AdminManualProductCreatePage() {
                   </button>
                 ))}
               </div>
+              <p className="text-[11px] text-slate-500">
+                Chuyển tab bất kỳ lúc nào — hệ thống không tự nhảy sang mục khác khi đã đủ ảnh tối thiểu.
+              </p>
 
               {formKind === 'color' ? (
                 <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
                   {pendingColorIndex === 0 ? (
                     <>
-                      Ảnh màu <strong>đầu tiên</strong>: upload ảnh mẫu SP — AI tự đọc tên SP + tên màu. Mỗi lần
-                      Tạo lại → người mẫu khác (cùng cài đặt tuổi/giới tính).
+                      Ảnh màu <strong>đầu tiên</strong>: upload ảnh mẫu SP — AI tự đọc tên SP + tên màu, giữ{' '}
+                      <strong>góc nhìn/tư thế như ảnh mẫu</strong>. Prompt tuỳ chọn — Tạo lại không bắt đổi prompt.
                     </>
                   ) : (
                     <>
                       Ảnh màu <strong>thứ {pendingColorIndex + 1}</strong>: upload{' '}
-                      <strong>ảnh mẫu SP mới</strong> — AI lấy <strong>kiểu đồ từ ảnh này</strong>, chỉ giữ{' '}
-                      <strong>khuôn mặt</strong> từ ảnh màu #1 (không dùng lại sản phẩm màu #1).
+                      <strong>ảnh mẫu SP mới</strong> — AI lấy kiểu/màu từ ảnh này, giữ{' '}
+                      <strong>khuôn mặt</strong> từ ảnh màu #1. Prompt giữ nguyên như màu đầu (không cần nhập lại).
                     </>
                   )}
                 </p>
@@ -2409,17 +2776,16 @@ export default function AdminManualProductCreatePage() {
 
               {formKind === 'gallery' ? (
                 <p className="text-xs text-sky-900 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
-                  Chọn ảnh màu / ảnh đã tạo để <strong>dùng luôn làm gallery</strong>, hoặc chọn làm tham khảo rồi{' '}
-                  <strong>Tạo mới</strong>. Nhập ý muốn (vd đeo vai, đứng nghiêng) — DeepSeek chuẩn hóa prompt:{' '}
-                  <strong>giữ nguyên SP</strong>, chỉ đổi tư thế/cách dùng. Cần đủ {STUDIO_MIN_GALLERY_IMAGES} ảnh
-                  gallery trước khi đăng.
+                  Chọn ảnh ref rồi <strong>Tạo mới</strong> — AI tạo cùng sản phẩm nhưng{' '}
+                  <strong>góc ảnh khác</strong> ref (prompt cố định, không cần nhập). Cần đủ{' '}
+                  {STUDIO_MIN_GALLERY_IMAGES} ảnh gallery trước khi đăng.
                 </p>
               ) : null}
 
               {formKind === 'detail' ? (
                 <p className="text-xs text-violet-900 bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
-                  Ảnh chi tiết <strong>tuỳ chọn để đăng</strong> — chọn ảnh đã tạo để dùng luôn, hoặc tạo mới. Nhập ý
-                  muốn — DeepSeek chuẩn hóa prompt: <strong>giữ nguyên SP</strong>, chỉ đổi góc/cách dùng.
+                  Ảnh chi tiết <strong>tuỳ chọn</strong> — chọn ref rồi Tạo mới; AI cận cảnh{' '}
+                  <strong>góc khác</strong> ref (prompt cố định).
                 </p>
               ) : null}
 
@@ -2433,10 +2799,9 @@ export default function AdminManualProductCreatePage() {
                   ) : (
                     ' (chưa có — quay lại bước Thuộc tính để nhập)'
                   )}
-                  , soạn 3 ưu điểm/điểm đáng mua (DeepSeek) rồi in trực tiếp lên ảnh dạng nhãn tiếng Việt.
-                  Nhập ý muốn (vd cận cảnh bề mặt, góc nghiêng) — DeepSeek chuẩn hóa prompt:{' '}
-                  <strong>giữ nguyên SP</strong>, chỉ đổi góc/zoom/bố cục.
-                  Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
+                  , tự soạn 3 ưu điểm riêng của đúng chất liệu đó (DeepSeek — vd lụa thì nói óng ảnh/mát, da thì nói vân da/bền) rồi in lên ảnh dạng nhãn tiếng Việt.{' '}
+                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI zoom vào vùng chất liệu trực quan nhất
+                  (thân áo/vải chính, mặt túi, upper giày…) và đặt nhãn ưu điểm ở góc, không che vùng texture. Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
               ) : null}
 
@@ -2460,7 +2825,7 @@ export default function AdminManualProductCreatePage() {
                   </div>
                   <p className="text-xs text-slate-500 mb-2">
                     {formKind === 'color' && pendingColorIndex === 0
-                      ? 'Upload ảnh mẫu SP khách — AI lấy kiểu, màu, cắt may từ ảnh; người mẫu theo cài đặt Studio.'
+                      ? 'Upload ảnh mẫu SP khách — AI lấy kiểu, màu, cắt may và góc nhìn từ ảnh; người mẫu theo cài đặt Studio.'
                       : formKind === 'color' && pendingColorIndex >= 1
                         ? 'Upload ảnh mẫu SP khách cho màu này — AI thay sản phẩm theo ảnh mới; chỉ giữ khuôn mặt từ ảnh màu #1.'
                         : formKind === 'gallery' || formKind === 'detail'
@@ -2471,7 +2836,7 @@ export default function AdminManualProductCreatePage() {
                     <>
                       {formAttachUrl ? (
                         <div className="mb-2">
-                          <Thumb url={formAttachUrl} onRemove={() => setFormAttachUrl('')} />
+                          <Thumb url={formAttachUrl} onRemove={clearStudioAttach} />
                           <p className="text-[10px] text-emerald-800 mt-1">Mẫu SP (màu + kiểu) gửi cho AI</p>
                         </div>
                       ) : null}
@@ -2482,7 +2847,7 @@ export default function AdminManualProductCreatePage() {
                         className="block w-full text-sm mb-1"
                         onChange={async (e) => {
                           const urls = await uploadFiles(e.target.files, 'ref');
-                          if (urls[0]) setFormAttachUrl(urls[0]);
+                          if (urls[0]) applyStudioAttachUpload(urls[0]);
                           e.target.value = '';
                         }}
                       />
@@ -2490,11 +2855,11 @@ export default function AdminManualProductCreatePage() {
                   ) : null}
                 </div>
 
-                {formKind !== 'color' && (studio?.ref_pool || []).length > 0 ? (
+                {formKind !== 'color' && refPickerItems.length > 0 ? (
                   <StudioRefPicker
-                    items={studio?.ref_pool || []}
+                    items={refPickerItems}
                     selectedUrls={sanitizedFormRefUrls}
-                    onChange={setFormRefUrls}
+                    onChange={handleStudioRefPickerChange}
                     disabled={studioBusy}
                   />
                 ) : null}
@@ -2509,11 +2874,12 @@ export default function AdminManualProductCreatePage() {
                 materialLocked={formKind === 'material'}
               />
 
+              {studioShowsPromptField(formKind, formPrompt) ? (
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
                   Nội dung muốn tạo ảnh{' '}
-                  {studioNeedsDeepSeekPrompt(formKind) ? (
-                    <span className="text-red-600">*</span>
+                  {formKind === 'material' ? (
+                    <span className="font-normal text-slate-500">(tuỳ chọn — để trống AI tự tối ưu)</span>
                   ) : (
                     <span className="font-normal text-slate-500">(tuỳ chọn)</span>
                   )}
@@ -2521,27 +2887,30 @@ export default function AdminManualProductCreatePage() {
                 <textarea
                   className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
                   value={formPrompt}
-                  disabled={studioBusy || uploading}
+                  disabled={studioBusy || uploading || (formKind === 'color' && pendingColorIndex >= 1)}
                   onChange={(e) => setFormPrompt(e.target.value)}
                   placeholder={
-                    studioNeedsDeepSeekPrompt(formKind)
-                      ? formKind === 'material'
-                        ? 'Bắt buộc — VD: cận cảnh bề mặt, zoom texture, góc nghiêng… (DeepSeek giữ nguyên SP, chỉ đổi góc/zoom).'
-                        : 'Bắt buộc — VD: đeo túi trên vai, đứng ¾, cầm túi bằng tay… (DeepSeek sẽ soạn lệnh giữ nguyên SP).'
+                    formKind === 'material'
+                      ? 'Để trống → AI tự chọn góc cận cảnh + callout ưu điểm. Hoặc nhập: zoom texture, góc nghiêng…'
                       : formKind === 'color'
-                        ? 'VD: cầm túi trên cẳng tay, tay chạm quai; hoặc tay ngắn, cổ V… — để trống thì AI tự theo loại SP.'
+                        ? 'Để trống → AI giữ góc nhìn/tư thế như ảnh mẫu. Hoặc nhập thêm chi tiết (cầm túi, cổ V…).'
                         : 'VD: tay ngắn, cổ V, mặc chéo vạt, đứng ¾… — để trống thì AI tự theo ảnh mẫu.'
                   }
-                  required={studioNeedsDeepSeekPrompt(formKind)}
                 />
-                {studioNeedsDeepSeekPrompt(formKind) ? (
+                {formKind === 'material' ? (
                   <p className="mt-1 text-[11px] text-slate-500">
-                    {formKind === 'material'
-                      ? 'DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi góc zoom/bố cục cận cảnh chất liệu theo ý bạn.'
-                      : 'DeepSeek viết lại thành prompt chuẩn: giữ nguyên sản phẩm từ ảnh mẫu; chỉ đổi thế đứng/cách dùng theo ý bạn.'}
+                    DeepSeek tự soạn ưu điểm chất liệu + prompt chuẩn; chỉ nhập thêm nếu muốn chỉnh góc
+                    zoom/bố cục.
+                  </p>
+                ) : formKind === 'color' ? (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    {pendingColorIndex >= 1
+                      ? 'Prompt dùng chung từ ảnh màu #1 — chỉ upload ảnh mẫu SP mới; khuôn mặt lấy từ ảnh màu #1.'
+                      : 'Ảnh màu giữ góc nhìn như ảnh mẫu admin gửi — Tạo lại không bắt đổi prompt hay ép người mẫu khác.'}
                   </p>
                 ) : null}
               </label>
+              ) : null}
 
               <div className="flex flex-wrap gap-2">
                 {(formKind === 'gallery' || formKind === 'detail') && sanitizedFormRefUrls.length > 0 ? (
@@ -2560,11 +2929,7 @@ export default function AdminManualProductCreatePage() {
                 ) : null}
                 <button
                   type="button"
-                  disabled={
-                    studioBusy ||
-                    uploading ||
-                    (studioNeedsDeepSeekPrompt(formKind) && !formPrompt.trim())
-                  }
+                  disabled={studioBusy || uploading}
                   onClick={() => submitGenerate()}
                   className="px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium disabled:opacity-50"
                 >
@@ -2599,7 +2964,7 @@ export default function AdminManualProductCreatePage() {
                     className={`relative w-full max-w-md ${studioAspectClass(aspectRatio)} rounded-xl overflow-hidden border border-slate-200 bg-slate-50`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={currentSlot.url} alt="" className="w-full h-full object-contain" />
+                    <img src={currentSlot.url} alt="" className="h-full w-full object-contain" />
                   </div>
                 </div>
               ) : (
@@ -2609,15 +2974,17 @@ export default function AdminManualProductCreatePage() {
               )}
 
               {currentSlot?.kind === 'color' ? (
-                <div>
+                <div className="space-y-3">
                   {approvalColorIndex === 0 ? (
                     <p className="text-xs text-sky-800 bg-sky-50 border border-sky-100 rounded-lg px-2 py-1.5">
-                      Tạo lại ảnh màu đầu → người mẫu khác (cùng tuổi/giới tính đã cài).
+                      Tạo lại → có thể <strong>upload ảnh mẫu SP mới</strong> hoặc chọn ref khác; AI vẫn giữ{' '}
+                      <strong>góc nhìn/tư thế như ảnh mẫu</strong> — không bắt đổi prompt.
                     </p>
                   ) : (
-                    <div className="space-y-2">
+                    <>
                       <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                        Upload ảnh mẫu SP mới nếu cần đổi mẫu — khuôn mặt giữ từ màu #1.
+                        Tạo lại → upload ảnh mẫu SP mới hoặc chọn ref — chỉ giữ <strong>khuôn mặt</strong>{' '}
+                        từ màu #1.
                       </p>
                       {firstColorRef.url ? (
                         <StudioFaceRefCard
@@ -2626,44 +2993,95 @@ export default function AdminManualProductCreatePage() {
                           compact
                         />
                       ) : null}
-                      {formAttachUrl ? (
-                        <div>
-                          <Thumb url={formAttachUrl} onRemove={() => setFormAttachUrl('')} />
-                        </div>
-                      ) : null}
-                      <input
-                        type="file"
-                        accept="image/*"
+                    </>
+                  )}
+
+                  <div>
+                    <div className="text-sm font-medium text-slate-800 mb-1">
+                      Ảnh mẫu sản phẩm — có thể đổi trước Tạo lại
+                    </div>
+                    {formAttachUrl ? (
+                      <div className="mb-2">
+                        <Thumb url={formAttachUrl} onRemove={clearStudioAttach} />
+                        <p className="text-[10px] text-emerald-800 mt-1">Mẫu SP (màu + kiểu) gửi cho AI</p>
+                      </div>
+                    ) : null}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={studioBusy || uploading}
+                      className="block w-full text-sm"
+                      onChange={async (e) => {
+                        const urls = await uploadFiles(e.target.files, 'ref');
+                        if (urls[0]) applyStudioAttachUpload(urls[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+
+                  {refPickerItems.length > 0 ? (
+                    <div>
+                      <div className="text-sm font-medium text-slate-800 mb-1">
+                        Ảnh tham khảo — chọn mới sẽ thay ảnh cũ
+                      </div>
+                      <StudioRefPicker
+                        items={refPickerItems}
+                        selectedUrls={sanitizedFormRefUrls}
+                        onChange={handleStudioRefPickerChange}
                         disabled={studioBusy || uploading}
-                        className="block w-full text-sm"
-                        onChange={async (e) => {
-                          const urls = await uploadFiles(e.target.files, 'ref');
-                          if (urls[0]) setFormAttachUrl(urls[0]);
-                          e.target.value = '';
-                        }}
+                        compact
+                        selectionMode="replace"
+                        lockedUrls={
+                          approvalColorIndex >= 1 && firstColorRef.url ? [firstColorRef.url] : []
+                        }
                       />
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : null}
 
               {currentSlot?.kind === 'gallery' ||
               currentSlot?.kind === 'detail' ||
               currentSlot?.kind === 'material' ? (
-                <div>
-                  <div className="text-sm font-medium text-slate-800 mb-1">
-                    Ảnh tham khảo đã chọn (tối đa 3) — có thể chọn lại trước khi Tạo lại
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-800 mb-1">
+                      Ảnh tham khảo (tối đa 3) — chọn lại trước Tạo lại
+                    </div>
+                    <p className="text-xs text-slate-500 mb-2">
+                      Bấm ảnh khác → <strong>thay thế</strong> ảnh cũ (không ghép ref lần trước).
+                    </p>
+                    <StudioRefPicker
+                      items={refPickerItems}
+                      selectedUrls={sanitizedFormRefUrls}
+                      onChange={handleStudioRefPickerChange}
+                      disabled={studioBusy || uploading}
+                      compact
+                      selectionMode="replace"
+                    />
                   </div>
-                  <p className="text-xs text-slate-500 mb-2">
-                    Giữ nguyên lựa chọn lần tạo trước; bấm ảnh để bỏ/chọn thêm rồi Tạo lại.
-                  </p>
-                  <StudioRefPicker
-                    items={studio?.ref_pool || []}
-                    selectedUrls={sanitizedFormRefUrls}
-                    onChange={setFormRefUrls}
-                    disabled={studioBusy}
-                    compact
-                  />
+
+                  <div>
+                    <div className="text-sm font-medium text-slate-800 mb-1">
+                      Hoặc upload ảnh mẫu mới
+                    </div>
+                    {formAttachUrl ? (
+                      <div className="mb-2">
+                        <Thumb url={formAttachUrl} onRemove={clearStudioAttach} />
+                      </div>
+                    ) : null}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={studioBusy || uploading}
+                      className="block w-full text-sm"
+                      onChange={async (e) => {
+                        const urls = await uploadFiles(e.target.files, 'ref');
+                        if (urls[0]) applyStudioAttachUpload(urls[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
                 </div>
               ) : null}
 
@@ -2677,32 +3095,30 @@ export default function AdminManualProductCreatePage() {
                 materialLocked={currentSlot?.kind === 'material'}
               />
 
+              {studioShowsPromptField(currentSlot?.kind, formPrompt) ? (
               <label className="block text-sm">
                 <span className="font-medium text-slate-800">
                   Nội dung muốn tạo ảnh{' '}
-                  {studioNeedsDeepSeekPrompt(currentSlot?.kind) ? (
-                    <span className="text-red-600">*</span>
-                  ) : (
-                    <span className="font-normal text-slate-500">(tuỳ chọn)</span>
-                  )}
+                  <span className="font-normal text-slate-500">(tuỳ chọn)</span>
                 </span>
                 <textarea
                   className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm min-h-[72px] disabled:opacity-50"
                   value={formPrompt}
-                  disabled={studioBusy}
+                  disabled={
+                    studioBusy ||
+                    (currentSlot?.kind === 'color' && approvalColorIndex >= 1)
+                  }
                   onChange={(e) => setFormPrompt(e.target.value)}
                   placeholder={
-                    studioNeedsDeepSeekPrompt(currentSlot?.kind)
-                      ? currentSlot?.kind === 'material'
-                        ? 'Bắt buộc — sửa ý (vd cận cảnh bề mặt) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi góc/zoom.'
-                        : 'Bắt buộc — sửa ý (vd đeo vai) rồi Tạo lại. DeepSeek giữ nguyên SP, chỉ đổi tư thế/cách dùng.'
+                    currentSlot?.kind === 'material'
+                      ? 'Để trống → AI tự chọn góc cận cảnh. Hoặc sửa ý (zoom texture, góc nghiêng…) rồi Tạo lại.'
                       : currentSlot?.kind === 'color'
-                        ? 'Sửa mô tả rồi bấm Tạo lại — VD: cầm túi bằng tay phải, quai trong lòng bàn tay…'
+                        ? 'Để trống → AI giữ góc nhìn/tư thế như ảnh mẫu. Hoặc nhập thêm chi tiết rồi Tạo lại.'
                         : 'Sửa mô tả rồi bấm Tạo lại — VD: tay ngắn, cổ V, đứng nghiêng…'
                   }
-                  required={studioNeedsDeepSeekPrompt(currentSlot?.kind)}
                 />
               </label>
+              ) : null}
 
               <div className="flex flex-wrap gap-2 items-end">
                 <button
@@ -2715,10 +3131,7 @@ export default function AdminManualProductCreatePage() {
                 </button>
                 <button
                   type="button"
-                  disabled={
-                    studioBusy ||
-                    (studioNeedsDeepSeekPrompt(currentSlot?.kind) && !formPrompt.trim())
-                  }
+                  disabled={studioBusy}
                   onClick={regenerateImage}
                   className="px-4 py-2.5 rounded-lg border border-slate-300 text-slate-800 text-sm font-medium disabled:opacity-50"
                 >
@@ -2744,7 +3157,7 @@ export default function AdminManualProductCreatePage() {
                   {studioPublishCheck.galleryCount >= STUDIO_MIN_GALLERY_IMAGES ? ' ✓' : ''}
                 </li>
                 <li className={studioPublishCheck.materialOk ? 'text-emerald-700' : 'text-slate-700'}>
-                  Ảnh chất liệu: {studioPublishCheck.materialOk ? 1 : 0}/{STUDIO_MIN_MATERIAL_IMAGES}
+                  Ảnh chất liệu (tự lấy): {studioPublishCheck.materialOk ? 1 : 0}/{STUDIO_MIN_MATERIAL_IMAGES}
                   {studioPublishCheck.materialOk ? ' ✓' : ''}
                 </li>
                 <li className={studioPublishCheck.detailCount > 0 ? 'text-emerald-700' : 'text-slate-500'}>
@@ -2756,14 +3169,16 @@ export default function AdminManualProductCreatePage() {
                 <div className="text-xs font-medium text-slate-600 uppercase tracking-wide">
                   Đã tạo / chọn được làm ref
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openImageSelector()}
-                  disabled={studioBusy || studioSelectableImages.length === 0}
-                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Chọn lại ảnh
-                </button>
+                {imageSelectionConfirmed ? (
+                  <button
+                    type="button"
+                    onClick={() => openImageSelector()}
+                    disabled={studioBusy || studioSelectableImages.length === 0}
+                    className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Chọn lại ảnh
+                  </button>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {(studio?.ref_pool || []).map((item) => (
@@ -2775,50 +3190,65 @@ export default function AdminManualProductCreatePage() {
                   </div>
                 ))}
               </div>
-              {imageSelectorOpen ? (
+              {showPublishImageSelector ? (
                 <div
                   className="rounded-xl border border-sky-200 bg-sky-50/60 p-3 space-y-3"
                   role="dialog"
                   aria-modal="false"
-                  aria-label="Chọn lại ảnh trước khi đăng"
+                  aria-label="Chọn ảnh trước khi đăng"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <h3 className="text-sm font-semibold text-slate-900">Chọn lại ảnh để đăng</h3>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {imageSelectionConfirmed
+                          ? 'Chọn lại ảnh để đăng'
+                          : imageSelectionKind === 'gallery'
+                            ? 'Bước 1: Chọn ảnh gallery'
+                            : 'Bước 2: Chọn ảnh chi tiết'}
+                      </h3>
                       <p className="text-xs text-slate-600 mt-0.5">
-                        Bấm ảnh để chọn hoặc bỏ chọn. Số trên ảnh là thứ tự dùng khi đăng.
+                        Chọn gallery trước, chi tiết sau (tuỳ chọn). Chỉ hiện ảnh đã tạo trong Studio (ẩn
+                        ảnh mẫu khách upload). Ảnh chất liệu có thể chọn làm gallery/chi tiết; ảnh chất liệu
+                        Ladipage tự lấy theo Studio.
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setImageSelectorOpen(false)}
-                      className="text-sm text-slate-600 hover:text-slate-900"
-                      aria-label="Đóng chọn lại ảnh"
-                    >
-                      ×
-                    </button>
+                    {imageSelectionConfirmed ? (
+                      <button
+                        type="button"
+                        onClick={() => setImageSelectorOpen(false)}
+                        className="text-sm text-slate-600 hover:text-slate-900"
+                        aria-label="Đóng chọn lại ảnh"
+                      >
+                        ×
+                      </button>
+                    ) : null}
                   </div>
-                  <div className="flex flex-wrap gap-2" role="group" aria-label="Loại ảnh cần thay">
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Loại ảnh cần chọn">
                     {(
                       [
                         ['gallery', 'Gallery'],
-                        ['material', 'Ảnh chất liệu'],
                         ['detail', 'Ảnh chi tiết'],
-                      ] as Array<[StudioSelectionKind, string]>
-                    ).map(([kind, label]) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        onClick={() => changeImageSelectionKind(kind)}
-                        className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                          imageSelectionKind === kind
-                            ? 'bg-slate-900 text-white'
-                            : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
+                      ] as Array<[PublishSelectionKind, string]>
+                    ).map(([kind, label]) => {
+                      const locked = isPublishKindLocked(kind, unconfirmedSelectionKind);
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          disabled={locked}
+                          onClick={() => changeImageSelectionKind(kind)}
+                          className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                            imageSelectionKind === kind
+                              ? 'bg-slate-900 text-white'
+                              : locked
+                                ? 'border border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                     {studioSelectableImages.map((item) => {
@@ -2851,23 +3281,35 @@ export default function AdminManualProductCreatePage() {
                       );
                     })}
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="space-y-2">
                     <p className="text-xs text-slate-600">
-                      Đã chọn: {imageSelectionUrls.length}
-                      {imageSelectionKind === 'material' ? ' (dùng 1 ảnh)' : ''}
+                      {imageSelectionKind === 'gallery' ? (
+                        <>
+                          Gallery đã chọn: {imageSelectionUrls.length} (tối thiểu{' '}
+                          {STUDIO_MIN_GALLERY_IMAGES})
+                        </>
+                      ) : (
+                        <>
+                          Chi tiết đã chọn: {imageSelectionUrls.length} — không chọn gì cũng được (bỏ qua)
+                        </>
+                      )}
                     </p>
                     <button
                       type="button"
-                      onClick={saveImageSelection}
-                      disabled={studioBusy || imageSelectionUrls.length === 0}
-                      className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
+                      onClick={confirmPublishImageSelection}
+                      disabled={
+                        studioBusy ||
+                        (imageSelectionKind === 'gallery' &&
+                          imageSelectionUrls.length < STUDIO_MIN_GALLERY_IMAGES)
+                      }
+                      className="w-full rounded-lg bg-sky-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-sky-800 disabled:opacity-50"
                     >
-                      {studioBusy ? 'Đang lưu…' : 'Dùng ảnh đã chọn'}
+                      {publishConfirmLabel}
                     </button>
                   </div>
                 </div>
               ) : null}
-              {canPublish ? (
+              {canPublish && imageSelectionConfirmed ? (
                 <button
                   type="button"
                   disabled={submitting || studioBusy || job.status === 'publishing'}
@@ -2878,14 +3320,15 @@ export default function AdminManualProductCreatePage() {
                     ? 'Đang đăng (DeepSeek + taxonomy)…'
                     : 'Đăng sản phẩm'}
                 </button>
-              ) : (
+              ) : !canPublish ? (
                 <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
                   Chưa đủ ảnh để đăng — hoàn thành checklist phía trên (màu, gallery, chất liệu).
                 </p>
-              )}
+              ) : null}
               <p className="text-xs text-slate-500">
                 Bắt buộc: {STUDIO_MIN_COLOR_IMAGES} ảnh màu, {STUDIO_MIN_GALLERY_IMAGES} gallery,{' '}
-                {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu. Ảnh chi tiết sản phẩm là tuỳ chọn.
+                {STUDIO_MIN_MATERIAL_IMAGES} ảnh chất liệu (tự lấy). Ảnh chi tiết tuỳ chọn — chọn gallery rồi
+                chi tiết.
               </p>
             </div>
           ) : null}

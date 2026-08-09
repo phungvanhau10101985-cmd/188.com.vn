@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Any, Dict, Optional
 import logging
 from app.db.session import SessionLocal, get_db
-from app.db.retry import TransientDbError
+from app.db.retry import TransientDbError, is_transient_db_error
 from app.schemas.category import Category, CategoryCreate, CategoryUpdate
 from app.crud import category as crud_category
 from app.crud import product as crud_product
@@ -240,11 +240,29 @@ def read_category_seo_data(
     - seo_description / seo_body nếu đã có trong DB — **không** gọi Gemini tự động.
 
     Để có đoạn văn SEO (Gemini): dùng admin «Quản lý danh mục SEO» → chạy tạo SEO body, hoặc script/job chủ động.
+
+    Lưu ý: đây là route hay bị "Không thể tải danh mục" ở trang /danh-muc khi DB pool bận
+    (COUNT sản phẩm chạy qua `get_category_by_path`) — trả 503 + Retry-After cho lỗi hạ tầng tạm
+    thời (giống `/from-products/by-path`) thay vì để lỗi 500 trần rơi thẳng ra frontend, vì frontend
+    chỉ tự retry khi nhận diện được đây là lỗi tạm.
     """
-    data = crud_product.get_category_seo_data(
-        db, level1_slug=level1, level2_slug=level2, level3_slug=level3,
-        is_active=is_active, image_limit=4
-    )
+    try:
+        data = crud_product.get_category_seo_data(
+            db, level1_slug=level1, level2_slug=level2, level3_slug=level3,
+            is_active=is_active, image_limit=4
+        )
+    except Exception as exc:
+        if is_transient_db_error(exc):
+            raise HTTPException(
+                status_code=503,
+                detail="Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây",
+                headers={"Retry-After": "5"},
+            ) from exc
+        _log.exception(
+            "GET /categories/from-products/seo-data failed (level1=%s level2=%s level3=%s)",
+            level1, level2, level3,
+        )
+        raise
     if data is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
 

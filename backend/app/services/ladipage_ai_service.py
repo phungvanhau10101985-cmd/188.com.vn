@@ -17,6 +17,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import requests
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -35,6 +36,19 @@ logger = logging.getLogger(__name__)
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_PRODUCTS_LIMIT = 12
+
+
+def normalize_material_filter(raw: Optional[str]) -> Optional[str]:
+    """Chuẩn hoá giá trị lọc chất liệu admin chọn (trim; rỗng → None)."""
+    if raw is None:
+        return None
+    t = str(raw).strip()
+    return t[:100] if t else None
+
+
+def material_filter_match_key(raw: Optional[str]) -> Optional[str]:
+    norm = normalize_material_filter(raw)
+    return norm.lower() if norm else None
 
 FIXED_SECTION_ORDER: List[str] = [
     "hero",
@@ -71,13 +85,17 @@ def resolve_products_for_ladipage(
 
     if ladipage.source_type == "category" and ladipage.category_id:
         eff_limit = limit or ladipage.products_limit or DEFAULT_PRODUCTS_LIMIT
-        return (
-            db.query(Product)
-            .filter(Product.category_id == ladipage.category_id, Product.is_active.is_(True))
-            .order_by(Product.purchases.desc(), Product.id.desc())
-            .limit(eff_limit)
-            .all()
+        q = db.query(Product).filter(
+            Product.category_id == ladipage.category_id,
+            Product.is_active.is_(True),
         )
+        material_key = material_filter_match_key(getattr(ladipage, "material_filter", None))
+        if material_key:
+            q = q.filter(
+                Product.material.isnot(None),
+                func.lower(func.trim(Product.material)) == material_key,
+            )
+        return q.order_by(Product.purchases.desc(), Product.id.desc()).limit(eff_limit).all()
     return []
 
 
@@ -417,7 +435,11 @@ def build_context(db: Session, ladipage: Ladipage) -> Dict[str, Any]:
     context_products = aligned_products if is_category_landing else products
 
     materials = [(p.material or "").strip() for p in context_products if (p.material or "").strip()]
-    dominant_material = max(set(materials), key=materials.count) if materials else None
+    material_filter = normalize_material_filter(getattr(ladipage, "material_filter", None))
+    if material_filter:
+        dominant_material = material_filter
+    else:
+        dominant_material = max(set(materials), key=materials.count) if materials else None
     brief = (ladipage.admin_brief or "").strip()
 
     prices = [p.price for p in products if p.price]
@@ -443,6 +465,29 @@ def build_context(db: Session, ladipage: Ladipage) -> Dict[str, Any]:
 
     code_tokens = _collect_code_tokens_from_products(context_products)
 
+    # Import cục bộ tránh vòng import với ladipage_seo_strategy.
+    from app.services.ladipage_seo_strategy import (
+        get_category_seo_competitor,
+        get_dominant_category_for_products,
+    )
+
+    category_competitor: Dict[str, Any] = {}
+    if is_category_landing and ladipage.category_id:
+        category_competitor = get_category_seo_competitor(db, ladipage.category_id)
+    elif ladipage.source_type == "products" and len(products) > 1:
+        # Ladipage nhiều SP: nếu đa số SP cùng 1 danh mục, canh SEO/link chéo như ladipage danh mục.
+        dominant_category_id = get_dominant_category_for_products(db, [p.id for p in products])
+        if dominant_category_id:
+            category_competitor = get_category_seo_competitor(db, dominant_category_id)
+
+    category_head_title = category_competitor.get("head_title")
+    category_seo_description = category_competitor.get("seo_description")
+    category_full_slug = category_competitor.get("full_slug")
+    category_seo_path = category_competitor.get("seo_path")
+    category_catalog_path = category_competitor.get("catalog_path")
+    if not category_name:
+        category_name = category_competitor.get("category_name")
+
     return {
         "title": _sanitize_copy_for_ladipage((ladipage.title or "").strip(), code_tokens=code_tokens),
         "category_name": category_name,
@@ -450,6 +495,13 @@ def build_context(db: Session, ladipage: Ladipage) -> Dict[str, Any]:
         "product_count": len(products),
         "sample_products": [_product_brief(p) for p in context_products[:8]],
         "dominant_material": dominant_material,
+        "material_filter": material_filter,
+        "category_head_title": category_head_title,
+        "category_seo_description": category_seo_description,
+        "category_full_slug": category_full_slug,
+        "category_seo_path": category_seo_path,
+        "category_catalog_path": category_catalog_path,
+        "category_competitor": category_competitor,
         "price_min": min(prices) if prices else None,
         "price_max": max(prices) if prices else None,
         "is_single_product": is_single_product,
@@ -568,6 +620,30 @@ def _context_block(context: Dict[str, Any]) -> str:
             "Danh mục có thể có thêm vài sản phẩm phụ lệch chủ đề ở lưới cuối trang — KHÔNG được viết "
             "marketing về các sản phẩm lệch chủ đề đó (vd danh mục giày thì không viết/vẽ túi xách)."
         )
+        lines.append(
+            "PHÂN VAI SEO/AI: Trang danh mục/cluster là trang SEO chính (head keyword). "
+            "Ladipage này là landing bộ sưu tập / long-tail — KHÔNG copy nguyên tiêu đề hay mô tả trang danh mục. "
+            "Phải có góc riêng (chất liệu đã lọc, bộ sưu tập, dịp dùng)."
+        )
+    elif context.get("category_head_title"):
+        lines.append(
+            f"Đa số sản phẩm trong ladipage này thuộc danh mục «{context.get('category_name') or context['category_head_title']}» "
+            "(trang danh mục/cluster đó là trang SEO chính — head keyword). Ladipage này là landing bộ sưu tập chọn lọc — "
+            "KHÔNG copy nguyên tiêu đề hay mô tả trang danh mục đó, phải có góc riêng (bộ sưu tập, USP nổi bật của nhóm SP này)."
+        )
+    if context.get("material_filter"):
+        lines.append(
+            f"Lọc chất liệu bắt buộc trên lưới SP: «{context['material_filter']}» — "
+            "mọi copy (hero/highlights/chất liệu/FAQ/SEO) phải nêu rõ góc chất liệu này."
+        )
+    if context.get("category_head_title"):
+        lines.append(
+            f"Tiêu đề trang SEO chính (TRÁNH trùng): {context['category_head_title']}"
+        )
+    if context.get("category_seo_description"):
+        lines.append(
+            f"Mô tả SEO danh mục (TRÁNH viết lại gần giống): {context['category_seo_description'][:220]}"
+        )
     if context.get("sample_products"):
         label = "Sản phẩm tiêu biểu đúng chủ đề danh mục" if context.get("is_category_landing") else "Sản phẩm tiêu biểu"
         names = ", ".join(p["name"] for p in context["sample_products"][:6] if p.get("name"))
@@ -637,17 +713,38 @@ Chỉ trả JSON, không thêm chữ nào khác."""
 
 
 def generate_material_text(
-    context: Dict[str, Any], material: str, *, custom_instruction: Optional[str] = None
+    context: Dict[str, Any],
+    material: str,
+    *,
+    custom_instruction: Optional[str] = None,
+    strict_material_callouts: bool = False,
 ) -> Optional[Dict[str, Any]]:
     extra = f"\nYêu cầu thêm từ admin: {custom_instruction}" if custom_instruction else ""
+    strict_block = ""
+    if strict_material_callouts:
+        strict_block = f"""
+
+QUAN TRỌNG — callouts (3 nhãn in trên ảnh):
+- Mỗi callout PHẢI nói đặc tính riêng CHỈ chất liệu «{material}» mới có — khách đọc phải hiểu ngay đang nói về {material},
+  không thể dùng chung cho chất liệu khác.
+- Mỗi callout PHẢI toát lên sự CAO CẤP/KHAN HIẾM gắn với chính đặc tính đó (không phải cao cấp chung chung) —
+  khiến khách cảm nhận "đúng chất liệu xịn, đáng tiền, chốt đơn ngay", không phải câu marketing sáo rỗng.
+- CẤM câu chung chung dùng được cho mọi loại vải/da: «Sang trọng đẳng cấp», «Mềm mại tự nhiên», «Thoáng khí mát lạnh»,
+  «Chất lượng cao», «Đáng đồng tiền», «Cao cấp», «Tiện dụng».
+- Ví dụ lụa: «Óng ánh chuẩn lụa thật», «Mát lạnh hiếm có tự nhiên», «Càng dùng càng lên màu đẹp».
+- Ví dụ da bò: «Vân da độc bản tự nhiên», «Càng dùng càng lên màu», «Bền đẹp theo thời gian dùng».
+- Ví dụ cotton 100%: «Thấm hút vượt trội tự nhiên», «Mềm mại chuẩn cotton nguyên chất», «Thoáng khí suốt ngày dài».
+- body cũng phải giải thích vì sao {material} đáng mua NGAY — nêu đặc tính độc quyền của {material}, không viết
+  chung chung cho mọi loại vải."""
     prompt = f"""{_BRAND_VOICE}
 
 {_context_block(context)}
-Chất liệu cần giải thích: {material}{extra}
+Chất liệu cần giải thích: {material}{extra}{strict_block}
 
-Nhiệm vụ: Viết đoạn giải thích ngắn (60-90 từ) về chất liệu "{material}" — vì sao đây là điểm đáng mua
-(độ bền, cảm giác mặc/dùng, cách bảo quản nếu phù hợp). Đồng thời liệt kê 3 chú thích ngắn (mỗi cái 3-6 từ,
-kiểu nhãn callout) sẽ in trực tiếp trên ảnh minh họa chất liệu.
+Nhiệm vụ: Viết đoạn giải thích ngắn (60-90 từ) về chất liệu "{material}" — vì sao đây là điểm đáng mua và đáng
+chốt đơn ngay (độ bền, cảm giác mặc/dùng, đặc tính riêng — cao cấp — của {material}, cách bảo quản nếu phù hợp).
+Đồng thời liệt kê 3 chú thích ngắn (mỗi cái 3-6 từ, kiểu nhãn callout) sẽ in trực tiếp trên ảnh minh họa — mỗi
+nhãn phải gắn với ưu điểm thật + cảm giác cao cấp riêng của {material}.
 Trả về đúng JSON: {{"body": "đoạn giải thích", "callouts": ["...", "...", "..."]}}
 Chỉ trả JSON, không thêm chữ nào khác."""
     data = _extract_json(_call_deepseek_text(prompt, max_tokens=500) or "")
@@ -709,14 +806,28 @@ def generate_ladipage_seo(
         hero_bits.append(f"Mô tả phụ hero: {hero_subheadline}")
     hero_block = ("\n" + "\n".join(hero_bits)) if hero_bits else ""
 
+    material_rule = ""
+    if context.get("material_filter"):
+        material_rule = (
+            f"\n- BẮT BUỘC có cụm chất liệu «{context['material_filter']}» trong meta_title "
+            "(góc long-tail / bộ sưu tập theo chất liệu)"
+        )
+    category_rule = ""
+    if context.get("category_head_title"):
+        category_rule = (
+            "\n- KHÔNG viết meta giống trang danh mục/cluster (head keyword). "
+            "Ladipage = bộ sưu tập / USP; danh mục mới là trang SEO chính."
+        )
+
     prompt = f"""Bạn là chuyên gia SEO thương mại điện tử cho 188.com.vn. Viết meta title và meta description tiếng Việt.
 
 {_context_block(context)}{hero_block}
 
-Nhiệm vụ: Viết SEO cho landing page `/lp/...` — thu hút click trên Google, bám đúng chủ đề trang (danh mục/sản phẩm), không bịa thông tin.
+Nhiệm vụ: Viết SEO cho landing page `/lp/...` — thu hút click, bám USP trang (không thay trang danh mục), không bịa thông tin.
 - KHÔNG nhắc mã sản phẩm, mã kho, SKU hay mã nội bộ trong meta title/description
-- meta_title: tối đa 60 ký tự, có từ khóa chính, có thể kết thúc bằng "| 188.com.vn" nếu còn chỗ
-- meta_description: 120–160 ký tự, nêu lợi ích + kêu gọi mua, tự nhiên
+- meta_title: tối đa 60 ký tự, có từ khóa + USP (chất liệu/góc bộ sưu tập), có thể kết thúc bằng "| 188.com.vn" nếu còn chỗ
+- meta_description: 120–160 ký tự, nêu lợi ích góc riêng + kêu gọi mua, tự nhiên
+{material_rule}{category_rule}
 
 Trả về đúng JSON: {{"meta_title": "...", "meta_description": "..."}}
 Chỉ trả JSON, không thêm chữ nào khác."""
@@ -746,12 +857,15 @@ def generate_and_save_ladipage_seo(
     hero_subheadline: Optional[str] = None,
     only_missing: bool = False,
 ) -> Dict[str, str]:
+    from app.services.ladipage_seo_strategy import apply_ladipage_seo_guardrails
+
     has_title = bool((ladipage.meta_title or "").strip())
     has_desc = bool((ladipage.meta_description or "").strip())
     if only_missing and has_title and has_desc:
         return {
             "meta_title": ladipage.meta_title or "",
             "meta_description": ladipage.meta_description or "",
+            "seo_collision_warning": None,
         }
 
     context = build_context(db, ladipage)
@@ -762,6 +876,17 @@ def generate_and_save_ladipage_seo(
     )
     if not seo:
         raise RuntimeError("DeepSeek không trả nội dung SEO hợp lệ.")
+
+    warning = None
+    competitor = context.get("category_competitor") or {}
+    if competitor.get("category_id"):
+        seo, warning = apply_ladipage_seo_guardrails(
+            seo,
+            competitor=competitor,
+            material_filter=context.get("material_filter"),
+            category_name=context.get("category_name"),
+        )
+
     if only_missing:
         if not has_title:
             ladipage.meta_title = seo["meta_title"]
@@ -775,6 +900,7 @@ def generate_and_save_ladipage_seo(
     return {
         "meta_title": ladipage.meta_title or "",
         "meta_description": ladipage.meta_description or "",
+        "seo_collision_warning": warning,
     }
 
 
@@ -1010,7 +1136,12 @@ def generate_or_regenerate_section(
         return text
 
     if st == "material":
-        material = current.get("material") or context.get("dominant_material") or "chất liệu cao cấp"
+        material = (
+            normalize_material_filter(getattr(ladipage, "material_filter", None))
+            or normalize_material_filter(str(current.get("material") or ""))
+            or context.get("dominant_material")
+            or "chất liệu cao cấp"
+        )
         single_product_lp = _is_single_product_ladipage(ladipage)
         if single_product_lp:
             image_source = str(current.get("image_source") or "product").strip().lower()

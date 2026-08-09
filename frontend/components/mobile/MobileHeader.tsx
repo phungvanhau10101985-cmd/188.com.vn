@@ -547,7 +547,7 @@ export default function MobileHeader({
           {/* Trang chi tiết SP: danh mục SP liên quan trong vùng cam — không để khoảng trống; các trang khác: gợi ý từ khóa */}
           {isProductDetailPage ? (
             <div
-              className={`flex mt-1 -mx-0.5 px-0.5 overflow-x-auto scrollbar-hide snap-x snap-mandatory ${isScrolled ? 'gap-1 pb-0.5 pt-0' : 'gap-1.5 pb-1'}`}
+              className="flex mt-1 -mx-0.5 px-0.5 overflow-x-auto scrollbar-hide snap-x snap-mandatory gap-1.5 pb-1"
               role="tablist"
               aria-label="Nhóm sản phẩm liên quan"
             >
@@ -558,9 +558,7 @@ export default function MobileHeader({
                   role="tab"
                   aria-selected={activeRelatedTab === tab.id}
                   onClick={() => setRelatedTab(tab.id)}
-                  className={`flex-shrink-0 rounded-full font-medium whitespace-nowrap transition-colors snap-start ${
-                    isScrolled ? 'px-2 py-0.5 text-[10px] leading-tight' : 'px-2.5 py-1 text-[11px]'
-                  } ${
+                  className={`flex-shrink-0 rounded-full font-medium whitespace-nowrap transition-colors snap-start px-2.5 py-1 text-[11px] ${
                     activeRelatedTab === tab.id
                       ? 'bg-white text-[#ea580c] shadow-sm'
                       : 'bg-white/15 text-white border border-white/25 hover:bg-white/25'

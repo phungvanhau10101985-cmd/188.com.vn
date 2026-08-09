@@ -12,12 +12,14 @@
     .\dev-clear-start.ps1 -KillAllNode    # chi node/esbuild trong frontend repo nay
     .\dev-clear-start.ps1 -NoNgrok        # bo qua ngrok
     .\dev-clear-start.ps1 -OnlyClean      # chi xoa cache, khong khoi dong
+    .\dev-clear-start.ps1 -StopOnly       # chi dong local (nhanh, khong xoa cache)
 #>
 
 param(
     [switch]$KillAllNode,
     [switch]$NoNgrok,
-    [switch]$OnlyClean
+    [switch]$OnlyClean,
+    [switch]$StopOnly
 )
 
 $ErrorActionPreference = "Continue"
@@ -299,7 +301,15 @@ if ($KillAllNode) {
     Stop-NodeProcessesForDirectory -Dir $FrontendDir
     Stop-EsbuildForDirectory -Dir $FrontendDir
 }
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 1
+
+if ($StopOnly) {
+    Write-Host ""
+    Write-Host "Xong (-StopOnly). Da dong backend/frontend local 188-com-vn." -ForegroundColor Green
+    exit 0
+}
+
+Start-Sleep -Seconds 2
 
 Write-Step "Xoa cache frontend (Next.js)..."
 if (Test-Path $FrontendDir) {

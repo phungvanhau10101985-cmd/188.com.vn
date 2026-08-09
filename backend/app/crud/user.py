@@ -5,6 +5,7 @@ backend/app/crud/user.py - FIXED VERSION
 AttributeError: module 'app.crud.user' has no attribute 'get_user'
 """
 
+import logging
 import random
 from collections import defaultdict
 from sqlalchemy.orm import Session
@@ -22,6 +23,8 @@ from app.schemas.user import (
     UserCreate, UserUpdate, UserAdminUpdate, ProductViewCreate, FavoriteCreate,
     CategoryViewCreate, BrandViewCreate, SearchHistoryCreate, ShopInteractionCreate
 )
+
+logger = logging.getLogger(__name__)
 
 print("✅ Loading user CRUD module...")
 
@@ -543,7 +546,7 @@ def get_products_viewed_by_same_age_gender(
     return sample_cohort_products_from_pool(db, user_id, limit=limit)
 
 
-SAME_SHOP_MAX_POOL = 800
+SAME_SHOP_MAX_POOL = 1500
 SAME_SHOP_MAX_PER_SHOP_PER_PAGE = 8
 SAME_SHOP_RECENT_WINDOW = 8
 SAME_SHOP_HISTORY_WINDOW = 40
@@ -578,6 +581,20 @@ def _fetch_same_shop_view_history(
 
         return guest_behavior_crud.recent_guest_view_product_ids(db, sid, limit=history_limit)
     return []
+
+
+def get_recent_view_product_ids(
+    db: Session,
+    *,
+    user_id: Optional[int] = None,
+    guest_session_id: Optional[str] = None,
+    limit: int = SAME_SHOP_HISTORY_WINDOW,
+) -> List[int]:
+    """Wrapper public — ID sản phẩm user/guest xem gần nhất (mới → cũ), dùng để loại
+    trùng khi tính fallback/gợi ý khác (ví dụ `get_popular_fallback_products`)."""
+    return _fetch_same_shop_view_history(
+        db, user_id=user_id, guest_session_id=guest_session_id, history_limit=limit
+    )
 
 
 def _detect_leading_shop_streak(
@@ -623,10 +640,15 @@ def _build_same_shop_weighted_cycle(
     history_shop_order: List[str],
     product_by_id: Dict[int, Product],
     shops_lower: set[str],
+    history_product_ids: Optional[List[int]] = None,
 ) -> Tuple[List[str], Dict[str, int]]:
     """
     Trọng số round-robin theo shop.
     Nếu 8 SP gần nhất cùng một shop: shop đó chiếm ưu thế nhưng vẫn xen shop khác từ lịch sử xem.
+    Trường hợp thường: trọng số tính theo tần suất trong TOÀN BỘ lịch sử xem (tối đa 40 lượt,
+    `history_product_ids`) — không chỉ 8 lượt gần nhất — để các shop xem trước đó (lượt 9-40)
+    vẫn thực sự có mặt trong vòng quay round-robin (trước đây bị lấy vào candidate query nhưng
+    không bao giờ được chọn vì vòng quay chỉ dựng từ 8 lượt gần nhất).
     """
     max_per_shop_overrides: Dict[str, int] = {}
     streak_shop, streak_len = _detect_leading_shop_streak(recent_product_ids, product_by_id)
@@ -643,9 +665,10 @@ def _build_same_shop_weighted_cycle(
             max_per_shop_overrides[streak_shop] = SAME_SHOP_DOMINANT_MAX_PER_PAGE
             return weighted_cycle, max_per_shop_overrides
 
+    freq_source_ids = history_product_ids if history_product_ids is not None else recent_product_ids
     shop_seen_order: List[str] = []
     shop_freq: Dict[str, int] = {}
-    for pid in recent_product_ids:
+    for pid in freq_source_ids:
         product = product_by_id.get(pid)
         shop_cn = _same_shop_key(product) if product else ""
         if not shop_cn or shop_cn not in shops_lower:
@@ -777,7 +800,8 @@ def get_products_same_shop_as_recent_views(
     8 SP gần nhất: dùng subcategory (AC) + phát hiện xem liên tiếp cùng shop.
     Nếu 8 SP liên tiếp cùng shop: ưu tiên shop đó (~5/8 vòng round-robin, tối đa 14 SP/trang)
     nhưng vẫn xen shop khác đã xem trước đó (tối đa 8 SP/shop/trang).
-    Trường hợp thường: round-robin theo tần suất 8 SP gần nhất, tối đa 8 SP/shop/trang.
+    Trường hợp thường: round-robin theo tần suất trong toàn bộ lịch sử xem (tối đa 40 lượt),
+    tối đa 8 SP/shop/trang — shop chỉ xem ở lượt 9-40 vẫn được xen vào, không chỉ 8 lượt gần nhất.
     """
     history_product_ids = _fetch_same_shop_view_history(
         db, user_id=user_id, guest_session_id=guest_session_id
@@ -814,6 +838,7 @@ def get_products_same_shop_as_recent_views(
         history_shop_order,
         product_by_id,
         shops_lower,
+        history_product_ids=history_product_ids,
     )
     if not weighted_cycle:
         return [], 0, None
@@ -838,6 +863,16 @@ def get_products_same_shop_as_recent_views(
         .limit(SAME_SHOP_MAX_POOL)
         .all()
     )
+    if len(candidates) == SAME_SHOP_MAX_POOL:
+        # Có shop trong `shops_lower` với số SP active vượt SAME_SHOP_MAX_POOL — candidate bị
+        # cắt cứng theo `id ASC`, SP có id cao hơn của (các) shop đó sẽ không bao giờ được đề
+        # xuất. Log để phát hiện sớm, không chặn request.
+        logger.warning(
+            "same_shop: candidate pool hit SAME_SHOP_MAX_POOL=%s for shops=%s — some products "
+            "from oversized shops may never be recommended; consider raising the cap.",
+            SAME_SHOP_MAX_POOL,
+            sorted(shops_lower),
+        )
     if not candidates:
         return [], 0, None
     if require_video:

@@ -237,7 +237,7 @@ export type CategorySeoDataResult =
  * component) đều gọi hàm này với cùng tham số trong 1 request; memo hoá theo request tránh gọi API
  * lặp lại 3-4 lần nối tiếp (mỗi lần kèm 1 query COUNT sản phẩm) cho một lần mở trang danh mục.
  */
-const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResult(
+async function fetchCategorySeoDataOnce(
   level1: string,
   level2?: string | null,
   level3?: string | null
@@ -259,6 +259,21 @@ const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResu
   } catch {
     return { status: "error" };
   }
+}
+
+const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResult(
+  level1: string,
+  level2?: string | null,
+  level3?: string | null
+): Promise<CategorySeoDataResult> {
+  let result = await fetchCategorySeoDataOnce(level1, level2, level3);
+  // Backend đôi khi trả lỗi tạm (pool DB bận / timeout ngắn khi COUNT sản phẩm) — thử lại một lần
+  // trước khi báo lỗi hẳn cho khách. Không retry khi "not_found" (danh mục thật sự không có).
+  if (result.status === "error") {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    result = await fetchCategorySeoDataOnce(level1, level2, level3);
+  }
+  return result;
 });
 
 /**
@@ -397,7 +412,16 @@ export async function getProductsByCategory(
   const sortTrim = f.sort?.trim();
   const useRandomListing = categoryListingUsesRandomSort(f);
 
-  try {
+  const attempt = async (): Promise<{
+    products: unknown[];
+    total: number;
+    total_pages: number;
+    page: number;
+    category?: string;
+    subcategory?: string;
+    sub_subcategory?: string;
+    fetchFailed?: boolean;
+  }> => {
     const params = new URLSearchParams({
       limit: String(limit),
       skip: String(skip),
@@ -474,9 +498,24 @@ export async function getProductsByCategory(
       subcategory,
       sub_subcategory,
     };
-  } catch {
-    return {
-      products: [],
+  };
+
+  let result = await attempt().catch(() => ({
+    products: [] as unknown[],
+    total: 0,
+    total_pages: 0,
+    page: 1,
+    category,
+    subcategory,
+    sub_subcategory,
+    fetchFailed: true,
+  }));
+  // Danh mục lớn (vd. ~9k SP) đôi khi query chậm/timeout do DB pool bận tạm thời — thử lại một lần
+  // trước khi báo lỗi hẳn, tránh khách bị "Không thể tải danh mục" chỉ vì một nhịp nghẽn ngắn.
+  if (result.fetchFailed) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    result = await attempt().catch(() => ({
+      products: [] as unknown[],
       total: 0,
       total_pages: 0,
       page: 1,
@@ -484,8 +523,9 @@ export async function getProductsByCategory(
       subcategory,
       sub_subcategory,
       fetchFailed: true,
-    };
+    }));
   }
+  return result;
 }
 
 /** URL path danh mục (không có leading slash). */

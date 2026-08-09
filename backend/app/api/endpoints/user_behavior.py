@@ -13,7 +13,7 @@ from app.schemas.user import (
     FavoriteResponse, CategoryViewCreate, CategoryViewResponse,
     BrandViewCreate, BrandViewResponse, SearchHistoryCreate,
     SearchHistoryResponse, ShopInteractionCreate, ShopInteractionResponse,
-    UserBehaviorStats
+    UserBehaviorStats, GuestProfileHintCreate
 )
 from app.crud import guest_behavior as guest_behavior_crud
 from app.crud.personalized_feed import get_personalized_home_products
@@ -134,6 +134,26 @@ def track_product_view(
     if current_user:
         return {"message": "Đã lưu lịch sử xem sản phẩm"}
     return {"message": "Đã lưu lịch sử xem sản phẩm (phiên khách)"}
+
+
+@router.post("/guest-profile-hint", response_model=dict)
+def set_guest_profile_hint(
+    hint: GuestProfileHintCreate,
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Khách chưa đăng nhập tự khai giới tính (+ năm sinh tùy chọn) — không cần tài khoản —
+    để nhận gợi ý theo cohort giống user đã đăng nhập ở khối «CÓ THỂ BẠN THÍCH».
+    """
+    sid = (x_guest_session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="Cần gửi header X-Guest-Session-Id")
+    guest_behavior_crud.upsert_guest_profile_hint(
+        db, sid, gender=hint.gender, birth_year=hint.birth_year
+    )
+    return {"message": "Đã lưu lựa chọn", "gender": hint.gender, "birth_year": hint.birth_year}
+
 
 def _enrich_behavior_rows(db: Session, rows: list) -> dict[int, Any]:
     """Enrich product_data theo lô — một query Product + batch warehouse."""
@@ -329,6 +349,7 @@ def get_home_recommendation_block_endpoint(
     uid = current_user.id if current_user else None
     try:
         block = build_home_recommendation_block_rows(
+            db,
             user_id=uid,
             guest_session_id=sid,
             shop_limit=shop_limit,

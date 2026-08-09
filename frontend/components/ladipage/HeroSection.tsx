@@ -20,6 +20,11 @@ interface HeroSectionProps {
   ctaSlot?: React.ReactNode;
   /** Gallery vuốt ngang (public PDP / 1 SP). */
   carouselImages?: string[];
+  /**
+   * Heading cấp cho headline. Mặc định h1 (trang /lp multi).
+   * Trên PDP 1 SP dùng h2 để tránh trùng h1 với tên sản phẩm.
+   */
+  headlineAs?: 'h1' | 'h2' | 'p';
 }
 
 export default function HeroSection({
@@ -33,6 +38,7 @@ export default function HeroSection({
   onRegenerateImage,
   ctaSlot,
   carouselImages,
+  headlineAs = 'h1',
 }: HeroSectionProps) {
   const useProductHeroPicker = editable && !!onSaveField;
 
@@ -98,7 +104,7 @@ export default function HeroSection({
             Gợi ý dành cho bạn
           </p>
           <EditableText
-            as="h1"
+            as={headlineAs}
             value={data.headline || ''}
             placeholder="Tiêu đề chính chưa có nội dung"
             className="max-w-xl text-3xl font-extrabold leading-[1.12] tracking-tight text-gray-950 md:text-5xl"

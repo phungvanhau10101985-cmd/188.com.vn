@@ -3028,6 +3028,8 @@ export type ManualProductStudio = {
   material_image?: string;
   material_callouts?: string[];
   material_body?: string;
+  color_user_prompt?: string;
+  last_ref_urls?: Partial<Record<'gallery' | 'detail' | 'material', string[]>>;
   current_slot?: ManualProductStudioSlot | null;
   can_publish?: boolean;
 };
@@ -3124,6 +3126,12 @@ export const manualProductCreateAPI = {
       { timeoutMs: 30_000 },
     );
   },
+
+  deleteJob: (jobId: string) =>
+    fetchAdmin<void>(`/manual-products/jobs/${encodeURIComponent(jobId)}/discard`, {
+      method: 'POST',
+      timeoutMs: 30_000,
+    }),
 
   setColors: (jobId: string, colors: Array<string | { name: string }>) =>
     fetchAdmin<ManualProductJob>(
@@ -5023,6 +5031,8 @@ export interface Ladipage {
   include_material: boolean;
   include_faq: boolean;
   products_limit: number;
+  /** Lọc SP theo chất liệu — chỉ ladipage danh mục */
+  material_filter?: string | null;
   meta_title?: string | null;
   meta_description?: string | null;
   created_at?: string | null;
@@ -5034,6 +5044,9 @@ export interface Ladipage {
 export interface LadipageDetail extends Ladipage {
   sections: LadipageSection[];
   resolved_product_ids: number[];
+  category_catalog_path?: string | null;
+  category_seo_path?: string | null;
+  seo_collision_warning?: string | null;
 }
 
 export interface LadipageListResponse {
@@ -5065,6 +5078,8 @@ export interface LadipageCreatePayload {
   include_material?: boolean;
   include_faq?: boolean;
   products_limit?: number;
+  /** Ladipage danh mục — lọc SP theo chất liệu */
+  material_filter?: string | null;
   /** Ladipage 1 SP — cách lấy ảnh chất liệu */
   material_image_source?: MaterialImageSource;
 }
@@ -5078,6 +5093,17 @@ export interface LadipageUpdatePayload {
   meta_description?: string;
   products_limit?: number;
   product_ids?: number[];
+  material_filter?: string | null;
+}
+
+export interface LadipageCategoryMaterialItem {
+  material: string;
+  count: number;
+}
+
+export interface LadipageCategoryMaterialsResponse {
+  category_id: number;
+  items: LadipageCategoryMaterialItem[];
 }
 
 export const ladipageAdminAPI = {
@@ -5092,6 +5118,11 @@ export const ladipageAdminAPI = {
 
   stats: (kind: LadipageListKind) =>
     fetchAdmin<LadipageAdminStats>(`/admin/ladipages/stats?kind=${encodeURIComponent(kind)}`),
+
+  listCategoryMaterials: (categoryId: number) =>
+    fetchAdmin<LadipageCategoryMaterialsResponse>(
+      `/admin/ladipages/materials?category_id=${encodeURIComponent(String(categoryId))}`,
+    ),
 
   get: (id: number) => fetchAdmin<LadipageDetail>(`/admin/ladipages/${id}`),
 

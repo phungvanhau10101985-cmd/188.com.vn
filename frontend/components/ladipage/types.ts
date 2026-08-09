@@ -31,7 +31,6 @@ export interface MaterialSectionData {
   image_url?: string;
   /** Ladipage 1 SP: `product` = chọn ảnh SP (mặc định); `ai` = Gemini tạo ảnh. Ladipage khác luôn `ai`. */
   image_source?: 'ai' | 'product';
-  /** CSS object-position khi image_source = product */
   image_object_position?: string;
 }
 

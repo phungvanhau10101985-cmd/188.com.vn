@@ -200,7 +200,9 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
   // Sản phẩm + cây danh mục (chỉ cần khi có seoBody) không phụ thuộc lẫn nhau — chạy song song
   // thay vì nối tiếp để giảm thời gian mở trang danh mục.
-  const [productsResult, categoryTree] = await Promise.all([
+  const pathStrForRelated = [level1, level2, level3].filter(Boolean).join('/');
+  const { listRelatedPublishedLadipages } = await import('@/lib/ladipage-public');
+  const [productsResult, categoryTree, relatedLadipages] = await Promise.all([
     getProductsByCategory(
       level1,
       level2,
@@ -209,6 +211,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       seoData,
     ),
     seoBody ? getCategoryTreeForLayout() : Promise.resolve([] as Awaited<ReturnType<typeof getCategoryTreeForLayout>>),
+    listRelatedPublishedLadipages({ categoryPath: pathStrForRelated, limit: 8 }),
   ]);
   if (productsResult.fetchFailed) {
     // Cùng lý do như trên: gọi API sản phẩm lỗi tạm (mạng/timeout/5xx) — không phải danh mục
@@ -233,6 +236,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       facets={null}
       listingQueryString={listingQueryString}
       listingRefresh={listingRefresh ?? null}
+      relatedLadipages={relatedLadipages}
     />
   );
 }

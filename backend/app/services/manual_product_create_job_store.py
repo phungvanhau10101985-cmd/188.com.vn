@@ -41,6 +41,23 @@ def load_job(job_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def delete_job(job_id: str) -> bool:
+    """Xóa file job — dùng khi admin hủy phiên tạo SP dở."""
+    if not _SAFE_JOB_ID.match(job_id or ""):
+        return False
+    root = _jobs_root()
+    removed = False
+    for name in (f"{job_id}.json", f"{job_id}.json.tmp"):
+        path = root / name
+        if path.is_file():
+            try:
+                path.unlink()
+                removed = True
+            except OSError:
+                return False
+    return removed
+
+
 def list_jobs(
     *,
     active_only: bool = True,
@@ -62,8 +79,10 @@ def list_jobs(
             continue
         if not isinstance(state, dict):
             continue
-        if created_by is not None and state.get("created_by") != created_by:
-            continue
+        if created_by is not None:
+            job_owner = state.get("created_by")
+            if job_owner is not None and job_owner != created_by:
+                continue
         status = str(state.get("status") or "").strip()
         if active_only and status in _DONE:
             continue

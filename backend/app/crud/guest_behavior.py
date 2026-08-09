@@ -5,7 +5,7 @@ from typing import List, Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory
+from app.models.guest_behavior import GuestProductView, GuestFavorite, GuestSearchHistory, GuestProfileHint
 from app.schemas.user import ProductViewCreate, FavoriteCreate, SearchHistoryCreate
 from app.crud import user as user_crud
 
@@ -237,6 +237,39 @@ def delete_guest_search_history_by_query(db: Session, session_id: str, search_qu
     return int(deleted or 0)
 
 
+def upsert_guest_profile_hint(
+    db: Session, session_id: str, gender: str, birth_year: Optional[int] = None
+) -> GuestProfileHint:
+    """Khách tự khai giới tính/năm sinh (không cần tài khoản) — dùng cho gợi ý cohort."""
+    sid = _norm_session(session_id)
+    if not sid:
+        raise ValueError("session_id required")
+    row = db.query(GuestProfileHint).filter(GuestProfileHint.session_id == sid).first()
+    if row:
+        row.gender = gender
+        row.birth_year = birth_year
+    else:
+        row = GuestProfileHint(session_id=sid, gender=gender, birth_year=birth_year)
+        db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_guest_profile_hint(db: Session, session_id: str) -> Optional[GuestProfileHint]:
+    sid = _norm_session(session_id)
+    if not sid:
+        return None
+    return db.query(GuestProfileHint).filter(GuestProfileHint.session_id == sid).first()
+
+
+def delete_guest_profile_hint(db: Session, session_id: str) -> None:
+    sid = _norm_session(session_id)
+    if not sid:
+        return
+    db.query(GuestProfileHint).filter(GuestProfileHint.session_id == sid).delete()
+
+
 def merge_guest_session_to_user(db: Session, user_id: int, session_id: str) -> dict:
     """Gộp hành vi phiên khách vào tài khoản; xóa bản ghi guest."""
     sid = _norm_session(session_id)
@@ -286,5 +319,18 @@ def merge_guest_session_to_user(db: Session, user_id: int, session_id: str) -> d
         merged_srch += 1
     db.query(GuestSearchHistory).filter(GuestSearchHistory.session_id == sid).delete()
 
+    # Không tự ghi đè User.gender/date_of_birth (tránh sai lệch hồ sơ thật) — chỉ trả về
+    # giá trị khách đã tự khai (nếu có) để frontend gợi ý điền sẵn, cần user xác nhận.
+    profile_hint = get_guest_profile_hint(db, sid)
+    guest_gender_hint = profile_hint.gender if profile_hint else None
+    guest_birth_year_hint = profile_hint.birth_year if profile_hint else None
+    delete_guest_profile_hint(db, sid)
+
     db.commit()
-    return {"merged_views": merged_views, "merged_favorites": merged_favs, "merged_searches": merged_srch}
+    return {
+        "merged_views": merged_views,
+        "merged_favorites": merged_favs,
+        "merged_searches": merged_srch,
+        "guest_gender_hint": guest_gender_hint,
+        "guest_birth_year_hint": guest_birth_year_hint,
+    }

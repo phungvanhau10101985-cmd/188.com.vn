@@ -18,7 +18,10 @@ from app.db.session import get_db
 from app.models.admin import AdminUser
 from app.models.category import Category
 from app.models.ladipage import Ladipage, LadipageSection
+from app.models.product import Product
 from app.schemas.ladipage import (
+    LadipageCategoryMaterialItem,
+    LadipageCategoryMaterialsResponse,
     LadipageCreate,
     LadipageDetailResponse,
     LadipageAdminStatsResponse,
@@ -35,10 +38,21 @@ from app.services.ladipage_ai_service import (
     build_fixed_sections_plan,
     generate_and_save_ladipage_seo,
     generate_or_regenerate_section,
+    normalize_material_filter,
     resolve_products_for_ladipage,
 )
 from app.services.ladipage_public_url import resolve_ladipage_public_path
 from app.services.ladipage_admin_stats import ladipage_admin_stats
+from app.services.ladipage_seo_strategy import (
+    apply_ladipage_seo_guardrails,
+    build_seo_collision_warning,
+    get_category_seo_competitor,
+    get_dominant_category_for_products,
+    resolve_ladipage_category_competitor,
+    seo_texts_collide,
+    suggest_category_ladipage_title,
+    suggest_multi_product_ladipage_title,
+)
 from app.utils.slug import create_slug
 
 logger = logging.getLogger(__name__)
@@ -91,6 +105,7 @@ def _to_response(db: Session, lp: Ladipage) -> LadipageResponse:
         include_material=lp.include_material,
         include_faq=lp.include_faq,
         products_limit=lp.products_limit,
+        material_filter=lp.material_filter,
         meta_title=lp.meta_title,
         meta_description=lp.meta_description,
         created_at=lp.created_at,
@@ -100,13 +115,38 @@ def _to_response(db: Session, lp: Ladipage) -> LadipageResponse:
     )
 
 
-def _to_detail_response(db: Session, lp: Ladipage) -> LadipageDetailResponse:
+def _to_detail_response(
+    db: Session,
+    lp: Ladipage,
+    *,
+    seo_collision_warning: Optional[str] = None,
+) -> LadipageDetailResponse:
     base = _to_response(db, lp).model_dump()
     resolved = [p.id for p in resolve_products_for_ladipage(db, lp)]
     sections = [
         LadipageSectionResponse.model_validate(s) for s in sorted(lp.sections, key=lambda s: s.order_index)
     ]
-    return LadipageDetailResponse(**base, sections=sections, resolved_product_ids=resolved)
+    # Danh mục liên quan: category_id thật (ladipage danh mục) hoặc danh mục chiếm đa số
+    # trong SP đã chọn (ladipage nhiều SP) — dùng canh SEO + link chéo cho cả hai loại.
+    competitor = resolve_ladipage_category_competitor(db, lp, resolved)
+    catalog_path = competitor.get("catalog_path")
+    seo_path = competitor.get("seo_path")
+    warning = seo_collision_warning
+    if warning is None and competitor.get("category_id"):
+        warning = build_seo_collision_warning(
+            lp.meta_title,
+            lp.meta_description,
+            competitor,
+            lp.material_filter,
+        )
+    return LadipageDetailResponse(
+        **base,
+        sections=sections,
+        resolved_product_ids=resolved,
+        category_catalog_path=catalog_path,
+        category_seo_path=seo_path,
+        seo_collision_warning=warning,
+    )
 
 
 def _get_ladipage_or_404(db: Session, ladipage_id: int) -> Ladipage:
@@ -227,6 +267,43 @@ def get_ladipage_admin_stats(
     return LadipageAdminStatsResponse(**ladipage_admin_stats(db, k))
 
 
+@router.get("/materials", response_model=LadipageCategoryMaterialsResponse)
+def list_category_materials_for_ladipage(
+    category_id: int = Query(..., ge=1, description="ID danh mục (thường cấp 3)"),
+    db: Session = Depends(get_db),
+    admin: AdminUser = Depends(require_module_permission(MODULE_KEY)),
+):
+    """Distinct chất liệu có SP active trong danh mục — dùng chọn lọc ladipage danh mục."""
+    cat = db.query(Category.id).filter(Category.id == category_id).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
+
+    material_norm = func.lower(func.trim(Product.material))
+    rows = (
+        db.query(
+            func.min(func.trim(Product.material)).label("material"),
+            func.count(Product.id).label("cnt"),
+        )
+        .filter(
+            Product.category_id == category_id,
+            Product.is_active.is_(True),
+            Product.material.isnot(None),
+            func.trim(Product.material) != "",
+        )
+        .group_by(material_norm)
+        .order_by(func.count(Product.id).desc(), func.min(func.trim(Product.material)).asc())
+        .all()
+    )
+    return LadipageCategoryMaterialsResponse(
+        category_id=category_id,
+        items=[
+            LadipageCategoryMaterialItem(material=str(r.material), count=int(r.cnt))
+            for r in rows
+            if r.material
+        ],
+    )
+
+
 @router.post("", response_model=LadipageDetailResponse, include_in_schema=False)
 @router.post("/", response_model=LadipageDetailResponse)
 def create_ladipage(
@@ -234,22 +311,42 @@ def create_ladipage(
     db: Session = Depends(get_db),
     admin: AdminUser = Depends(require_module_permission(MODULE_KEY)),
 ):
+    material_filter = None
+    title = payload.title.strip()
     if payload.source_type == "category":
         if not payload.category_id:
             raise HTTPException(status_code=400, detail="Cần chọn danh mục")
         cat = db.query(Category).filter(Category.id == payload.category_id).first()
         if not cat:
             raise HTTPException(status_code=404, detail="Không tìm thấy danh mục")
+        material_filter = normalize_material_filter(payload.material_filter)
+        if payload.include_material and not material_filter:
+            raise HTTPException(
+                status_code=400,
+                detail="Ladipage danh mục có phần Chất liệu cần chọn lọc chất liệu",
+            )
+        # Ép title có USP — tránh trùng tên danh mục thuần.
+        if seo_texts_collide(title, cat.name) or (
+            material_filter and material_filter.lower() not in title.lower()
+        ):
+            title = suggest_category_ladipage_title(cat.name or title, material_filter)
     elif payload.source_type == "products":
         if not payload.product_ids:
             raise HTTPException(status_code=400, detail="Cần chọn ít nhất 1 sản phẩm")
+        if len(payload.product_ids) > 1:
+            dominant_id = get_dominant_category_for_products(db, payload.product_ids)
+            if dominant_id:
+                dom_competitor = get_category_seo_competitor(db, dominant_id)
+                dom_head = dom_competitor.get("head_title") or dom_competitor.get("category_name")
+                if seo_texts_collide(title, dom_head):
+                    title = suggest_multi_product_ladipage_title(title, dom_competitor.get("category_name"))
     else:
         raise HTTPException(status_code=400, detail="source_type không hợp lệ")
 
-    slug = _unique_slug(db, payload.title)
+    slug = _unique_slug(db, title)
     lp = Ladipage(
         slug=slug,
-        title=payload.title.strip(),
+        title=title,
         status="draft",
         source_type=payload.source_type,
         category_id=payload.category_id if payload.source_type == "category" else None,
@@ -258,6 +355,7 @@ def create_ladipage(
         include_material=payload.include_material,
         include_faq=payload.include_faq,
         products_limit=payload.products_limit,
+        material_filter=material_filter if payload.source_type == "category" else None,
         created_by=admin.id,
     )
     db.add(lp)
@@ -321,6 +419,33 @@ def update_ladipage(
         lp.products_limit = payload.products_limit
     if payload.product_ids is not None and lp.source_type == "products":
         lp.product_ids = payload.product_ids
+    if payload.material_filter is not None and lp.source_type == "category":
+        next_filter = normalize_material_filter(payload.material_filter)
+        if lp.include_material and not next_filter:
+            raise HTTPException(
+                status_code=400,
+                detail="Ladipage danh mục có phần Chất liệu cần chọn lọc chất liệu",
+            )
+        lp.material_filter = next_filter
+    # Guardrail SEO khi admin lưu meta tay — áp dụng cả ladipage danh mục và ladipage nhiều SP
+    # (canh theo danh mục chiếm đa số trong SP đã chọn, nếu có).
+    seo_warning: Optional[str] = None
+    if payload.meta_title is not None or payload.meta_description is not None:
+        resolved_for_seo = [p.id for p in resolve_products_for_ladipage(db, lp)]
+        competitor = resolve_ladipage_category_competitor(db, lp, resolved_for_seo)
+        if competitor.get("category_id"):
+            guarded, seo_warning = apply_ladipage_seo_guardrails(
+                {
+                    "meta_title": lp.meta_title or lp.title or "",
+                    "meta_description": lp.meta_description or "",
+                },
+                competitor=competitor,
+                material_filter=lp.material_filter,
+                category_name=competitor.get("category_name"),
+            )
+            lp.meta_title = guarded["meta_title"] or None
+            if guarded.get("meta_description"):
+                lp.meta_description = guarded["meta_description"]
     if payload.status is not None and payload.status != lp.status:
         if payload.status == "published":
             lp.published_at = datetime.now(timezone.utc)
@@ -340,7 +465,7 @@ def update_ladipage(
 
     db.commit()
     db.refresh(lp)
-    return _to_detail_response(db, lp)
+    return _to_detail_response(db, lp, seo_collision_warning=seo_warning)
 
 
 @router.post("/{ladipage_id}/generate-seo", response_model=LadipageDetailResponse)
@@ -353,17 +478,19 @@ def generate_ladipage_seo_endpoint(
     """Sinh meta title/description bằng DeepSeek từ nội dung ladipage và lưu vào DB."""
     lp = _get_ladipage_or_404(db, ladipage_id)
     headline, subheadline = _hero_copy_from_ladipage(lp)
+    warning = None
     try:
-        generate_and_save_ladipage_seo(
+        seo_result = generate_and_save_ladipage_seo(
             db,
             lp,
             hero_headline=headline,
             hero_subheadline=subheadline,
             only_missing=only_missing,
         )
+        warning = seo_result.get("seo_collision_warning")
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"AI tạo SEO thất bại: {exc}") from exc
-    return _to_detail_response(db, lp)
+    return _to_detail_response(db, lp, seo_collision_warning=warning)
 
 
 @router.delete("/{ladipage_id}", response_model=dict)

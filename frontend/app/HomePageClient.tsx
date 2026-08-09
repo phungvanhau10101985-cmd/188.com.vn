@@ -67,6 +67,7 @@ import { consumeHomeRecommendationFresh } from '@/lib/home-navigation-mode';
 import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
+import { hasAnsweredGuestGenderHint } from '@/lib/guest-gender-hint';
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
 const HOME_MIX_INITIAL_LIMIT = 24;
@@ -662,6 +663,11 @@ export default function HomePageClient({
   const searchFetchGenRef = useRef(0);
   const lastSearchTrackedRef = useRef<string>('');
   const lastFilterTrackedRef = useRef<string>('');
+  const recommendationFetchGenRef = useRef(0);
+  /** Khách chưa đăng nhập đã chọn giới tính nhẹ chưa (đọc 1 lần lúc mount). */
+  const [guestGenderHintAnswered, setGuestGenderHintAnswered] = useState(() =>
+    hasAnsweredGuestGenderHint()
+  );
 
   const applyRecommendationSnapshot = useCallback(
     (snap: HomeRecommendationSnapshotResponse) => {
@@ -731,18 +737,22 @@ export default function HomePageClient({
     };
   }, [shopBehaviorKey, authLoading, hasFilterParams, applyRecommendationSnapshot]);
 
-  useEffect(() => {
-    if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
-    let cancelled = false;
+  /**
+   * Fetch khối gợi ý «CÓ THỂ BẠN THÍCH» — dùng chung cho effect tự động (đổi shopBehaviorKey)
+   * và refetch thủ công (ví dụ ngay sau khi khách chọn giới tính nhẹ ở Phase 5).
+   * Guard bằng generation ref thay vì closure `cancelled` để gọi được từ nhiều nơi an toàn.
+   */
+  const fetchRecommendationBlock = useCallback(() => {
+    const gen = ++recommendationFetchGenRef.current;
     if (!hasDisplayedRecommendationRef.current) setSameShopLoading(true);
     setSameAgeGenderLoading(true);
     setSameShopCanLoadMore(false);
     cohortAppendedIdsRef.current = new Set();
     pendingCohortProductsRef.current = [];
-    apiClient
+    return apiClient
       .getHomeRecommendationBlock(HOME_MIX_INITIAL_LIMIT, HOME_COHORT_MIX_POOL_SIZE)
       .then((block) => {
-        if (cancelled) return;
+        if (recommendationFetchGenRef.current !== gen) return;
         const shopList = block.same_shop_products ?? [];
         const mixed = block.mixed_recommendation_products ?? shopList;
         cohortAppendedIdsRef.current = new Set(block.cohort_badge_product_ids ?? []);
@@ -759,7 +769,7 @@ export default function HomePageClient({
         setSameAgeGenderLoading(false);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (recommendationFetchGenRef.current !== gen) return;
         // Lỗi khi refetch nền mà đã có dữ liệu (từ cache/snapshot) đang hiển thị → giữ nguyên,
         // không xóa trắng UI vì một lần gọi API tạm lỗi.
         if (!hasDisplayedRecommendationRef.current) {
@@ -775,10 +785,18 @@ export default function HomePageClient({
         setSameShopLoading(false);
         setSameAgeGenderLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [shopBehaviorKey, authLoading, hasFilterParams, recommendationSource]);
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || hasFilterParams || recommendationSource !== 'fresh') return;
+    void fetchRecommendationBlock();
+  }, [shopBehaviorKey, authLoading, hasFilterParams, recommendationSource, fetchRecommendationBlock]);
+
+  /** Khách chọn xong giới tính nhẹ (Phase 5) — cập nhật cờ + refetch ngay, không cần reload. */
+  const handleGuestGenderHintAnswered = useCallback(() => {
+    setGuestGenderHintAnswered(true);
+    void fetchRecommendationBlock();
+  }, [fetchRecommendationBlock]);
 
   useEffect(() => {
     hasDisplayedRecommendationRef.current = displayedRecommendationProducts.length > 0;
@@ -1109,6 +1127,26 @@ export default function HomePageClient({
     currentPage,
   ]);
 
+  const lastRecommendationImpressionTrackedRef = useRef<string>('');
+  useEffect(() => {
+    if (hasFilterParams || sameShopLoading || sameAgeGenderCohortMode == null) return;
+    const hasProducts = displayedRecommendationProducts.length > 0;
+    const key = `${sameAgeGenderCohortMode}-${hasProducts}-${isAuthenticated}`;
+    if (lastRecommendationImpressionTrackedRef.current === key) return;
+    lastRecommendationImpressionTrackedRef.current = key;
+    trackEvent('recommendation_section_impression', {
+      cohort_mode: sameAgeGenderCohortMode,
+      has_products: hasProducts,
+      is_authenticated: isAuthenticated,
+    });
+  }, [
+    hasFilterParams,
+    sameShopLoading,
+    sameAgeGenderCohortMode,
+    displayedRecommendationProducts.length,
+    isAuthenticated,
+  ]);
+
   const canonicalListingQs = useMemo(
     () => searchParamsToEncodedQueryString(cloneUrlSearchParams(searchParams)),
     [searchParams]
@@ -1249,7 +1287,8 @@ export default function HomePageClient({
 
   const sameAgeGenderHint = sameAgeGenderCompactHint(
     sameAgeGenderCohortMode,
-    sameAgeGenderLoading && isAuthenticated
+    sameAgeGenderLoading && isAuthenticated,
+    isAuthenticated
   );
 
   const showMixedRecommendationSection =
@@ -1510,6 +1549,8 @@ export default function HomePageClient({
               isAuthenticated={isAuthenticated}
               hasCohortProducts={hasCohortProductsForHeader}
               hint={sameAgeGenderHint}
+              guestGenderHintAnswered={guestGenderHintAnswered}
+              onGuestGenderAnswered={handleGuestGenderHintAnswered}
             />
             <div className="mt-3">
               {showRecommendationSkeleton ? (

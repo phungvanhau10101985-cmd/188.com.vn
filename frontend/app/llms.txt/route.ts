@@ -12,19 +12,29 @@ function buildLlmsTxt(origin: string): string {
 > Thương mại điện tử thời trang nam nữ, giày dép, phụ kiện — tiếng Việt, giao hàng toàn quốc.
 
 ## Giới thiệu
-188.COM.VN là website mua sắm online tại Việt Nam. Nội dung công khai gồm trang chủ, danh mục sản phẩm, trang chi tiết sản phẩm, landing SEO cluster và trang thông tin/chính sách.
+188.COM.VN là website mua sắm online tại Việt Nam. Nội dung công khai gồm trang chủ, danh mục sản phẩm, trang chi tiết sản phẩm, landing SEO cluster, ladipage (bộ sưu tập / landing bán hàng) và trang thông tin/chính sách.
 
 ## URL chính
 - Trang chủ: ${origin}/
 - Danh mục: ${origin}/danh-muc
+- Ladipage (bộ sưu tập / landing): ${origin}/lp/{slug}
 - Tìm kiếm sản phẩm: ${origin}/?q={tu_khoa}
 - Tìm theo ảnh: ${origin}/tim-theo-anh
 - Giới thiệu: ${origin}/info/gioi-thieu
 - Liên hệ: ${origin}/info/lien-he
 
+## Ladipage (landing bán hàng / nội dung cho AI)
+- Vai trò: landing bộ sưu tập / long-tail (thường theo chất liệu). Trang SEO chính của danh mục là ${origin}/danh-muc/... hoặc SEO cluster ${origin}/c/{slug}.
+- Trang HTML công khai: ${origin}/lp/{slug} (danh mục hoặc nhiều sản phẩm đã publish).
+- Ladipage 1 sản phẩm redirect vĩnh viễn (308) về trang PDP ${origin}/products/{slug} — đọc nội dung bổ sung (hero, chất liệu, FAQ) trên PDP.
+- Danh sách URL ladipage đa sản phẩm/danh mục nằm trong sitemap chính (${origin}/sitemap.xml).
+- Chi tiết JSON theo slug: GET ${origin}/api/v1/ladipages/public/{slug}
+- Related theo danh mục/cluster: GET ${origin}/api/v1/ladipages/public/related?category_path=... hoặc ?cluster_slug=...
+- Sitemap ladipage (JSON): GET ${origin}/api/v1/ladipages/public/sitemap
+
 ## Sitemap
 - Sitemap index: ${origin}/sitemap-index.xml
-- Sitemap chính (sản phẩm, trang tĩnh): ${origin}/sitemap.xml
+- Sitemap chính (sản phẩm, ladipage multi, trang tĩnh): ${origin}/sitemap.xml
 - Sitemap danh mục SEO: ${origin}${CATEGORY_SEO_SITEMAP_PATH}
 - Robots: ${origin}/robots.txt
 
@@ -42,13 +52,13 @@ Base API (proxy qua frontend): ${origin}/api/v1
 - TikTok catalog: GET ${origin}/api/v1/import-export/export/tiktok-catalog-feed.tsv
 
 ## Chính sách thu thập
-- Được phép index và trích dẫn các trang sản phẩm, danh mục và nội dung thông tin công khai.
+- Được phép index và trích dẫn các trang sản phẩm, danh mục, ladipage (/lp/) và nội dung thông tin công khai.
 - Không thu thập các khu vực sau:
 ${disallowList}
 - Không thu thập thông tin tài khoản, giỏ hàng, checkout hoặc khu admin.
 
 ## Structured data
-Trang sản phẩm và danh mục có JSON-LD (schema.org: Product, CollectionPage, BreadcrumbList). Trang chủ có Organization và WebSite (SearchAction).
+Trang sản phẩm và danh mục có JSON-LD (schema.org: Product, CollectionPage, BreadcrumbList). Ladipage multi có CollectionPage, ItemList, FAQPage và BreadcrumbList. Trang chủ có Organization và WebSite (SearchAction).
 
 ## Liên hệ
 ${origin}/info/lien-he

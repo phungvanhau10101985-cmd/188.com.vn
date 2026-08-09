@@ -848,6 +848,23 @@ class ApiClient {
     };
   }
 
+  /**
+   * Khách chưa đăng nhập tự khai giới tính (+ năm sinh tùy chọn) — không cần tài khoản —
+   * để nhận gợi ý theo cohort giống user đã đăng nhập ở khối «CÓ THỂ BẠN THÍCH».
+   */
+  async setGuestProfileHint(hint: {
+    gender: 'male' | 'female';
+    birth_year?: number | null;
+  }): Promise<{ message: string; gender: string; birth_year: number | null }> {
+    return this.fetch('/user-behavior/guest-profile-hint', {
+      method: 'POST',
+      body: JSON.stringify({
+        gender: hint.gender,
+        birth_year: hint.birth_year ?? null,
+      }),
+    });
+  }
+
   /** Sản phẩm cùng shop TQ (AM): round-robin theo shop, tối đa 8 SP/shop/trang, ưu tiên subcategory (AC). */
   async getProductsSameShopAsRecentViews(
     limit = 60,

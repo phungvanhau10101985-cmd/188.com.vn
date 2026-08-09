@@ -228,18 +228,17 @@ def sample_cohort_products_from_pool(
     pool_ids, cohort_mode = get_or_build_cohort_pool(db, user_id)
 
     if cohort_mode == "popular_fallback" or not pool_ids:
-        self_viewed = _self_viewed_product_ids_subquery(db, user_id)
-        from app.services.warehouse_clearance import apply_catalog_visibility_filter
+        from app.crud.popular_fallback import get_popular_fallback_products
 
-        popular = (
-            apply_catalog_visibility_filter(
-                db.query(Product)
-                .filter(Product.is_active == True)  # noqa: E712
-                .filter(~Product.id.in_(db.query(self_viewed.c.product_id)))
-            )
-            .order_by(Product.purchases.desc().nullslast(), Product.id)
-            .limit(limit)
+        self_viewed_ids = [
+            r[0]
+            for r in db.query(UserProductView.product_id)
+            .filter(UserProductView.user_id == user_id)
+            .distinct()
             .all()
+        ]
+        popular = get_popular_fallback_products(
+            db, exclude_product_ids=self_viewed_ids, limit=limit
         )
         return popular, "popular_fallback"
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -13,45 +11,24 @@ from app.crud.home_recommendation_snapshot import (
     infer_same_shop_load_more_available,
     mix_shop_and_cohort_products,
 )
-from app.crud.user import get_products_same_shop_as_recent_views, get_products_viewed_by_same_age_gender
-from app.db.session import SessionLocal
+from app.crud.home_recommendation_sources import (
+    HOME_RECOMMENDATION_COHORT_LIMIT_DEFAULT,
+    HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT,
+    resolve_recommendation_sources,
+)
 from app.models.product import Product
 
-logger = logging.getLogger(__name__)
-
-HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT = 24
-HOME_RECOMMENDATION_COHORT_LIMIT_DEFAULT = 30
-
-
-def _fetch_same_shop_thread(
-    *,
-    user_id: Optional[int],
-    guest_session_id: Optional[str],
-    limit: int,
-) -> Tuple[List[Product], int, Optional[int]]:
-    db = SessionLocal()
-    try:
-        return get_products_same_shop_as_recent_views(
-            db,
-            user_id=user_id,
-            limit=limit,
-            offset=0,
-            seed=None,
-            guest_session_id=guest_session_id,
-        )
-    finally:
-        db.close()
-
-
-def _fetch_cohort_thread(*, user_id: int, limit: int) -> Tuple[List[Product], str]:
-    db = SessionLocal()
-    try:
-        return get_products_viewed_by_same_age_gender(db, user_id, limit=limit)
-    finally:
-        db.close()
+# Re-export để giữ tương thích với các import cũ (app.crud.home_recommendation_block.HOME_RECOMMENDATION_*).
+__all__ = [
+    "HOME_RECOMMENDATION_SHOP_LIMIT_DEFAULT",
+    "HOME_RECOMMENDATION_COHORT_LIMIT_DEFAULT",
+    "build_home_recommendation_block_rows",
+    "serialize_home_recommendation_block",
+]
 
 
 def build_home_recommendation_block_rows(
+    db: Session,
     *,
     user_id: Optional[int],
     guest_session_id: Optional[str],
@@ -60,52 +37,22 @@ def build_home_recommendation_block_rows(
 ) -> Dict[str, Any]:
     """
     Lấy ORM same-shop + cohort song song (2 session), trộn lưới — chưa serialize JSON.
+    `db` chỉ dùng cho phần fallback/cohort-guest (chạy trên session của request);
+    same-shop/cohort của user vẫn fetch song song qua session riêng trong thread.
     """
-    shop_limit = max(1, min(shop_limit, 60))
-    cohort_limit = max(1, min(cohort_limit, 100))
-    sid = (guest_session_id or "").strip() or None
+    sources = resolve_recommendation_sources(
+        db,
+        user_id=user_id,
+        guest_session_id=guest_session_id,
+        shop_limit=shop_limit,
+        cohort_limit=cohort_limit,
+    )
 
-    shop_products: List[Product] = []
-    shop_total = 0
-    shop_seed: Optional[int] = None
-    cohort_products: List[Product] = []
-    cohort_mode = "requires_login"
-
-    if user_id is not None:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            shop_future = pool.submit(
-                _fetch_same_shop_thread,
-                user_id=user_id,
-                guest_session_id=None,
-                limit=shop_limit,
-            )
-            cohort_future = pool.submit(
-                _fetch_cohort_thread,
-                user_id=user_id,
-                limit=cohort_limit,
-            )
-            try:
-                shop_products, shop_total, shop_seed = shop_future.result()
-            except Exception:
-                logger.exception("home_recommendation_block: same-shop fetch failed")
-                shop_products, shop_total, shop_seed = [], 0, None
-            try:
-                cohort_products, cohort_mode = cohort_future.result()
-            except Exception:
-                logger.exception("home_recommendation_block: cohort fetch failed")
-                cohort_products, cohort_mode = [], "popular_fallback"
-    elif sid:
-        try:
-            shop_products, shop_total, shop_seed = _fetch_same_shop_thread(
-                user_id=None,
-                guest_session_id=sid,
-                limit=shop_limit,
-            )
-        except Exception:
-            logger.exception("home_recommendation_block: guest same-shop fetch failed")
-            shop_products, shop_total, shop_seed = [], 0, None
-    else:
-        shop_products, shop_total, shop_seed = [], 0, None
+    shop_products = sources["shop_products"]
+    shop_total = sources["shop_total"]
+    shop_seed = sources["shop_seed"]
+    cohort_products = sources["cohort_products"]
+    cohort_mode = sources["cohort_mode"]
 
     shop_list = list(shop_products or [])
     cohort_list = list(cohort_products or [])

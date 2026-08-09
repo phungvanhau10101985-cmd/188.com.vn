@@ -14,6 +14,8 @@ import { getListingFreshnessMonthLabel } from '@/lib/listing-freshness-label';
 import { CATEGORY_LISTING_REFRESH_PARAM } from '@/lib/category-listing-random';
 import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
+import RelatedLadipagesStrip from '@/components/ladipage/RelatedLadipagesStrip';
+import type { LadipageRelatedItem } from '@/lib/ladipage-public';
 
 interface CategoryPageClientProps {
   breadcrumbNames: string[];
@@ -31,6 +33,7 @@ interface CategoryPageClientProps {
   listingQueryString: string;
   /** Seed random toàn danh mục — giữ khi phân trang (param `r`). */
   listingRefresh?: string | null;
+  relatedLadipages?: LadipageRelatedItem[];
 }
 
 function hasNonPageFilters(listingQs: string): boolean {
@@ -53,6 +56,7 @@ export default function CategoryPageClient({
   facets,
   listingQueryString,
   listingRefresh = null,
+  relatedLadipages = [],
 }: CategoryPageClientProps) {
   const router = useRouter();
   const fullName = breadcrumbNames.join(' - ');
@@ -138,6 +142,8 @@ export default function CategoryPageClient({
           {h1Text}
         </h1>
       </div>
+
+      <RelatedLadipagesStrip items={relatedLadipages} />
 
       {!error && (total > 0 || hasNonPageFilters(listingQueryString)) ? (
         <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">

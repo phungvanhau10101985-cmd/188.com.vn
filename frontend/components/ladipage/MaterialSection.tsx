@@ -4,6 +4,7 @@ import EditableText from './EditableText';
 import EditableImage from './EditableImage';
 import HeroEditableImage from './HeroEditableImage';
 import HeroDisplayImage from './HeroDisplayImage';
+import { MaterialImageZoomView, isAiMaterialImage } from './MaterialImageZoomView';
 import type { HeroImageOption, MaterialSectionData } from './types';
 
 interface MaterialSectionProps {
@@ -14,6 +15,8 @@ interface MaterialSectionProps {
   /** Ladipage 1 SP — bật chọn ảnh SP thay vì AI */
   singleProductMode?: boolean;
   productImageOptions?: HeroImageOption[];
+  /** URL gallery/màu SP — phân biệt ảnh pick từ SP vs ảnh AI trên trang công khai */
+  productImageUrls?: string[];
   onSaveField?: (field: keyof MaterialSectionData, value: string) => void | Promise<void>;
   onRegenerateText?: (instruction: string) => void | Promise<void>;
   onRegenerateImage?: (prompt: string) => void | Promise<void>;
@@ -26,12 +29,23 @@ export default function MaterialSection({
   imagePrompt = '',
   singleProductMode = false,
   productImageOptions = [],
+  productImageUrls = [],
   onSaveField,
   onRegenerateText,
   onRegenerateImage,
 }: MaterialSectionProps) {
   const imageSource =
     !singleProductMode || data.image_source === 'ai' ? 'ai' : 'product';
+  /** Trang công khai: chỉ ảnh AI mới có kính lúp. */
+  const publicMaterialZoomEnabled =
+    !editable &&
+    isAiMaterialImage(data, {
+      singleProductMode,
+      productImageUrls:
+        productImageUrls.length > 0
+          ? productImageUrls
+          : productImageOptions.map((item) => item.url),
+    });
   const useProductImagePicker =
     editable && singleProductMode && imageSource === 'product' && !!onSaveField;
 
@@ -52,11 +66,26 @@ export default function MaterialSection({
     }
 
     if (!editable) {
+      const alt = data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu';
+      if (publicMaterialZoomEnabled) {
+        return (
+          <MaterialImageZoomView
+            url={data.image_url!}
+            alt={alt}
+            zoomEnabled
+            className="aspect-square w-full overflow-hidden rounded-xl bg-gray-100"
+            imgClassName="h-full w-full object-cover"
+            lensSize={120}
+            zoomScale={6}
+            previewSize={420}
+          />
+        );
+      }
       return (
         <HeroDisplayImage
           src={data.image_url}
           objectPosition={data.image_object_position}
-          alt={data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu'}
+          alt={alt}
           aspectClassName="aspect-square"
         />
       );

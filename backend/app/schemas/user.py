@@ -385,3 +385,28 @@ class UserBehaviorStats(BaseModel):
     
     class Config:
         from_attributes = True
+
+class GuestProfileHintCreate(BaseModel):
+    """Khách chưa đăng nhập tự khai giới tính/năm sinh (không cần tài khoản) — dùng cho
+    gợi ý theo cohort giống user đã đăng nhập."""
+    gender: str = Field(..., description="'male' hoặc 'female'")
+    birth_year: Optional[int] = Field(None, description="Năm sinh (tùy chọn)")
+
+    @field_validator('gender', mode='before')
+    @classmethod
+    def validate_gender(cls, v):
+        v = (v or '').strip().lower()
+        if v not in ('male', 'female'):
+            raise ValueError("gender chỉ hỗ trợ 'male' hoặc 'female'")
+        return v
+
+    @field_validator('birth_year', mode='before')
+    @classmethod
+    def validate_birth_year(cls, v):
+        if v is None:
+            return None
+        year = int(v)
+        current_year = date.today().year
+        if year < current_year - 120 or year > current_year - 5:
+            raise ValueError('Năm sinh không hợp lệ')
+        return year

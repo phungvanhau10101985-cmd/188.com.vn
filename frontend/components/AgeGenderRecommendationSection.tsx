@@ -120,7 +120,7 @@ export default function AgeGenderRecommendationSection({
     cohortMode !== 'profile_incomplete' &&
     visibleProducts.length > 0;
 
-  const hint = sameAgeGenderCompactHint(cohortMode, loading && isAuthenticated);
+  const hint = sameAgeGenderCompactHint(cohortMode, loading && isAuthenticated, isAuthenticated);
 
   const showSection =
     loading ||

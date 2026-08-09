@@ -53,3 +53,17 @@ export function buildFaqPageJsonLd(items: FaqItem[], pageUrl: string): object | 
     })),
   };
 }
+
+/** BreadcrumbList: Trang chủ → bộ sưu tập ladipage. */
+export function buildLadipageBreadcrumbJsonLd(pageTitle: string, pageUrl: string): object {
+  const url = pageUrl.startsWith('http') ? pageUrl : `${SITE_URL}${pageUrl}`;
+  const name = pageTitle.trim() || 'Bộ sưu tập';
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Trang chủ', item: SITE_URL },
+      { '@type': 'ListItem', position: 2, name, item: url },
+    ],
+  };
+}

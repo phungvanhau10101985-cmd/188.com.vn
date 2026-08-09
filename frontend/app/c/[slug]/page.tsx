@@ -13,6 +13,8 @@ import { formatPrice } from "@/lib/utils";
 import { getOptimizedImage } from "@/lib/image-utils";
 import { productPathSlugFromApi } from "@/lib/product-path-slug";
 import SeoClusterFiltersClient from "./SeoClusterFiltersClient";
+import RelatedLadipagesStrip from "@/components/ladipage/RelatedLadipagesStrip";
+import { listRelatedPublishedLadipages } from "@/lib/ladipage-public";
 
 const PAGE_SIZE = 48;
 
@@ -85,7 +87,10 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
   const listingQueryString = serializeSearchParams(resolvedSearchParams);
   const hasFilters = hasClusterFilters(filters);
   const skip = (page - 1) * PAGE_SIZE;
-  const initialFacets = await getSeoClusterFacets(slug, filters);
+  const [initialFacets, relatedLadipages] = await Promise.all([
+    getSeoClusterFacets(slug, filters),
+    listRelatedPublishedLadipages({ clusterSlug: slug, limit: 8 }),
+  ]);
 
   // Trang 1 dùng products_sample đã có trong detail (đỡ 1 round-trip).
   // Trang 2+ gọi /products?skip=&limit=.
@@ -120,6 +125,8 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
           Tổng {total.toLocaleString("vi-VN")} sản phẩm — landing SEO của 188.COM.VN.
         </p>
       </header>
+
+      <RelatedLadipagesStrip items={relatedLadipages} />
 
       <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-5 border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
         <SeoClusterFiltersClient

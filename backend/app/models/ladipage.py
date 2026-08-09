@@ -37,6 +37,8 @@ class Ladipage(Base):
     include_faq = Column(Boolean, default=True, nullable=False)
     # Số sản phẩm hiển thị tối đa khi nguồn = danh mục (top bán chạy)
     products_limit = Column(Integer, default=12, nullable=False)
+    # Ladipage danh mục: chỉ resolve SP cùng chất liệu (trim + không phân biệt hoa thường)
+    material_filter = Column(String(100), nullable=True)
 
     meta_title = Column(String(500), nullable=True)
     meta_description = Column(String(1000), nullable=True)

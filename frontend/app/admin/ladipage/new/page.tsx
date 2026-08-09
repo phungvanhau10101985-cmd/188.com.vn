@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
-import { ladipageAdminAPI, type AdminProduct } from '@/lib/admin-api';
+import {
+  ladipageAdminAPI,
+  type AdminProduct,
+  type LadipageCategoryMaterialItem,
+} from '@/lib/admin-api';
 import LadipageProductPicker from '@/components/ladipage/LadipageProductPicker';
 import { useToast } from '@/components/ToastProvider';
 
@@ -53,6 +57,9 @@ export default function AdminLadipageNewPage() {
   const [categoryId, setCategoryId] = useState<number | ''>('');
   const [productsLimit, setProductsLimit] = useState(12);
   const [selectedProducts, setSelectedProducts] = useState<AdminProduct[]>([]);
+  const [materialOptions, setMaterialOptions] = useState<LadipageCategoryMaterialItem[]>([]);
+  const [materialsLoading, setMaterialsLoading] = useState(false);
+  const [materialFilter, setMaterialFilter] = useState('');
 
   const [title, setTitle] = useState('');
   const [titleTouched, setTitleTouched] = useState(false);
@@ -81,28 +88,67 @@ export default function AdminLadipageNewPage() {
   }, []);
 
   useEffect(() => {
+    if (sourceMode !== 'category' || !categoryId) {
+      setMaterialOptions([]);
+      setMaterialFilter('');
+      setMaterialsLoading(false);
+      return;
+    }
+    let alive = true;
+    setMaterialsLoading(true);
+    setMaterialFilter('');
+    ladipageAdminAPI
+      .listCategoryMaterials(categoryId as number)
+      .then((res) => {
+        if (!alive) return;
+        setMaterialOptions(res.items || []);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setMaterialOptions([]);
+      })
+      .finally(() => {
+        if (alive) setMaterialsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [sourceMode, categoryId]);
+
+  useEffect(() => {
     if (titleTouched) return;
     if (sourceMode === 'category') {
       const opt = cat3Options.find((c) => c.id === categoryId);
-      if (opt) setTitle(`${opt.breadcrumb.split(' › ').pop()} - Bộ sưu tập mới`);
+      if (opt) {
+        const leaf = opt.breadcrumb.split(' › ').pop() || opt.breadcrumb;
+        setTitle(materialFilter ? `${leaf} - ${materialFilter}` : `${leaf} - Bộ sưu tập mới`);
+      }
     } else if (sourceMode === 'product_single' && selectedProducts.length === 1) {
       setTitle(selectedProducts[0].name);
     } else if (sourceMode === 'products_multi' && selectedProducts.length >= 2) {
       setTitle(`${selectedProducts.length} sản phẩm nổi bật`);
     }
-  }, [sourceMode, categoryId, cat3Options, selectedProducts, titleTouched]);
+  }, [sourceMode, categoryId, cat3Options, selectedProducts, titleTouched, materialFilter]);
 
   const canSubmit = useMemo(() => {
     if (!title.trim()) return false;
-    if (sourceMode === 'category') return !!categoryId;
+    if (sourceMode === 'category') {
+      if (!categoryId) return false;
+      if (includeMaterial && !materialFilter.trim()) return false;
+      return true;
+    }
     if (sourceMode === 'product_single') return selectedProducts.length === 1;
     return selectedProducts.length >= 2;
-  }, [title, sourceMode, categoryId, selectedProducts]);
+  }, [title, sourceMode, categoryId, selectedProducts, includeMaterial, materialFilter]);
 
   const switchSourceMode = (mode: SourceMode) => {
     setSourceMode(mode);
     setFormError('');
     if (mode === 'category') setSelectedProducts([]);
+    else {
+      setMaterialFilter('');
+      setMaterialOptions([]);
+    }
   };
 
   const handleSubmit = async () => {
@@ -110,7 +156,9 @@ export default function AdminLadipageNewPage() {
     if (!canSubmit) {
       if (sourceMode === 'product_single') setFormError('Vui lòng chọn đúng 1 sản phẩm.');
       else if (sourceMode === 'products_multi') setFormError('Vui lòng chọn ít nhất 2 sản phẩm.');
-      else setFormError('Vui lòng điền tiêu đề và chọn danh mục.');
+      else if (includeMaterial && !materialFilter.trim()) {
+        setFormError('Vui lòng chọn chất liệu để lọc sản phẩm (bắt buộc khi bật phần Chất liệu).');
+      } else setFormError('Vui lòng điền tiêu đề và chọn danh mục.');
       return;
     }
     setSubmitting(true);
@@ -124,6 +172,8 @@ export default function AdminLadipageNewPage() {
         include_material: includeMaterial,
         include_faq: includeFaq,
         products_limit: productsLimit,
+        material_filter:
+          sourceMode === 'category' && materialFilter.trim() ? materialFilter.trim() : undefined,
         material_image_source: sourceMode === 'product_single' ? materialImageSource : 'ai',
       });
       pushToast({ title: 'Đã tạo bản nháp', description: 'Đang chuyển tới trình soạn thảo…', variant: 'success', durationMs: 2000 });
@@ -196,6 +246,37 @@ export default function AdminLadipageNewPage() {
                 onChange={(e) => setProductsLimit(Math.max(1, Math.min(60, Number(e.target.value) || 12)))}
                 className="w-32 rounded-md border border-gray-300 p-2 text-sm outline-none focus:border-orange-400"
               />
+            </div>
+            <div className="mt-3">
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Lọc chất liệu{includeMaterial ? ' (bắt buộc)' : ' (tuỳ chọn)'}
+              </label>
+              {materialsLoading ? (
+                <div className="h-10 animate-pulse rounded-md bg-gray-100" />
+              ) : (
+                <select
+                  value={materialFilter}
+                  onChange={(e) => setMaterialFilter(e.target.value)}
+                  disabled={!categoryId}
+                  className="w-full rounded-md border border-gray-300 p-2 text-sm outline-none focus:border-orange-400 disabled:bg-gray-50"
+                >
+                  <option value="">
+                    {categoryId
+                      ? materialOptions.length
+                        ? '— Chọn chất liệu —'
+                        : '— Không có chất liệu trong danh mục —'
+                      : '— Chọn danh mục trước —'}
+                  </option>
+                  {materialOptions.map((m) => (
+                    <option key={m.material} value={m.material}>
+                      {m.material} ({m.count} SP)
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="mt-1.5 text-xs text-gray-500">
+                Grid chỉ hiển thị SP cùng chất liệu trong danh mục này. Phần Chất liệu AI cũng viết theo chất liệu đã chọn.
+              </p>
             </div>
           </div>
         ) : (
