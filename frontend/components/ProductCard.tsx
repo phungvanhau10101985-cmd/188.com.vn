@@ -3,7 +3,7 @@
 
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
 import { getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
@@ -516,7 +516,11 @@ export default function ProductCard({
 }
 
 // Optimized Product Card cho ProductGrid (không có quick actions)
-export const SimpleProductCard = ({ 
+// React.memo: lưới danh mục có thể tới ~96 card/trang — nếu không memo, mỗi lần đổi
+// favoriteIds/facets/sale-calendar ở component cha sẽ re-render TOÀN BỘ lưới thay vì chỉ
+// (nhiều nhất) 1 card thực sự đổi props. Yêu cầu `onFavorite` truyền vào phải có reference
+// ổn định (useCallback) để memo phát huy tác dụng — xem `ProductGrid.tsx`.
+const SimpleProductCardComponent = ({
   product, 
   onFavorite,
   isFavorited = false,
@@ -674,3 +678,5 @@ export const SimpleProductCard = ({
     </ProductPdpLink>
   );
 };
+
+export const SimpleProductCard = memo(SimpleProductCardComponent);

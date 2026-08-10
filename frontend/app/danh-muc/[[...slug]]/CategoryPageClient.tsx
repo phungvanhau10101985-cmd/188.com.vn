@@ -65,6 +65,9 @@ export default function CategoryPageClient({
   const from = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const to = Math.min(currentPage * pageSize, total);
   const [goingHome, setGoingHome] = useState(false);
+  /** Đổi filter (size/màu/giá/sort) đang chờ server trả kết quả mới — hiện skeleton ngay
+   * thay vì để lưới SP cũ đứng im, để cảm giác "bấm là ra" dù danh mục có hàng ngàn SP. */
+  const [filtersPending, setFiltersPending] = useState(false);
 
   const monthLabel = getListingFreshnessMonthLabel();
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
@@ -146,8 +149,14 @@ export default function CategoryPageClient({
       <RelatedLadipagesStrip items={relatedLadipages} />
 
       {!error && (total > 0 || hasNonPageFilters(listingQueryString)) ? (
-        <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
-          <CategoryProductFilters basePath={basePath} facets={clientFacets} enableListingFacetShell compact />
+        <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50 px-1.5 py-1.5 shadow-sm sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:shadow-none">
+          <CategoryProductFilters
+            basePath={basePath}
+            facets={clientFacets}
+            enableListingFacetShell
+            compact
+            onPendingChange={setFiltersPending}
+          />
         </div>
       ) : null}
 
@@ -180,7 +189,7 @@ export default function CategoryPageClient({
           </h2>
           <ProductGrid
             products={products}
-            loading={false}
+            loading={filtersPending}
             selectedCategory={leafName}
             showFilters={false}
           />

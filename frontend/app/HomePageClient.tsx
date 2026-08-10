@@ -67,6 +67,8 @@ import { consumeHomeRecommendationFresh } from '@/lib/home-navigation-mode';
 import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
+import { getGuestCategoryInterest } from '@/lib/guest-category-interest';
+import GuestCategoryPicker from '@/components/home/GuestCategoryPicker';
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
 const HOME_MIX_INITIAL_LIMIT = 24;
@@ -1289,6 +1291,25 @@ export default function HomePageClient({
       (sameAgeGenderCohortMode === 'requires_login' ||
         sameAgeGenderCohortMode === 'profile_incomplete'));
 
+  /**
+   * Khách chưa đăng nhập + chưa có tín hiệu gì (chưa xem SP nào — backend rơi về
+   * `popular_fallback` chỉ trong đúng trường hợp này, xem `home_recommendation_sources.py`).
+   * Thay vì tự đoán/hỏi giới tính, hỏi thẳng muốn xem danh mục gì (GuestCategoryPicker).
+   */
+  const isGuestWithoutSignal =
+    !authLoading && !isAuthenticated && sameAgeGenderCohortMode === 'popular_fallback';
+  const guestCategoryInterest = isGuestWithoutSignal ? getGuestCategoryInterest() : null;
+
+  /**
+   * Ghé lại lần sau vẫn chưa có tín hiệu gì (chưa xem SP, chưa đăng nhập) và đã từng bấm
+   * chọn 1 danh mục ở lần trước → tự mở luôn trang danh mục đó, không hỏi lại.
+   */
+  useEffect(() => {
+    if (hasFilterParams) return;
+    if (!isGuestWithoutSignal || !guestCategoryInterest) return;
+    router.replace(guestCategoryInterest.path);
+  }, [hasFilterParams, isGuestWithoutSignal, guestCategoryInterest, router]);
+
   const handleFavorite = async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1402,7 +1423,7 @@ export default function HomePageClient({
                 </p>
               </div>
             </div>
-            <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50/95 px-1.5 py-1.5 shadow-sm backdrop-blur sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-gray-50 md:shadow-none md:backdrop-blur-none">
+            <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-4 w-full border-b border-gray-200 bg-gray-50 px-1.5 py-1.5 shadow-sm sm:px-3 md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:shadow-none">
                 <CategoryProductFilters
                   basePath="/"
                   facets={
@@ -1537,10 +1558,10 @@ export default function HomePageClient({
               cohortLoading={sameAgeGenderLoading}
               isAuthenticated={isAuthenticated}
               hasCohortProducts={hasCohortProductsForHeader}
-              hint={sameAgeGenderHint}
+              hint={isGuestWithoutSignal ? null : sameAgeGenderHint}
             />
             <div className="mt-3">
-              {showRecommendationSkeleton ? (
+              {showRecommendationSkeleton || (isGuestWithoutSignal && guestCategoryInterest) ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {[...Array(12)].map((_, i) => (
                     <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
@@ -1553,6 +1574,8 @@ export default function HomePageClient({
                     </div>
                   ))}
                 </div>
+              ) : isGuestWithoutSignal ? (
+                <GuestCategoryPicker />
               ) : displayedRecommendationProducts.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
                   {displayedRecommendationProducts.map((product, index) => (

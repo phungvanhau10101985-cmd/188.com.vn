@@ -16,6 +16,12 @@ type Props = {
   enableListingFacetShell?: boolean;
   /** Trang chủ / tìm kiếm — mặc định sort ổn định (id_desc), không «Ngẫu nhiên». */
   stableSortDefault?: boolean;
+  /**
+   * Báo cho component cha biết đang chờ navigation đổi filter (từ `useTransition`) — cha có
+   * thể dùng để hiện skeleton ngay trên lưới sản phẩm thay vì để lưới cũ "đứng im" tới khi
+   * server trả kết quả mới (cảm giác mượt hơn khi danh mục có hàng ngàn SP).
+   */
+  onPendingChange?: (pending: boolean) => void;
 };
 
 function formatVndHint(n: number): string {
@@ -29,10 +35,15 @@ function CategoryProductFiltersInner({
   enableEmptyListing,
   enableListingFacetShell,
   stableSortDefault,
+  onPendingChange,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isNavPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    onPendingChange?.(isNavPending);
+  }, [isNavPending, onPendingChange]);
 
   const minPriceQ = searchParams.get('min_price') || '';
   const maxPriceQ = searchParams.get('max_price') || '';

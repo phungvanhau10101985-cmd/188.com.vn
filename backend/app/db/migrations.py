@@ -829,6 +829,41 @@ class MigrationManager:
             logger.warning("migrate_product_listing_default_index: %s", e)
             return True
 
+    def migrate_product_price_filter_index(self) -> bool:
+        """
+        Index cho lọc theo khoảng giá (`min_price`/`max_price`) trên listing danh mục — thiếu
+        index này Postgres phải Seq Scan/Bitmap toàn bộ SP đã lọc theo category (có thể hàng
+        nghìn dòng) mỗi lần đổi bộ lọc giá, làm chậm cảm giác "bấm là ra kết quả".
+        """
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            if IS_POSTGRESQL:
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(
+                        text(
+                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                            "ix_products_active_price ON products (is_active, price) "
+                            "WHERE is_active IS TRUE"
+                        )
+                    )
+            else:
+                with engine.connect() as conn:
+                    conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_products_active_price "
+                            "ON products (is_active, price)"
+                        )
+                    )
+                    conn.commit()
+            logger.info("✅ ix_products_active_price ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_price_filter_index: %s", e)
+            return True
+
     def migrate_product_warehouse_clearance_lookup_index(self) -> bool:
         """
         Index cho subquery EXISTS «còn hàng kho thanh lý thay SP hết hàng nguồn» (storefront
@@ -1290,6 +1325,7 @@ class MigrationManager:
         results['product_category_active_index'] = self.migrate_product_category_active_index()
         results['product_category_text_lower_index'] = self.migrate_product_category_text_lower_index()
         results['product_listing_default_index'] = self.migrate_product_listing_default_index()
+        results['product_price_filter_index'] = self.migrate_product_price_filter_index()
         results['product_warehouse_clearance_lookup_index'] = (
             self.migrate_product_warehouse_clearance_lookup_index()
         )

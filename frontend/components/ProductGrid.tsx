@@ -1,7 +1,7 @@
 // frontend/components/ProductGrid.tsx - COMPLETE UPDATED VERSION
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { Product } from '@/types/api';
 import { SimpleProductCard } from './ProductCard';
 import { apiClient } from '@/lib/api-client';
@@ -96,7 +96,7 @@ const FilterBar = ({
   onSortChange: (sort: string) => void;
   onPriceFilterChange: (range: string) => void;
 }) => (
-  <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-6 border-b border-gray-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:bg-white md:shadow-none md:backdrop-blur-none">
+  <div className="sticky top-[var(--mobile-app-header-height)] z-40 mb-6 border-b border-gray-200 bg-white px-2 py-1.5 shadow-sm md:top-[var(--listing-filter-sticky-top)] md:border-t-0 md:shadow-none">
     <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
       {/* Results Info */}
       <div className="flex-1">
@@ -203,11 +203,86 @@ export default function ProductGrid({
     };
   }, [isAuthenticated]);
 
-  const handleFavorite = async (productId: number, e: React.MouseEvent) => {
+  const handleSortChange = (sortType: string) => {
+    setSortBy(sortType);
+    // Gọi API hoặc filter local data dựa trên sort type
+    console.log('Sort changed to:', sortType);
+  };
+
+  const handlePriceFilterChange = (range: string) => {
+    setPriceRange(range);
+    // Gọi API hoặc filter local data dựa trên price range
+    console.log('Price filter changed to:', range);
+  };
+
+  // Apply local filters (tạm thời - có thể thay bằng API call)
+  const filteredProducts = useMemo(
+    () =>
+      shuffledProducts.filter((product) => {
+        // Price filter logic
+        const price = product.price || 0;
+        switch (priceRange) {
+          case 'under500k':
+            if (price > 500000) return false;
+            break;
+          case '500k-1m':
+            if (price < 500000 || price > 1000000) return false;
+            break;
+          case '1m-3m':
+            if (price < 1000000 || price > 3000000) return false;
+            break;
+          case '3m-5m':
+            if (price < 3000000 || price > 5000000) return false;
+            break;
+          case 'over5m':
+            if (price < 5000000) return false;
+            break;
+        }
+        return true;
+      }),
+    [shuffledProducts, priceRange]
+  );
+
+  // Apply sorting (tạm thời - có thể thay bằng API call)
+  const sortedProducts = useMemo(
+    () =>
+      [...filteredProducts].sort((a, b) => {
+        switch (sortBy) {
+          case 'price_asc':
+            return (a.price || 0) - (b.price || 0);
+          case 'price_desc':
+            return (b.price || 0) - (a.price || 0);
+          case 'rating':
+            return (b.rating_point || 0) - (a.rating_point || 0);
+          case 'sales':
+            return (b.purchases || 0) - (a.purchases || 0);
+          case 'newest':
+            return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+          case 'popular':
+            return (b.purchases || 0) - (a.purchases || 0);
+          case 'default':
+          default:
+            return 0; // Giữ nguyên thứ tự (đã được random nếu randomize=true)
+        }
+      }),
+    [filteredProducts, sortBy]
+  );
+
+  /**
+   * Ref giữ giá trị mới nhất — cho phép `handleFavorite` có reference ỔN ĐỊNH (deps rỗng)
+   * mà vẫn đọc đúng dữ liệu hiện tại. Nhờ vậy `SimpleProductCard` (đã React.memo) không bị
+   * re-render toàn bộ lưới mỗi khi favoriteIds đổi — chỉ card có id thay đổi mới re-render.
+   */
+  const sortedProductsRef = useRef(sortedProducts);
+  sortedProductsRef.current = sortedProducts;
+  const favoriteIdsRef = useRef(favoriteIds);
+  favoriteIdsRef.current = favoriteIds;
+
+  const handleFavorite = useCallback(async (productId: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const product = sortedProducts.find((p) => p.id === productId);
-    const had = favoriteIds.has(productId);
+    const product = sortedProductsRef.current.find((p) => p.id === productId);
+    const had = favoriteIdsRef.current.has(productId);
     try {
       if (had) {
         await apiClient.removeFromFavorites(productId);
@@ -234,64 +309,7 @@ export default function ProductGrid({
     } catch {
       /* ignore */
     }
-  };
-
-  const handleSortChange = (sortType: string) => {
-    setSortBy(sortType);
-    // Gọi API hoặc filter local data dựa trên sort type
-    console.log('Sort changed to:', sortType);
-  };
-
-  const handlePriceFilterChange = (range: string) => {
-    setPriceRange(range);
-    // Gọi API hoặc filter local data dựa trên price range
-    console.log('Price filter changed to:', range);
-  };
-
-  // Apply local filters (tạm thời - có thể thay bằng API call)
-  const filteredProducts = shuffledProducts.filter(product => {
-    // Price filter logic
-    const price = product.price || 0;
-    switch (priceRange) {
-      case 'under500k':
-        if (price > 500000) return false;
-        break;
-      case '500k-1m':
-        if (price < 500000 || price > 1000000) return false;
-        break;
-      case '1m-3m':
-        if (price < 1000000 || price > 3000000) return false;
-        break;
-      case '3m-5m':
-        if (price < 3000000 || price > 5000000) return false;
-        break;
-      case 'over5m':
-        if (price < 5000000) return false;
-        break;
-    }
-    return true;
-  });
-
-  // Apply sorting (tạm thời - có thể thay bằng API call)
-  const sortedProducts = [...filteredProducts].sort((a, b) => {
-    switch (sortBy) {
-      case 'price_asc':
-        return (a.price || 0) - (b.price || 0);
-      case 'price_desc':
-        return (b.price || 0) - (a.price || 0);
-      case 'rating':
-        return (b.rating_point || 0) - (a.rating_point || 0);
-      case 'sales':
-        return (b.purchases || 0) - (a.purchases || 0);
-      case 'newest':
-        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
-      case 'popular':
-        return (b.purchases || 0) - (a.purchases || 0);
-      case 'default':
-      default:
-        return 0; // Giữ nguyên thứ tự (đã được random nếu randomize=true)
-    }
-  });
+  }, []);
 
   if (loading) {
     return <ProductGridSkeleton />;
