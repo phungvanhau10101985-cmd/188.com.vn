@@ -20,9 +20,19 @@ from sqlalchemy.orm import Session
 from app.crud.category_hero_suggestions import _text_has_gender_nam, _text_has_gender_nu
 from app.crud.product import _product_view_totals_subquery
 from app.models.product import Product
+from app.utils.ttl_cache import cache as ttl_cache
 
 # Cap SP/subcategory trong danh sách fallback — giữ đa dạng ngành hàng.
 POPULAR_FALLBACK_MAX_PER_SUBCATEGORY = 5
+
+# Cache TTL cho 2 danh sách xếp hạng nặng (bán chạy / được xem nhiều) — KHÔNG phụ thuộc
+# guest cụ thể nên cache chung, tính lại tối đa mỗi 10 phút. Thiếu cache này, mỗi request
+# của MỖI khách chưa có tín hiệu gì (rất phổ biến — hầu hết khách lần đầu) đều phải
+# aggregate lại toàn bộ guest_product_views + user_product_views (hàng trăm nghìn dòng ở
+# production) — gây nghẽn I/O/pool DB khi nhiều khách vào cùng lúc (đã xảy ra thật trên VPS).
+POPULAR_FALLBACK_CACHE_TTL_SECONDS = 600
+# Pool cache đủ lớn để phục vụ mọi lời gọi limit/balance_gender khác nhau từ 1 cache duy nhất.
+POPULAR_FALLBACK_CACHE_POOL_SIZE = 300
 
 
 def _fetch_ranked(
@@ -43,6 +53,45 @@ def _fetch_ranked(
         query = query.filter(~Product.id.in_(exclude_ids))
     query = apply_catalog_visibility_filter(query)
     return query.order_by(*order_exprs).limit(fetch_limit).all()
+
+
+def _fetch_bestsellers_cached_ids(db: Session) -> List[int]:
+    """
+    Chỉ cache list ID (không cache ORM object) — tránh rủi ro object bị detach/expire khi
+    session của request tính cache đã đóng nhưng object vẫn được dùng lại ở request sau.
+    """
+
+    def _fetch() -> List[int]:
+        rows = _fetch_ranked(
+            db,
+            order_exprs=[Product.purchases.desc().nullslast(), Product.id.desc()],
+            exclude_ids=set(),
+            fetch_limit=POPULAR_FALLBACK_CACHE_POOL_SIZE,
+        )
+        return [p.id for p in rows]
+
+    return ttl_cache.get_or_fetch(
+        "popular_fallback:bestsellers_ids", POPULAR_FALLBACK_CACHE_TTL_SECONDS, _fetch
+    )
+
+
+def _fetch_most_viewed_cached_ids(db: Session) -> List[int]:
+    def _fetch() -> List[int]:
+        view_totals_subq = _product_view_totals_subquery()
+        view_count_expr = sql_func.coalesce(view_totals_subq.c.view_total, 0)
+        rows = _fetch_ranked(
+            db,
+            order_exprs=[view_count_expr.desc(), Product.id.desc()],
+            exclude_ids=set(),
+            fetch_limit=POPULAR_FALLBACK_CACHE_POOL_SIZE,
+            join_target=view_totals_subq,
+            join_condition=view_totals_subq.c.product_id == Product.id,
+        )
+        return [p.id for p in rows]
+
+    return ttl_cache.get_or_fetch(
+        "popular_fallback:most_viewed_ids", POPULAR_FALLBACK_CACHE_TTL_SECONDS, _fetch
+    )
 
 
 def _interleave_and_diversify(
@@ -142,25 +191,26 @@ def get_popular_fallback_products(
     """
     exclude_ids = {int(pid) for pid in (exclude_product_ids or []) if pid is not None}
     limit = max(1, int(limit))
-    fetch_limit = max(limit * (8 if balance_gender else 4), 100)
 
-    bestsellers = _fetch_ranked(
-        db,
-        order_exprs=[Product.purchases.desc().nullslast(), Product.id.desc()],
-        exclude_ids=exclude_ids,
-        fetch_limit=fetch_limit,
-    )
+    # 2 thứ hạng ID nặng lấy từ cache dùng chung (xem POPULAR_FALLBACK_CACHE_TTL_SECONDS),
+    # lọc exclude_ids ở Python (rẻ) — KHÔNG chạy lại aggregation DB mỗi request.
+    bestseller_ids = [i for i in _fetch_bestsellers_cached_ids(db) if i not in exclude_ids]
+    most_viewed_ids = [i for i in _fetch_most_viewed_cached_ids(db) if i not in exclude_ids]
 
-    view_totals_subq = _product_view_totals_subquery()
-    view_count_expr = sql_func.coalesce(view_totals_subq.c.view_total, 0)
-    most_viewed = _fetch_ranked(
-        db,
-        order_exprs=[view_count_expr.desc(), Product.id.desc()],
-        exclude_ids=exclude_ids,
-        fetch_limit=fetch_limit,
-        join_target=view_totals_subq,
-        join_condition=view_totals_subq.c.product_id == Product.id,
+    all_ids = list(dict.fromkeys(bestseller_ids + most_viewed_ids))
+    if not all_ids:
+        return []
+
+    # Hydrate Product tươi theo session hiện tại (rẻ — lookup theo primary key) + re-check
+    # is_active vì cache có thể vài phút cũ (SP có thể đã bị ẩn/xoá trong lúc đó).
+    hydrated = (
+        db.query(Product)
+        .filter(Product.id.in_(all_ids), Product.is_active == True)  # noqa: E712
+        .all()
     )
+    by_id = {p.id: p for p in hydrated}
+    bestsellers = [by_id[i] for i in bestseller_ids if i in by_id]
+    most_viewed = [by_id[i] for i in most_viewed_ids if i in by_id]
 
     if not balance_gender:
         return _interleave_and_diversify([bestsellers, most_viewed], limit=limit)

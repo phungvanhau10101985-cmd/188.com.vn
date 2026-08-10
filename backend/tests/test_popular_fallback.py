@@ -96,22 +96,46 @@ def test_macro_interleave_two_alternates_evenly():
     assert [p.id for p in result] == [1, 10, 2, 20, 3]
 
 
+class _FakeHydrateDb:
+    """Giả `db.query(Product).filter(...).all()` ở bước hydrate lại theo ID sau khi lấy
+    thứ hạng từ cache — trả nguyên danh sách giả, không cần diễn giải điều kiện filter thật."""
+
+    def __init__(self, products):
+        self._products = products
+
+    def query(self, *args, **kwargs):
+        return self
+
+    def filter(self, *args, **kwargs):
+        return self
+
+    def all(self):
+        return self._products
+
+
 def test_get_popular_fallback_products_balance_gender_is_50_50(monkeypatch):
     """balance_gender=True: đúng nửa Nam / nửa Nữ khi có đủ SP mỗi bên (mock DB session)."""
     import app.crud.popular_fallback as popular_fallback
 
     nam_products = [_pg(i, f"Giày Nam {i}") for i in range(1, 21)]
     nu_products = [_pg(100 + i, f"Giày Nữ {i}") for i in range(1, 21)]
+    all_products = nam_products + nu_products
 
     def fake_fetch_ranked(db, *, order_exprs, exclude_ids, fetch_limit, join_target=None, join_condition=None):
         # bestsellers và most_viewed dùng cùng 1 pool giả cho đơn giản.
-        return nam_products + nu_products
+        return all_products
+
+    # 2 danh sách hạng ID giờ đi qua cache dùng chung — xoá trước để không dính cache từ
+    # lần gọi khác (test khác / lần gọi thật trước đó trong cùng process).
+    popular_fallback.ttl_cache.invalidate("popular_fallback:bestsellers_ids")
+    popular_fallback.ttl_cache.invalidate("popular_fallback:most_viewed_ids")
 
     monkeypatch.setattr(popular_fallback, "_fetch_ranked", fake_fetch_ranked)
     monkeypatch.setattr(popular_fallback, "_product_view_totals_subquery", lambda: SimpleNamespace(c=SimpleNamespace(view_total=0, product_id=None)))
 
+    fake_db = _FakeHydrateDb(all_products)
     result = popular_fallback.get_popular_fallback_products(
-        db=None, exclude_product_ids=[], limit=20, balance_gender=True
+        db=fake_db, exclude_product_ids=[], limit=20, balance_gender=True
     )
     tags = [_gender_tag(p) for p in result]
     assert len(result) == 20
