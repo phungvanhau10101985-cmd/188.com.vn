@@ -120,6 +120,20 @@ deploy_preserve_untracked_secrets() {
   done
 }
 
+deploy_stash_untracked_incoming_files() {
+  # File untracked trên VPS nhưng đã có trên origin → git pull báo "would be overwritten".
+  git fetch origin "${BRANCH}" 2>/dev/null || return 0
+  local f
+  while IFS= read -r f; do
+    [[ -z "${f}" ]] && continue
+    if [[ -f "${PROJECT_ROOT}/${f}" ]] && ! git -C "${PROJECT_ROOT}" ls-files --error-unmatch "${f}" &>/dev/null; then
+      cp -a "${PROJECT_ROOT}/${f}" "${PROJECT_ROOT}/${f}.pre-deploy.bak"
+      rm -f "${PROJECT_ROOT}/${f}"
+      echo "==> Git: backup untracked ${f} (incoming từ origin sẽ ghi đè)"
+    fi
+  done < <(git -C "${PROJECT_ROOT}" diff --name-only "HEAD" "origin/${BRANCH}" 2>/dev/null || true)
+}
+
 deploy_restore_untracked_secrets() {
   local f
   for f in "${_deploy_secret_files[@]}"; do
@@ -160,6 +174,7 @@ if [[ "${DEPLOY_SKIP_GIT:-0}" == "1" ]]; then
   echo "==> Git: DEPLOY_SKIP_GIT=1 — bỏ qua (đã git pull / sync tay trước khi chạy script)."
 else
   deploy_preserve_untracked_secrets
+  deploy_stash_untracked_incoming_files
   if ! deploy_git_sync; then
     deploy_restore_untracked_secrets
     echo ""

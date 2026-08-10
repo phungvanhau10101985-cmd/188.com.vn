@@ -24,7 +24,7 @@ module.exports = {
       env: {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
-        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
+        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'true',
         // Postgres max_connections=100 trên VPS nanoai — 15+20=35 vẫn còn dư địa lớn cho
         // các app khác (thu-do-online, worksheet-worker...). Tăng từ 10+15=25 vì admin bấm
         // nhiều thao tác nặng liên tiếp (tải danh sách + lọc + job ảnh...) từng chạm ngưỡng cũ.
