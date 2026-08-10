@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import func as sql_func
+from sqlalchemy import and_, func as sql_func, or_
 from sqlalchemy.orm import Session
 
 from app.crud.category_hero_suggestions import _text_has_gender_nam, _text_has_gender_nu
@@ -35,6 +35,26 @@ POPULAR_FALLBACK_CACHE_TTL_SECONDS = 600
 POPULAR_FALLBACK_CACHE_POOL_SIZE = 300
 
 
+def _cheap_source_can_order_filter():
+    """
+    Bản RẺ của phần "SP thường" trong `storefront_sellable_expr()`
+    (app.services.warehouse_clearance) — CHỦ ĐỘNG bỏ nhánh `EXISTS` tương quan "SP gốc
+    còn biến thể kho thanh lý còn tồn". Nhánh đó self-join lại chính bảng `products`
+    (+ LIKE prefix) cho MỖI dòng — cực đắt khi kết hợp với ORDER BY quét cả catalog không
+    lọc trước theo category (đã đo thực tế: >20s, nguyên nhân chính khiến "CÓ THỂ BẠN
+    THÍCH" bị trắng/treo). Hàm này chỉ dùng cho fallback "phổ biến" (dòng
+    is_warehouse_clearance đã bị loại trước ở `_fetch_ranked`) nên chỉ cần điều kiện
+    "còn tồn nguồn" — bỏ edge-case hiếm (SP gốc hết hàng nguồn NHƯNG có biến thể thanh lý
+    còn hàng) là chấp nhận được, không ảnh hưởng trải nghiệm.
+    """
+    not_oos = or_(
+        Product.source_stock_status.is_(None),
+        sql_func.trim(Product.source_stock_status) == "",
+        sql_func.lower(sql_func.trim(Product.source_stock_status)) != "out_of_stock",
+    )
+    return and_(sql_func.coalesce(Product.available, 0) > 0, not_oos)
+
+
 def _fetch_ranked(
     db: Session,
     *,
@@ -44,14 +64,18 @@ def _fetch_ranked(
     join_target=None,
     join_condition=None,
 ) -> List[Product]:
-    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+    from app.services.product_image_visibility import apply_storefront_image_filter
 
     query = db.query(Product).filter(Product.is_active == True)  # noqa: E712
     if join_target is not None and join_condition is not None:
         query = query.outerjoin(join_target, join_condition)
     if exclude_ids:
         query = query.filter(~Product.id.in_(exclude_ids))
-    query = apply_catalog_visibility_filter(query)
+    query = query.filter(
+        or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
+    )
+    query = query.filter(_cheap_source_can_order_filter())
+    query = apply_storefront_image_filter(query)
     return query.order_by(*order_exprs).limit(fetch_limit).all()
 
 
