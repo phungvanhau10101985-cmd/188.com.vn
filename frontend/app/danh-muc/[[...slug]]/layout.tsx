@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { getCategorySeoData, buildCategoryBreadcrumbJsonLd, buildCategoryCollectionJsonLd } from "@/lib/category-seo";
 import { absolutePublicAssetUrl } from "@/lib/cdn-url";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
@@ -132,37 +133,34 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function CategoryLayout({ params, children }: Props) {
+/** JSON-LD tách riêng — không chặn `loading.tsx` / page khi fetch SEO chậm. */
+async function CategoryJsonLdScripts({
+  params,
+}: {
+  params: Promise<{ slug?: string[] }>;
+}) {
   const { slug } = await params;
   const [level1, level2, level3] = slug || [];
-  if (!level1) {
-    return <>{children}</>;
-  }
+  if (!level1) return null;
 
-  // Xuất JSON-LD cho mọi trang danh mục (không còn khái niệm canonical duy nhất)
   const info = await getCategorySeoData(level1, level2, level3);
-  if (!info) {
-    return <>{children}</>;
-  }
+  if (!info) return null;
 
   const pathSegments = [level1];
   if (level2) pathSegments.push(level2);
   if (level3) pathSegments.push(level3);
   const pathStr = pathSegments.join("/");
-  
-  // Sử dụng mô tả AI cho JSON-LD nếu có
-  const seoDescription = info.seo_description || 
+
+  const seoDescription =
+    info.seo_description ||
     `${info.full_name} - ${info.product_count} sản phẩm tại 188.com.vn`;
-  
-  const breadcrumbJsonLd = buildCategoryBreadcrumbJsonLd(
-    info.breadcrumb_names,
-    pathSegments
-  );
+
+  const breadcrumbJsonLd = buildCategoryBreadcrumbJsonLd(info.breadcrumb_names, pathSegments);
   const collectionJsonLd = buildCategoryCollectionJsonLd(
     info.full_name,
     pathStr,
     info.product_count,
-    seoDescription
+    seoDescription,
   );
 
   return (
@@ -175,6 +173,16 @@ export default async function CategoryLayout({ params, children }: Props) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLdForScript(collectionJsonLd) }}
       />
+    </>
+  );
+}
+
+export default function CategoryLayout({ params, children }: Props) {
+  return (
+    <>
+      <Suspense fallback={null}>
+        <CategoryJsonLdScripts params={params} />
+      </Suspense>
       {children}
     </>
   );

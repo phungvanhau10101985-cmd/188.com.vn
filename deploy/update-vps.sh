@@ -540,6 +540,11 @@ if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then
 fi
 
 echo ""
+echo "==> API env: bật resume job bản địa hóa ảnh sau restart PM2"
+bash "${PROJECT_ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || \
+  echo "⚠️  ensure-api-safe-env có bước lỗi — tiếp tục deploy"
+
+echo ""
 echo "==> PM2: khôi phục dump + khởi động lại toàn bộ dự án trên VPS"
 pm2 resurrect 2>/dev/null || true
 

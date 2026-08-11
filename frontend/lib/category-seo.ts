@@ -15,6 +15,15 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_DOM
 /** Tránh treo SSR khi backend tắt / mạng chặn (Windows hay gặp). */
 const LAYOUT_FETCH_TIMEOUT_MS = 8000;
 
+/** SEO-data có thể chậm hơn (COUNT SP trên danh mục lớn) — timeout riêng. */
+const CATEGORY_SEO_DATA_FETCH_TIMEOUT_MS = Math.min(
+  110_000,
+  Math.max(
+    LAYOUT_FETCH_TIMEOUT_MS,
+    parseInt(process.env.CATEGORY_SEO_DATA_FETCH_TIMEOUT_MS || "12000", 10) || 12000,
+  ),
+);
+
 /** Listing danh mục L1 lớn (vd. Thời trang Nữ ~9k SP) có thể >8s — timeout riêng. */
 const CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS = Math.min(
   110_000,
@@ -250,7 +259,7 @@ async function fetchCategorySeoDataOnce(
     const res = await fetch(url, {
       next: { revalidate: REVALIDATE_SEO_DATA, tags: [CACHE_TAG_CATEGORY_SEO] },
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(LAYOUT_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(CATEGORY_SEO_DATA_FETCH_TIMEOUT_MS),
     });
     if (res.status === 404) return { status: "not_found" };
     if (!res.ok) return { status: "error" };
@@ -267,10 +276,10 @@ const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResu
   level3?: string | null
 ): Promise<CategorySeoDataResult> {
   let result = await fetchCategorySeoDataOnce(level1, level2, level3);
-  // Backend đôi khi trả lỗi tạm (pool DB bận / timeout ngắn khi COUNT sản phẩm) — thử lại một lần
+  // Backend đôi khi trả lỗi tạm (pool DB bận / timeout ngắn khi COUNT sản phẩm) — thử lại vài lần
   // trước khi báo lỗi hẳn cho khách. Không retry khi "not_found" (danh mục thật sự không có).
-  if (result.status === "error") {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+  for (let attempt = 0; attempt < 2 && result.status === "error"; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
     result = await fetchCategorySeoDataOnce(level1, level2, level3);
   }
   return result;
@@ -513,7 +522,20 @@ export async function getProductsByCategory(
   // Danh mục lớn (vd. ~9k SP) đôi khi query chậm/timeout do DB pool bận tạm thời — thử lại một lần
   // trước khi báo lỗi hẳn, tránh khách bị "Không thể tải danh mục" chỉ vì một nhịp nghẽn ngắn.
   if (result.fetchFailed) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    result = await attempt().catch(() => ({
+      products: [] as unknown[],
+      total: 0,
+      total_pages: 0,
+      page: 1,
+      category,
+      subcategory,
+      sub_subcategory,
+      fetchFailed: true,
+    }));
+  }
+  if (result.fetchFailed) {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     result = await attempt().catch(() => ({
       products: [] as unknown[],
       total: 0,

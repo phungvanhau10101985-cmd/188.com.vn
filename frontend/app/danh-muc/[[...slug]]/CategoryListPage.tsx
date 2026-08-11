@@ -6,6 +6,7 @@ import Button from '@/components/ui/Button';
 import { apiClient } from '@/lib/api-client';
 import { sortCategoryTiles } from '@/lib/category-tree-sort';
 import CategoryCatalogMarquee from '@/components/category/CategoryCatalogMarquee';
+import CategoryRouteLoading from '@/components/category/CategoryRouteLoading';
 import type {
   CategoryLevel1,
   CategoryLevel2,
@@ -130,15 +131,7 @@ export default function CategoryListPage({
     <div className="min-h-screen w-full bg-white pb-16 md:pb-8">
       <h1 className="sr-only">Tất cả danh mục</h1>
 
-      {loading ? (
-        <div
-          className="relative left-1/2 h-[min(72vh,640px)] w-screen max-w-[100vw] -translate-x-1/2 overflow-hidden bg-gradient-to-br from-orange-100 to-amber-50 md:left-0 md:h-[min(78vh,720px)] md:w-full md:max-w-7xl md:translate-x-0 md:mx-auto"
-          aria-busy="true"
-          aria-label="Đang tải danh mục"
-        >
-          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-orange-200/40 via-orange-100/30 to-amber-100/40" />
-        </div>
-      ) : null}
+      {loading ? <CategoryRouteLoading message="Đang tải danh mục…" compactHero /> : null}
 
       {error && !loading ? (
         <div className="mx-4 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 md:mx-auto md:max-w-7xl">

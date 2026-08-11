@@ -143,12 +143,25 @@ def get_job_worker_pid(job_id: str) -> Optional[int]:
     return getattr(proc, "pid", None)
 
 
-def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:
-    """Gọi từ FastAPI startup (thread daemon)."""
+def _job_worker_alive(job_id: str) -> bool:
+    with _proc_lock:
+        proc = _job_processes.get((job_id or "").strip())
+    return proc is not None and proc.is_alive()
+
+
+def _clear_stale_job_thread_mark(job_id: str) -> None:
+    """Worker subprocess chết giữa chừng (deploy/restart) — bỏ cờ in-memory để resume lại."""
+    if _job_worker_alive(job_id):
+        return
+    with _job_threads_lock:
+        _job_threads_running.discard(job_id)
+
+
+def resume_pending_jobs(run_job, payload_cls: type) -> None:
+    """Resume job queued/running trong DB nếu chưa có worker subprocess sống."""
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
         return
 
-    time.sleep(2.5)
     from app.crud import image_localization_job as job_crud
 
     db = SessionLocal()
@@ -161,6 +174,10 @@ def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:
         return
 
     for row in rows:
+        if _job_worker_alive(row.job_id):
+            continue
+        _clear_stale_job_thread_mark(row.job_id)
+
         db_check = SessionLocal()
         try:
             fresh = job_crud.get_job(db_check, row.job_id)
@@ -212,9 +229,29 @@ def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:
         start_job_process(row.job_id, payload.model_dump(), resume=True)
 
 
+def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:
+    """Gọi từ FastAPI startup (thread daemon)."""
+    time.sleep(2.5)
+    resume_pending_jobs(run_job, payload_cls)
+
+
+def _resume_daemon_loop(run_job, payload_cls: type) -> None:
+    resume_pending_jobs_after_startup(run_job, payload_cls)
+    interval = max(
+        60,
+        int(getattr(settings, "IMAGE_LOCALIZATION_JOB_ORPHAN_CHECK_SECONDS", 180)),
+    )
+    while True:
+        time.sleep(interval)
+        try:
+            resume_pending_jobs(run_job, payload_cls)
+        except Exception:
+            logger.exception("image localization orphan resume loop failed")
+
+
 def start_resume_daemon(run_job, payload_cls: type) -> None:
     t = threading.Thread(
-        target=resume_pending_jobs_after_startup,
+        target=_resume_daemon_loop,
         args=(run_job, payload_cls),
         daemon=True,
         name="image-localization-job-resume",
