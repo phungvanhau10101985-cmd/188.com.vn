@@ -190,6 +190,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     );
   }
   const seoData = seoDataResult.data;
+  const listingDataStale = Boolean(seoDataResult.stale);
 
   const breadcrumbNames = seoData.breadcrumb_names || [];
   const pathSegments = [level1];
@@ -214,11 +215,12 @@ export default async function CategoryPage({ params, searchParams }: Props) {
     listRelatedPublishedLadipages({ categoryPath: pathStrForRelated, limit: 8 }),
   ]);
   if (productsResult.fetchFailed) {
-    // Cùng lý do như trên: gọi API sản phẩm lỗi tạm (mạng/timeout/5xx) — không phải danh mục
-    // trống thật. Ném lỗi để hiển thị error.tsx (nút "Thử lại") thay vì "chưa có sản phẩm".
+    // Cùng lý do như trên: gọi API sản phẩm lỗi tạm — không phải danh mục trống thật.
+    // Chỉ ném lỗi khi không còn bản cache gần nhất để hiển thị.
     throw new Error(`Không tải được sản phẩm danh mục: ${level1}/${level2 ?? ''}/${level3 ?? ''}`);
   }
   const { products, total, total_pages, page: currentPage } = productsResult;
+  const productsStale = Boolean(productsResult.stale);
   const internalLinkMap = seoBody ? buildInternalLinkMap(categoryTree, pathSegments) : [];
 
   return (
@@ -237,6 +239,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
       listingQueryString={listingQueryString}
       listingRefresh={listingRefresh ?? null}
       relatedLadipages={relatedLadipages}
+      listingDataStale={listingDataStale || productsStale}
     />
   );
 }

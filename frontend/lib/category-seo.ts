@@ -53,6 +53,93 @@ const CATEGORY_TREE_MEM_TTL_MS = Math.max(15_000, REVALIDATE_CATEGORY * 1000 || 
 let categoryTreeMemCache: { expiresAt: number; value: CategoryLevel1[] } | null = null;
 let categoryTreeInflight: Promise<CategoryLevel1[]> | null = null;
 
+/** Lỗi DB pool / timeout ngắn — backend trả 503 + Retry-After. */
+const RETRYABLE_HTTP_STATUSES = new Set([502, 503, 504]);
+const CATEGORY_FETCH_MAX_ATTEMPTS = 4;
+/** Bản ghi thành công gần nhất — dùng khi API tạm lỗi để khách vẫn xem được trang thay vì error.tsx. */
+const CATEGORY_STALE_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type StaleMemEntry<T> = { expiresAt: number; value: T };
+const categorySeoStaleMem = new Map<string, StaleMemEntry<CategorySeoData>>();
+const categoryProductsStaleMem = new Map<
+  string,
+  StaleMemEntry<{
+    products: unknown[];
+    total: number;
+    total_pages: number;
+    page: number;
+    category?: string;
+    subcategory?: string;
+    sub_subcategory?: string;
+  }>
+>();
+
+function categoryPathCacheKey(
+  level1: string,
+  level2?: string | null,
+  level3?: string | null,
+): string {
+  return [level1.trim(), level2?.trim() || "", level3?.trim() || ""].join("/");
+}
+
+function readStaleMem<T>(map: Map<string, StaleMemEntry<T>>, key: string): T | null {
+  const hit = map.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    map.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function writeStaleMem<T>(map: Map<string, StaleMemEntry<T>>, key: string, value: T): void {
+  map.set(key, { expiresAt: Date.now() + CATEGORY_STALE_CACHE_TTL_MS, value });
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function transientRetryDelayMs(attempt: number, retryAfterHeader: string | null): number {
+  const fromHeader = Number(retryAfterHeader || "");
+  if (!Number.isNaN(fromHeader) && fromHeader > 0) {
+    return Math.min(fromHeader * 1000, 6000);
+  }
+  return Math.min(700 * (attempt + 1), 2800);
+}
+
+/** Fetch server-side có retry 502/503/504 + timeout — giảm "Không thể tải danh mục" khi pool DB bận vài giây. */
+async function fetchWithTransientRetry(
+  url: string,
+  init: RequestInit & { next?: { revalidate?: number; tags?: string[] } },
+  timeoutMs: number,
+): Promise<Response | null> {
+  for (let attempt = 0; attempt < CATEGORY_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok || res.status === 404) return res;
+      if (
+        RETRYABLE_HTTP_STATUSES.has(res.status) &&
+        attempt < CATEGORY_FETCH_MAX_ATTEMPTS - 1
+      ) {
+        await sleepMs(transientRetryDelayMs(attempt, res.headers.get("Retry-After")));
+        continue;
+      }
+      return res;
+    } catch {
+      if (attempt < CATEGORY_FETCH_MAX_ATTEMPTS - 1) {
+        await sleepMs(transientRetryDelayMs(attempt, null));
+        continue;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Tag dùng cho revalidateTag() khi admin bấm "Xóa sạch cache". */
 export const CACHE_TAG_CATEGORY_SEO = "category-seo";
 
@@ -237,7 +324,7 @@ export const getCategoryByPathForSeo = cache(async function getCategoryByPathFor
  * "danh mục không có sản phẩm" khi thực ra chỉ là tải lỗi tạm thời.
  */
 export type CategorySeoDataResult =
-  | { status: "ok"; data: CategorySeoData }
+  | { status: "ok"; data: CategorySeoData; stale?: boolean }
   | { status: "not_found" }
   | { status: "error" };
 
@@ -256,11 +343,15 @@ async function fetchCategorySeoDataOnce(
     if (level2?.trim()) params.set("level2", level2.trim());
     if (level3?.trim()) params.set("level3", level3.trim());
     const url = `${API_BASE}/categories/from-products/seo-data?${params.toString()}`;
-    const res = await fetch(url, {
-      next: { revalidate: REVALIDATE_SEO_DATA, tags: [CACHE_TAG_CATEGORY_SEO] },
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(CATEGORY_SEO_DATA_FETCH_TIMEOUT_MS),
-    });
+    const res = await fetchWithTransientRetry(
+      url,
+      {
+        next: { revalidate: REVALIDATE_SEO_DATA, tags: [CACHE_TAG_CATEGORY_SEO] },
+        headers: { "Content-Type": "application/json" },
+      },
+      CATEGORY_SEO_DATA_FETCH_TIMEOUT_MS,
+    );
+    if (!res) return { status: "error" };
     if (res.status === 404) return { status: "not_found" };
     if (!res.ok) return { status: "error" };
     const data = (await res.json()) as CategorySeoData;
@@ -275,14 +366,16 @@ const fetchCategorySeoDataResult = cache(async function fetchCategorySeoDataResu
   level2?: string | null,
   level3?: string | null
 ): Promise<CategorySeoDataResult> {
-  let result = await fetchCategorySeoDataOnce(level1, level2, level3);
-  // Backend đôi khi trả lỗi tạm (pool DB bận / timeout ngắn khi COUNT sản phẩm) — thử lại vài lần
-  // trước khi báo lỗi hẳn cho khách. Không retry khi "not_found" (danh mục thật sự không có).
-  for (let attempt = 0; attempt < 2 && result.status === "error"; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
-    result = await fetchCategorySeoDataOnce(level1, level2, level3);
+  const cacheKey = categoryPathCacheKey(level1, level2, level3);
+  const result = await fetchCategorySeoDataOnce(level1, level2, level3);
+  if (result.status === "ok") {
+    writeStaleMem(categorySeoStaleMem, cacheKey, result.data);
+    return result;
   }
-  return result;
+  if (result.status === "not_found") return result;
+  const stale = readStaleMem(categorySeoStaleMem, cacheKey);
+  if (stale) return { status: "ok", data: stale, stale: true };
+  return { status: "error" };
 });
 
 /**
@@ -408,6 +501,8 @@ export async function getProductsByCategory(
   sub_subcategory?: string;
   /** true = gọi API sản phẩm thất bại (mạng/timeout/5xx) — khác với "danh mục thật sự trống" (total=0 hợp lệ). */
   fetchFailed?: boolean;
+  /** true = đang hiển thị bản cache gần nhất do API tạm lỗi. */
+  stale?: boolean;
 }> {
   const { limit = 96, skip = 0, filters, listingRefresh } = options;
   const info = resolvedInfo ?? (await getCategoryByPathForSeo(level1, level2, level3));
@@ -420,6 +515,19 @@ export async function getProductsByCategory(
   const f = filters || {};
   const sortTrim = f.sort?.trim();
   const useRandomListing = categoryListingUsesRandomSort(f);
+
+  const productsCacheKey = [
+    categoryPathCacheKey(level1, level2, level3),
+    String(limit),
+    String(skip),
+    sortTrim || (useRandomListing ? "random" : "newest"),
+    (listingRefresh || "").trim(),
+    f.minPrice ?? "",
+    f.maxPrice ?? "",
+    f.size?.trim() || "",
+    f.color?.trim() || "",
+    f.styleTag?.trim() || "",
+  ].join("|");
 
   const attempt = async (): Promise<{
     products: unknown[];
@@ -460,13 +568,28 @@ export async function getProductsByCategory(
     if (f.styleTag?.trim()) params.set("style_tag", f.styleTag.trim());
 
     const url = `${API_BASE}/products/?${params.toString()}`;
-    const res = await fetch(url, {
-      ...(useRandomListing
-        ? { cache: "no-store" as RequestCache }
-        : { next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] } }),
-      headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS),
-    });
+    const res = await fetchWithTransientRetry(
+      url,
+      {
+        ...(useRandomListing
+          ? { cache: "no-store" as RequestCache }
+          : { next: { revalidate: REVALIDATE_CATEGORY_PRODUCTS, tags: [CACHE_TAG_CATEGORY_SEO] } }),
+        headers: { "Content-Type": "application/json" },
+      },
+      CATEGORY_PRODUCTS_FETCH_TIMEOUT_MS,
+    );
+    if (!res) {
+      return {
+        products: [],
+        total: 0,
+        total_pages: 0,
+        page: 1,
+        category,
+        subcategory,
+        sub_subcategory,
+        fetchFailed: true,
+      };
+    }
     if (!res.ok) {
       return {
         products: [],
@@ -519,33 +642,23 @@ export async function getProductsByCategory(
     sub_subcategory,
     fetchFailed: true,
   }));
-  // Danh mục lớn (vd. ~9k SP) đôi khi query chậm/timeout do DB pool bận tạm thời — thử lại một lần
-  // trước khi báo lỗi hẳn, tránh khách bị "Không thể tải danh mục" chỉ vì một nhịp nghẽn ngắn.
-  if (result.fetchFailed) {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    result = await attempt().catch(() => ({
-      products: [] as unknown[],
-      total: 0,
-      total_pages: 0,
-      page: 1,
-      category,
-      subcategory,
-      sub_subcategory,
-      fetchFailed: true,
-    }));
+
+  if (!result.fetchFailed) {
+    writeStaleMem(categoryProductsStaleMem, productsCacheKey, {
+      products: result.products,
+      total: result.total,
+      total_pages: result.total_pages,
+      page: result.page,
+      category: result.category,
+      subcategory: result.subcategory,
+      sub_subcategory: result.sub_subcategory,
+    });
+    return result;
   }
-  if (result.fetchFailed) {
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    result = await attempt().catch(() => ({
-      products: [] as unknown[],
-      total: 0,
-      total_pages: 0,
-      page: 1,
-      category,
-      subcategory,
-      sub_subcategory,
-      fetchFailed: true,
-    }));
+
+  const stale = readStaleMem(categoryProductsStaleMem, productsCacheKey);
+  if (stale) {
+    return { ...stale, stale: true };
   }
   return result;
 }

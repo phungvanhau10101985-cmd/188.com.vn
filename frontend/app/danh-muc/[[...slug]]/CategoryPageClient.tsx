@@ -34,6 +34,8 @@ interface CategoryPageClientProps {
   /** Seed random toàn danh mục — giữ khi phân trang (param `r`). */
   listingRefresh?: string | null;
   relatedLadipages?: LadipageRelatedItem[];
+  /** API tạm lỗi — đang hiển thị bản cache gần nhất thay vì chặn trang. */
+  listingDataStale?: boolean;
 }
 
 function hasNonPageFilters(listingQs: string): boolean {
@@ -57,6 +59,7 @@ export default function CategoryPageClient({
   listingQueryString,
   listingRefresh = null,
   relatedLadipages = [],
+  listingDataStale = false,
 }: CategoryPageClientProps) {
   const router = useRouter();
   const fullName = breadcrumbNames.join(' - ');
@@ -68,6 +71,7 @@ export default function CategoryPageClient({
   /** Đổi filter (size/màu/giá/sort) đang chờ server trả kết quả mới — hiện skeleton ngay
    * thay vì để lưới SP cũ đứng im, để cảm giác "bấm là ra" dù danh mục có hàng ngàn SP. */
   const [filtersPending, setFiltersPending] = useState(false);
+  const [refreshingStale, setRefreshingStale] = useState(false);
 
   const monthLabel = getListingFreshnessMonthLabel();
   const h1Text = `${leafName} mới nhất ${monthLabel} | ${total} sản phẩm`;
@@ -138,6 +142,29 @@ export default function CategoryPageClient({
           </span>
         ))}
       </nav>
+
+      {listingDataStale ? (
+        <div
+          className="mb-4 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-4 py-3 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+          role="status"
+        >
+          <p>
+            Máy chủ đang bận — đang hiển thị dữ liệu gần nhất. Bạn có thể tiếp tục xem hoặc làm mới
+            để lấy bản cập nhật.
+          </p>
+          <Button
+            variant="secondary"
+            className="shrink-0 border-amber-300 bg-white hover:bg-amber-50 text-amber-900"
+            loading={refreshingStale}
+            onClick={() => {
+              setRefreshingStale(true);
+              router.refresh();
+            }}
+          >
+            Làm mới
+          </Button>
+        </div>
+      ) : null}
 
       {/* H1 riêng; bộ lọc là sibling để sticky không bị giới hạn trong khối tiêu đề. */}
       <div className="mb-4">
