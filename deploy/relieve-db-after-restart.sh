@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Sau deploy/restart API: pool DB + dọn connection kẹt + tắt resume job ảnh OCR.
+# Sau deploy/restart API: pool DB + dọn connection kẹt. Mặc định **không** hủy job bản địa hóa ảnh
+# (worker sẽ được resume sau restart — xem IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP).
+# Chỉ hủy job khi storefront thật sự kẹt: RELIEVE_CANCEL_IMGLOC_JOBS=1 bash deploy/relieve-db-after-restart.sh
 # Usage: cd /var/www/188.com.vn && bash deploy/relieve-db-after-restart.sh
 set -euo pipefail
 
@@ -50,11 +52,14 @@ if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 
   echo "⚠️  Phát hiện tiến trình bản địa hóa ảnh/OCR — API storefront sẽ chậm/timeout."
 fi
 
-if [[ "${imgloc_running}" == "1" && "${RELIEVE_CANCEL_IMGLOC_JOBS:-1}" == "1" ]]; then
-  echo "==> Hủy job ảnh đang chạy (free-api-now)…"
+if [[ "${imgloc_running}" == "1" && "${RELIEVE_CANCEL_IMGLOC_JOBS:-0}" == "1" ]]; then
+  echo "==> Hủy job ảnh đang chạy (free-api-now — RELIEVE_CANCEL_IMGLOC_JOBS=1)…"
   bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
 else
-  echo "==> PM2 restart ${PM2_API} (áp dụng pool + tắt resume job ảnh)…"
+  if [[ "${imgloc_running}" == "1" ]]; then
+    echo "==> Job bản địa hóa ảnh đang chạy — giữ nguyên (resume sau restart PM2)."
+  fi
+  echo "==> PM2 restart ${PM2_API} (áp dụng pool DB)…"
   pm2 restart "${PM2_API}" --update-env 2>/dev/null || \
     pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}"
   pm2 save 2>/dev/null || true

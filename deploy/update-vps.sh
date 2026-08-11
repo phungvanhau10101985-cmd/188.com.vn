@@ -572,6 +572,12 @@ sleep 5
 if [[ -f "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" ]]; then
   echo ""
   echo "==> Dọn pool PostgreSQL sau restart (apply-db-pool + terminate idle in transaction)"
+  # Mặc định không hủy job bản địa hóa — chỉ khi user ép: DEPLOY_CANCEL_IMAGE_LOCALIZATION=1
+  if [[ "${DEPLOY_CANCEL_IMAGE_LOCALIZATION:-0}" == "1" ]]; then
+    export RELIEVE_CANCEL_IMGLOC_JOBS=1
+  else
+    export RELIEVE_CANCEL_IMGLOC_JOBS=0
+  fi
   bash "${PROJECT_ROOT}/deploy/relieve-db-after-restart.sh" || true
 fi
 
