@@ -5113,29 +5113,28 @@ _CATEGORY_MENU_TREE_KEY_ALL = "category_tree_v1:from_products:active=false"
 
 
 def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
+    """
+    Stale-first: luôn trả cache (kể cả stale). Không bao giờ DISTINCT+prune trên request path.
+    Cold miss → schedule rebuild nền, trả [] (startup/daemon sẽ precompute sớm).
+    """
     from app.db.session import SessionLocal
     from app.crud import category_menu_cache as menu_cache_crud
-    from app.models.category_menu_cache import CategoryMenuCache
 
     db = SessionLocal()
     try:
-        cached = menu_cache_crud.read_cached_tree(db, is_active, allow_stale=True)
+        cached = menu_cache_crud.read_cached_tree(
+            db, is_active, allow_stale=True, schedule_if_stale=True
+        )
         if cached:
-            row = (
-                db.query(CategoryMenuCache)
-                .filter(CategoryMenuCache.cache_key == menu_cache_crud.cache_key_for_is_active(is_active))
-                .first()
-            )
-            if row and row.is_stale:
-                menu_cache_crud.schedule_rebuild_both_trees()
             return cached
-        return menu_cache_crud.rebuild_tree_in_session(db, is_active)
+        menu_cache_crud.schedule_rebuild_both_trees()
+        return []
     finally:
         db.close()
 
 
 def get_cached_menu_category_tree(is_active: bool = True) -> List[Dict[str, Any]]:
-    """Cây danh mục menu: RAM → DB JSON → build từ products."""
+    """Cây danh mục menu: RAM → Redis → DB JSON (stale-first). Prune chỉ chạy nền."""
     from app.utils.ttl_cache import cache as ttl_cache
 
     key = _CATEGORY_MENU_TREE_KEY_ACTIVE if is_active else _CATEGORY_MENU_TREE_KEY_ALL

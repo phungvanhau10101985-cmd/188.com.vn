@@ -686,6 +686,27 @@ async def startup_event():
         print(f"   ⚠️  home hero category cache startup: {_e_hhc}")
 
     try:
+        from app.core.config import settings as _menu_cache_settings
+        from app.services.category_menu_cache_startup import start_category_menu_cache_daemon_if_needed
+
+        if getattr(_menu_cache_settings, "CATEGORY_MENU_WARM_ON_STARTUP", True):
+            start_category_menu_cache_daemon_if_needed(delay_seconds=3.0)
+            _menu_iv = float(
+                getattr(_menu_cache_settings, "CATEGORY_MENU_PRECOMPUTE_INTERVAL_SECONDS", 900) or 0
+            )
+            if _menu_iv > 0:
+                print(
+                    f"   📂 category menu cache: warm sau ~3s + precompute mỗi {int(_menu_iv)}s "
+                    "(stale-first, không block request)."
+                )
+            else:
+                print("   📂 category menu cache: warm sau ~3s (precompute định kỳ tắt).")
+        else:
+            print("   📂 category menu cache: warm startup tắt (CATEGORY_MENU_WARM_ON_STARTUP=false).")
+    except Exception as _e_menu_cache:
+        print(f"   ⚠️  category menu cache startup: {_e_menu_cache}")
+
+    try:
         from app.db.pool_relief import start_pool_relief_daemon_if_enabled
 
         start_pool_relief_daemon_if_enabled()

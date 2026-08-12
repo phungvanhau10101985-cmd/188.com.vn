@@ -167,6 +167,13 @@ class Settings:
         # Cây danh mục /menu (GET /categories/from-products): chỉ giữ nhánh có số SP active **lớn hơn** ngưỡng này.
         # 0 = hành vi cũ (ẩn nhánh 0 SP). Mặc định 10 → hiển thị khi có ≥11 SP; ≤10 SP thì ẩn khỏi menu/sitemap dùng cây này.
         self.CATEGORY_MENU_MIN_PRODUCT_COUNT: int = int(os.getenv("CATEGORY_MENU_MIN_PRODUCT_COUNT", "10"))
+        # Precompute prune menu nền (stale-first). 0 = chỉ warm lúc startup, không force định kỳ.
+        self.CATEGORY_MENU_PRECOMPUTE_INTERVAL_SECONDS: float = float(
+            os.getenv("CATEGORY_MENU_PRECOMPUTE_INTERVAL_SECONDS", "900")
+        )
+        self.CATEGORY_MENU_WARM_ON_STARTUP: bool = os.getenv(
+            "CATEGORY_MENU_WARM_ON_STARTUP", "true"
+        ).lower() in ("1", "true", "yes")
         
         # ========================
         # SECURITY CONFIGURATION

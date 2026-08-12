@@ -3,6 +3,8 @@
 
 Chỉ ảnh hưởng cấu trúc menu navigation; không cache danh sách SP trên trang /danh-muc/
 (sort random / sản phẩm mới vẫn query products riêng mỗi lần mở trang danh mục).
+
+Stale-first: request khách luôn nhận bản cache (kể cả stale); prune/DISTINCT chạy nền.
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_KEY_ACTIVE = "menu_tree:active=true"
 CACHE_KEY_ALL = "menu_tree:active=false"
+# Cờ Redis: menu đang stale — vẫn serve tree cũ, chỉ kích hoạt rebuild nền.
+STALE_FLAG_KEY = "menu_tree:needs_rebuild"
 
 _MENU_RAM_KEYS = (
     "category_tree_v1:from_products:active=true",
@@ -36,7 +40,8 @@ def cache_key_for_is_active(is_active: bool) -> str:
     return CACHE_KEY_ACTIVE if is_active else CACHE_KEY_ALL
 
 
-def _invalidate_menu_ram_cache() -> None:
+def _invalidate_menu_ram_only() -> None:
+    """Chỉ xóa TTL in-process — giữ Redis tree để worker khác vẫn stale-first."""
     try:
         from app.utils.ttl_cache import cache as ttl_cache
 
@@ -44,6 +49,11 @@ def _invalidate_menu_ram_cache() -> None:
             ttl_cache.invalidate(key)
     except Exception:
         pass
+
+
+def _invalidate_menu_ram_cache() -> None:
+    """Xóa RAM + Redis tree (sau khi ghi bản mới hoặc cần force miss)."""
+    _invalidate_menu_ram_only()
     try:
         from app.core import redis_cache
 
@@ -56,12 +66,72 @@ def _invalidate_menu_ram_cache() -> None:
         pass
 
 
+def _set_redis_stale_flag(stale: bool) -> None:
+    try:
+        from app.core import redis_cache
+        from app.core.config import settings
+
+        if not redis_cache.is_enabled():
+            return
+        key = redis_cache.menu_cache_key(STALE_FLAG_KEY)
+        if stale:
+            ttl = max(60, int(getattr(settings, "REDIS_MENU_CACHE_TTL_SECONDS", 1800)))
+            client = redis_cache.get_client()
+            if client is not None:
+                client.set(key, "1", ex=ttl)
+        else:
+            redis_cache.delete(key)
+    except Exception:
+        pass
+
+
+def redis_menu_needs_rebuild() -> bool:
+    try:
+        from app.core import redis_cache
+
+        if not redis_cache.is_enabled():
+            return False
+        client = redis_cache.get_client()
+        if client is None:
+            return False
+        return bool(client.get(redis_cache.menu_cache_key(STALE_FLAG_KEY)))
+    except Exception:
+        return False
+
+
+def _seed_redis_tree(cache_key: str, tree: List[Dict[str, Any]], *, is_stale: bool) -> None:
+    """Luôn đẩy tree lên Redis (kể cả stale) để mọi worker hit chung, không stampede Postgres."""
+    try:
+        from app.core import redis_cache
+        from app.core.config import settings
+
+        if not redis_cache.is_enabled():
+            return
+        ttl = int(getattr(settings, "REDIS_MENU_CACHE_TTL_SECONDS", 1800))
+        if is_stale:
+            ttl = max(60, min(ttl, 300))
+        redis_cache.set_json(
+            redis_cache.menu_cache_key(cache_key),
+            tree,
+            ttl_seconds=ttl,
+        )
+        _set_redis_stale_flag(is_stale)
+    except Exception:
+        pass
+
+
 def _is_missing_cache_table(exc: BaseException) -> bool:
     msg = str(getattr(exc, "orig", exc)).lower()
     return "category_menu_cache" in msg and ("does not exist" in msg or "no such table" in msg)
 
 
-def read_cached_tree(db: Session, is_active: bool, *, allow_stale: bool = True) -> Optional[List[Dict[str, Any]]]:
+def read_cached_tree(
+    db: Session,
+    is_active: bool,
+    *,
+    allow_stale: bool = True,
+    schedule_if_stale: bool = False,
+) -> Optional[List[Dict[str, Any]]]:
     key = cache_key_for_is_active(is_active)
     try:
         from app.core import redis_cache
@@ -69,6 +139,8 @@ def read_cached_tree(db: Session, is_active: bool, *, allow_stale: bool = True) 
         if redis_cache.is_enabled():
             cached = redis_cache.get_json(redis_cache.menu_cache_key(key))
             if isinstance(cached, list) and cached:
+                if schedule_if_stale and redis_menu_needs_rebuild():
+                    schedule_rebuild_both_trees()
                 return cached
     except Exception:
         pass
@@ -91,20 +163,10 @@ def read_cached_tree(db: Session, is_active: bool, *, allow_stale: bool = True) 
         data = json.loads(row.tree_json)
         if not isinstance(data, list) or len(data) == 0:
             return None
-        if not row.is_stale:
-            try:
-                from app.core import redis_cache
-
-                if redis_cache.is_enabled():
-                    from app.core.config import settings
-
-                    redis_cache.set_json(
-                        redis_cache.menu_cache_key(key),
-                        data,
-                        ttl_seconds=settings.REDIS_MENU_CACHE_TTL_SECONDS,
-                    )
-            except Exception:
-                pass
+        # Reseed Redis từ Postgres (kể cả stale) — tránh mọi worker đọc DB JSON.
+        _seed_redis_tree(key, data, is_stale=bool(row.is_stale))
+        if schedule_if_stale and row.is_stale:
+            schedule_rebuild_both_trees()
         return data
     except json.JSONDecodeError:
         return None
@@ -129,7 +191,7 @@ def write_cached_tree(db: Session, is_active: bool, tree: List[Dict[str, Any]], 
                 )
             )
         db.commit()
-        _invalidate_menu_ram_cache()
+        _invalidate_menu_ram_only()
     except (ProgrammingError, SQLAlchemyError) as exc:
         db.rollback()
         if _is_missing_cache_table(exc):
@@ -139,23 +201,11 @@ def write_cached_tree(db: Session, is_active: bool, tree: List[Dict[str, Any]], 
     except Exception:
         db.rollback()
         raise
-    if not is_stale:
-        try:
-            from app.core import redis_cache
-
-            if redis_cache.is_enabled():
-                from app.core.config import settings
-
-                redis_cache.set_json(
-                    redis_cache.menu_cache_key(key),
-                    tree,
-                    ttl_seconds=settings.REDIS_MENU_CACHE_TTL_SECONDS,
-                )
-        except Exception:
-            pass
+    _seed_redis_tree(key, tree, is_stale=is_stale)
 
 
 def mark_all_stale(db: Session) -> int:
+    """Đánh stale nhưng giữ JSON + Redis tree — request vẫn stale-first."""
     try:
         n = (
             db.query(CategoryMenuCache)
@@ -163,7 +213,8 @@ def mark_all_stale(db: Session) -> int:
             .update({CategoryMenuCache.is_stale: True}, synchronize_session=False)
         )
         db.commit()
-        _invalidate_menu_ram_cache()
+        _invalidate_menu_ram_only()
+        _set_redis_stale_flag(True)
         return int(n or 0)
     except (ProgrammingError, SQLAlchemyError) as exc:
         db.rollback()
@@ -229,9 +280,71 @@ def schedule_rebuild_both_trees() -> None:
     threading.Thread(target=_run, name="category-menu-cache-rebuild", daemon=True).start()
 
 
+def has_any_cached_tree(db: Session) -> bool:
+    try:
+        row = (
+            db.query(CategoryMenuCache.cache_key)
+            .filter(CategoryMenuCache.cache_key.in_([CACHE_KEY_ACTIVE, CACHE_KEY_ALL]))
+            .first()
+        )
+        return row is not None
+    except (ProgrammingError, SQLAlchemyError) as exc:
+        if _is_missing_cache_table(exc):
+            db.rollback()
+            return False
+        raise
+
+
+def warm_or_rebuild_menu_cache(*, force: bool = False) -> None:
+    """
+    Precompute prune offline: nếu chưa có cache / đang stale / force → rebuild nền.
+    Gọi từ startup + daemon định kỳ — không chặn request khách.
+    """
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if force:
+            mark_all_stale(db)
+            schedule_rebuild_both_trees()
+            return
+        active = read_cached_tree(db, True, allow_stale=True, schedule_if_stale=False)
+        if not active:
+            schedule_rebuild_both_trees()
+            return
+        row = (
+            db.query(CategoryMenuCache)
+            .filter(CategoryMenuCache.cache_key == CACHE_KEY_ACTIVE)
+            .first()
+        )
+        if row and row.is_stale:
+            schedule_rebuild_both_trees()
+            return
+        if redis_menu_needs_rebuild():
+            schedule_rebuild_both_trees()
+            return
+        # Đã có bản fresh — seed Redis nếu thiếu.
+        _seed_redis_tree(CACHE_KEY_ACTIVE, active, is_stale=False)
+        all_tree = read_cached_tree(db, False, allow_stale=True, schedule_if_stale=False)
+        if all_tree:
+            row_all = (
+                db.query(CategoryMenuCache)
+                .filter(CategoryMenuCache.cache_key == CACHE_KEY_ALL)
+                .first()
+            )
+            _seed_redis_tree(CACHE_KEY_ALL, all_tree, is_stale=bool(row_all and row_all.is_stale))
+        logger.info("category menu cache: warm OK (active nodes=%s)", len(active))
+    except Exception as exc:
+        logger.warning("category menu cache warm failed: %s", exc)
+        schedule_rebuild_both_trees()
+    finally:
+        db.close()
+
+
 def invalidate_all_menu_caches() -> None:
-    """Sau đổi taxonomy / mapping — xóa RAM + đánh stale DB + rebuild nền."""
-    _invalidate_menu_ram_cache()
+    """Sau đổi taxonomy / mapping — đánh stale + rebuild nền (vẫn serve bản cũ)."""
+    _invalidate_menu_ram_only()
+    _set_redis_stale_flag(True)
 
     def _run() -> None:
         from app.db.session import SessionLocal
