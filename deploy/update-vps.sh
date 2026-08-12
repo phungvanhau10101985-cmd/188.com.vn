@@ -34,6 +34,7 @@
 #   DEPLOY_SKIP_DB_TUNING=1        không chạy tune-db-vps (.env pool/TTL + index + swap)
 #   DEPLOY_SKIP_SWAP=1             không tạo/bật swap (vẫn chạy pool .env + index nếu tuning bật)
 #   DEPLOY_APPLY_NGINX_RATE_LIMIT=1 áp rule rate-limit API nặng (by-slug/seo-clusters/user-behavior)
+#   DEPLOY_CANCEL_IMAGE_LOCALIZATION=1  (hiếm) cho phép relieve-db gọi free-api-now hủy job ảnh
 #
 set -euo pipefail
 
@@ -50,6 +51,17 @@ PM2_WEB="${PM2_WEB_NAME:-188-web}"
 API_INTERNAL_PORT="${API_INTERNAL_PORT:-8001}"
 WEB_INTERNAL_PORT="${WEB_INTERNAL_PORT:-3001}"
 DEPLOY_STOP_PM2_BEFORE_BUILD="${DEPLOY_STOP_PM2_BEFORE_BUILD:-1}"
+DEPLOY_LOCK="${PROJECT_ROOT}/deploy/.deploy-in-progress"
+
+clear_deploy_lock() {
+  rm -f "${DEPLOY_LOCK}" 2>/dev/null || true
+}
+
+# Báo watchdog cron bỏ qua trong lúc pm2 stop / build — tránh free-api-now hủy job ảnh.
+mkdir -p "$(dirname "${DEPLOY_LOCK}")"
+printf 'pid=%s\nstarted_at=%s\nbranch=%s\n' "$$" "$(date --iso-8601=seconds 2>/dev/null || date -Iseconds)" "${BRANCH}" >"${DEPLOY_LOCK}"
+trap clear_deploy_lock EXIT
+echo "==> Deploy lock: ${DEPLOY_LOCK} (watchdog sẽ skip)"
 
 ensure_postgres_database_for_deploy() {
   [[ "${DEPLOY_CREATE_DATABASE:-1}" == "1" ]] || return 0

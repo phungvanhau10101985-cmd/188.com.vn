@@ -38,6 +38,7 @@ build/
 
 # Logs & IDE
 *.log
+deploy/.deploy-in-progress
 .idea/
 .vscode/
 .cursor/

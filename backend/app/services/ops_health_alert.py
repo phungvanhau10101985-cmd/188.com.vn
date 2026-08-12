@@ -115,15 +115,18 @@ def build_recovery_commands(
         "# 1) Xem server đang nặng gì",
         "bash deploy/check-server-load.sh",
         "",
-        "# 2) Giải phóng pool DB + dừng OCR + restart API sạch (quan trọng nhất)",
-        "bash deploy/free-api-now.sh",
+        "# 2) Soft: dọn pool DB + restart API — GIỮ job bản địa hóa (ưu tiên)",
+        "bash deploy/relieve-db-after-restart.sh",
+        "",
+        "# 3) Chỉ khi storefront vẫn kẹt và chấp nhận HỦY job ảnh:",
+        "# bash deploy/free-api-now.sh",
         "",
     ]
 
     if has_ocr:
         lines.extend(
             [
-                "# (Tuỳ chọn) Hủy job bản địa hóa ảnh nếu vẫn thấy img loc trong check-server-load",
+                "# (Tuỳ chọn) Hủy job bản địa hóa ảnh nếu OCR đang làm treo API",
                 "bash deploy/cancel-image-localization-job.sh --all-active --nuke",
                 "",
             ]

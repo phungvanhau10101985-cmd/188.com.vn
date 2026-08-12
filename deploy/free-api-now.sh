@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Giải phóng API kẹt do job OCR ảnh — không dùng Python ORM (tránh treo).
 # Usage: cd /var/www/188.com.vn && bash deploy/free-api-now.sh
+#
+# CẢNH BÁO: script này HỦY CỨNG mọi job bản địa hóa queued/running.
+# Không gọi từ deploy/watchdog mặc định — chỉ khi storefront thật sự kẹt
+# và bạn chấp nhận mất tiến trình job (hoặc WATCHDOG_HARD_FREE=1 / RELIEVE_CANCEL_IMGLOC_JOBS=1).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

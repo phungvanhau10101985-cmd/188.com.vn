@@ -84,9 +84,25 @@ if command -v curl >/dev/null 2>&1; then
   fi
   echo "    GET /api/v1/products/ (storefront probe) → ${code}"
   if [[ "${code}" != "200" ]]; then
-    echo "⚠️  Products API chưa 200 — chạy free-api-now…"
-    bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
-    exit 1
+    if [[ "${RELIEVE_CANCEL_IMGLOC_JOBS:-0}" == "1" ]]; then
+      echo "⚠️  Products API chưa 200 — RELIEVE_CANCEL_IMGLOC_JOBS=1 → free-api-now…"
+      bash "${PROJECT_ROOT}/deploy/free-api-now.sh" || true
+    else
+      echo "⚠️  Products API chưa 200 — KHÔNG hủy job ảnh."
+      echo "    Thử: terminate idle + restart API mềm (giữ job queued/running để resume)."
+      health_terminate_idle_db_transactions
+      bash "${PROJECT_ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+      pm2 restart "${PM2_API}" --update-env 2>/dev/null || \
+        pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}"
+      pm2 save 2>/dev/null || true
+      sleep 3
+      code=$(health_curl_products_probe "${API_PORT}" 2 30)
+      echo "    GET /api/v1/products/ (sau soft restart) → ${code}"
+      if [[ "${code}" != "200" ]]; then
+        echo "    Vẫn lỗi — chạy tay khi cần: RELIEVE_CANCEL_IMGLOC_JOBS=1 bash deploy/free-api-now.sh"
+        exit 1
+      fi
+    fi
   fi
 
   db_code=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health/db" 8)
