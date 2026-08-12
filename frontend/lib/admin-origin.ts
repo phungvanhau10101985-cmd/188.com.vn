@@ -3,6 +3,23 @@
  * cần handoff token qua hash — localStorage không chia sẻ giữa hai origin.
  */
 
+export function getStorefrontOrigin(): string {
+  const fromEnv = (
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.NEXT_PUBLIC_DOMAIN ||
+    ''
+  )
+    .trim()
+    .replace(/\/$/, '');
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    if (host === 'localhost' || host === '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+  return fromEnv || 'https://188.com.vn';
+}
+
 export function getAdminOrigin(): string {
   const fromEnv = (process.env.NEXT_PUBLIC_ADMIN_ORIGIN || '').trim().replace(/\/$/, '');
   if (typeof window !== 'undefined') {

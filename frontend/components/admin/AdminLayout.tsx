@@ -13,6 +13,7 @@ import {
 } from '@/lib/admin-role';
 import { ADMIN_NAV_GROUPS, type AdminNavGroup } from '@/lib/admin-nav-config';
 import { clearAdminStepUp } from '@/lib/admin-step-up';
+import { getStorefrontOrigin } from '@/lib/admin-origin';
 
 function adminNavPathFromHref(href: string): string {
   return href.split('#')[0]?.split('?')[0] || href;
@@ -163,7 +164,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 pb-6 lg:py-2 lg:pb-8">
         {hydrated ? renderNavLinks() : <p className="px-3 py-2 text-sm text-slate-400">Đang tải menu...</p>}
       </nav>
-      <div className="border-t border-slate-700 p-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="border-t border-slate-700 p-2 shrink-0 pb-[max(0.5rem,env(safe-area-inset-bottom))] space-y-1">
+        <a
+          href={`${getStorefrontOrigin()}/`}
+          onClick={closeMobileNav}
+          className="block w-full rounded-lg px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-slate-700 hover:text-white lg:py-2"
+        >
+          Về cửa hàng 188.com.vn
+        </a>
         <button
           type="button"
           onClick={() => {

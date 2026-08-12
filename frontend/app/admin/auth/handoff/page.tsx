@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { setStoredAdminModules } from '@/lib/admin-role';
 import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
+import { getStorefrontOrigin } from '@/lib/admin-origin';
 
 /**
  * Nhận admin JWT từ hash (không gửi lên server) rồi ghi localStorage trên
@@ -64,6 +65,9 @@ export default function AdminSessionHandoffPage() {
         <p className="text-sm text-red-700">{error}</p>
         <a href="/admin/login" className="text-sm font-semibold text-[#ea580c] underline">
           Đăng nhập quản trị
+        </a>
+        <a href={`${getStorefrontOrigin()}/`} className="text-sm text-blue-600 underline">
+          Về trang chủ 188.com.vn
         </a>
       </div>
     );

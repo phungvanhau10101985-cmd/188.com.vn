@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { adminLogin, adminLoginVerifyOtp, type AdminLoginResponse } from '@/lib/admin-api';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
 import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
+import { getStorefrontOrigin } from '@/lib/admin-origin';
 import { getApiBaseUrl, ngrokFetchHeaders } from '@/lib/api-base';
 
 function safeAdminRedirect(value: string | null): string {
@@ -190,7 +190,9 @@ export default function AdminLoginPage() {
         )}
 
         <p className="mt-6 text-center text-sm text-gray-500">
-          <Link href="/" className="text-blue-600 hover:underline">Về trang chủ</Link>
+          <a href={getStorefrontOrigin() + '/'} className="text-blue-600 hover:underline">
+            Về trang chủ 188.com.vn
+          </a>
         </p>
       </div>
     </div>
