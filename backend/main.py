@@ -625,9 +625,19 @@ async def startup_event():
 
     try:
         from app.services.listing_import_queue import reconcile_all_queues_on_startup
+        from app.core.config import settings as _liq_settings
 
         reconcile_all_queues_on_startup()
-        print("   📋 Listing import queue: đã dọn snapshot kẹt sau restart (link running → pending).")
+        if getattr(_liq_settings, "LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP", True):
+            print(
+                "   📋 LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: "
+                "dọn snapshot kẹt + tự tiếp tục đợt Parse thẻ còn pending (~3s)."
+            )
+        else:
+            print(
+                "   📋 Listing import queue: đã dọn snapshot kẹt "
+                "(auto-resume tắt — admin bấm «Tiếp tục»)."
+            )
     except Exception as _e_liq:
         print(f"   ⚠️  listing import queue startup reconcile: {_e_liq}")
 

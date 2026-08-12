@@ -30,12 +30,13 @@ if [[ "${IL_RESUME}" == "1" ]]; then
 else
   upsert IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP true "${ENV_FILE}"
 fi
+upsert LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP  true    "${ENV_FILE}"
 upsert RUN_DB_INIT_ON_STARTUP               0       "${ENV_FILE}"
 upsert LEGACY_OOS_DEEPSEEK_ENABLED           false   "${ENV_FILE}"
 upsert GROUP_LISTING_SKIP_SLOW_SLUG_POOL     true    "${ENV_FILE}"
 
 if [[ "${IL_RESUME}" == "1" ]]; then
-  echo "✓ API safe env: tắt resume job ảnh (DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1); OOS redirect không gọi DeepSeek."
+  echo "✓ API safe env: tắt resume job ảnh (DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1); OOS redirect không gọi DeepSeek; listing queue auto-resume=on."
 else
-  echo "✓ API safe env: job bản địa hóa ảnh sẽ resume sau restart; OOS redirect không gọi DeepSeek."
+  echo "✓ API safe env: job ảnh + listing queue (Parse thẻ) sẽ resume sau restart; OOS redirect không gọi DeepSeek."
 fi

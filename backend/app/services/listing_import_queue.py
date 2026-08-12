@@ -204,7 +204,8 @@ def _worker_is_alive(token: str) -> bool:
 def _reconcile_queue_after_worker_loss(q: Dict[str, Any], token: str) -> bool:
     """
     Sau restart/deploy: thread worker mất nhưng snapshot vẫn ``running`` / item ``running``.
-    Đưa link kẹt về ``pending`` và ``run_status`` → ``paused`` để admin bấm Tiếp tục.
+    Đưa link kẹt về ``pending`` và ``run_status`` → ``paused``.
+    (Startup có thể auto-resume nếu LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP=true.)
     """
     if _worker_is_alive(token):
         return False
@@ -235,17 +236,44 @@ def _reconcile_queue_after_worker_loss(q: Dict[str, Any], token: str) -> bool:
     if has_pending and not has_running and rs in {"running", "pausing"}:
         q["run_status"] = "paused"
         if not (q.get("worker_error") or "").strip():
-            q["worker_error"] = "Worker dừng (restart server). Bấm «Tiếp tục» trên admin."
+            q["worker_error"] = (
+                "Worker dừng (restart server). Hệ thống sẽ tự tiếp tục sau khi API sẵn sàng "
+                "(hoặc bấm «Tiếp tục» trên admin)."
+            )
         changed = True
 
     return changed
 
 
+def _queue_should_auto_resume_after_restart(q: Dict[str, Any], token: str, *, was_active: bool) -> bool:
+    """Đợt bị cắt vì restart — không resume nếu admin đã «Tạm dừng» / «Dừng hẳn»."""
+    if q.get("stop_requested") or str(q.get("run_status") or "") == "stopped":
+        return False
+    if bool(q.get("pause_requested")):
+        return False
+    if _worker_is_alive(token):
+        return False
+    items = q.get("items") or []
+    if not any(it.get("state") == "pending" for it in items):
+        return False
+    err = (q.get("worker_error") or "").casefold()
+    rs = str(q.get("run_status") or "")
+    if was_active or rs in {"running", "pausing"}:
+        return True
+    if "restart server" in err:
+        return True
+    return False
+
+
 def reconcile_all_queues_on_startup() -> None:
-    """Gọi khi khởi động API — dọn snapshot listing queue bị kẹt sau deploy."""
+    """Gọi khi khởi động API — dọn snapshot kẹt; tuỳ env thì tự resume worker."""
     try:
+        from app.core.config import settings
         from app.db.session import SessionLocal
         from app.models.listing_import_queue_snapshot import ListingImportQueueSnapshot
+
+        auto_resume = bool(getattr(settings, "LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP", True))
+        to_resume: List[Tuple[str, Optional[int]]] = []
 
         db = SessionLocal()
         try:
@@ -258,11 +286,38 @@ def reconcile_all_queues_on_startup() -> None:
                     q = load_queue(tok)
                     if not q:
                         continue
+                    was_active = str(q.get("run_status") or "") in {"running", "pausing"}
                     if _reconcile_queue_after_worker_loss(q, tok):
                         save_queue(q)
                         logger.info("listing queue %s… reconciled on startup", tok[:12])
+                    if auto_resume and _queue_should_auto_resume_after_restart(
+                        q, tok, was_active=was_active
+                    ):
+                        to_resume.append((tok, q.get("created_by")))
         finally:
             db.close()
+
+        if not to_resume:
+            return
+
+        def _delayed_resume() -> None:
+            import time
+
+            time.sleep(3.0)
+            for tok, admin_id in to_resume:
+                try:
+                    resume(tok, admin_id)
+                    logger.info("listing queue %s… auto-resumed after API restart", tok[:12])
+                except Exception as exc:
+                    logger.warning(
+                        "listing queue %s… auto-resume failed: %s", tok[:12], exc
+                    )
+
+        threading.Thread(
+            target=_delayed_resume,
+            name="listing-import-queue-auto-resume",
+            daemon=True,
+        ).start()
     except Exception as exc:
         logger.warning("listing_import_queue startup reconcile failed: %s", exc)
 

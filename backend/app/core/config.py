@@ -526,6 +526,10 @@ class Settings:
         self.IMPORT_1688_BATCH_RESUME_ON_STARTUP: bool = os.getenv(
             "IMPORT_1688_BATCH_RESUME_ON_STARTUP", ""
         ).strip().lower() in ("1", "true", "yes")
+        # Parse thẻ Taobao / listing queue: sau restart API tự «Tiếp tục» đợt đang chạy (không resume nếu admin đã Tạm dừng).
+        self.LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: bool = os.getenv(
+            "LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP", "true"
+        ).strip().lower() in ("1", "true", "yes")
         _import_batch_delay_raw = os.getenv(
             "IMPORT_1688_BATCH_INTER_JOB_DELAY_SECONDS", "0"
         ).strip()
