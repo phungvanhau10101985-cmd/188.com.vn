@@ -123,3 +123,21 @@ def test_apply_import_keeps_rule_match():
     }
     apply_import_rating_question_groups_to_product_data(pd)
     assert pd["group_rating"] == 27
+
+
+def test_apply_import_skips_groups_when_taxonomy_auto_created():
+    pd = {
+        "name": "Sản phẩm ngành mới nữ",
+        "category": "Ngành mới Nữ",
+        "subcategory": "Nhóm mới",
+        "sub_subcategory": "Chi tiết mới",
+        "group_rating": 0,
+        "_taxonomy_auto_created_levels": "1,2,3",
+    }
+    with patch("app.services.product_rating_question_groups._ai_fallback_import_groups") as ai_mock:
+        warns: list[str] = []
+        apply_import_rating_question_groups_to_product_data(pd, warns)
+        ai_mock.assert_not_called()
+    assert pd["group_rating"] == 888
+    assert pd["group_question"] == 0
+    assert any("để trống nhóm" in w for w in warns)

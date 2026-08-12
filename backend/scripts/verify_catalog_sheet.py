@@ -1,5 +1,5 @@
 """Kiểm tra nhanh tab catalog Google Sheet."""
-from app.services.google_sheets_sku_sync import _escape_sheet_title, _get_sheets_service, _sheet_title_for_gid
+from app.services.google_sheets_client import _escape_sheet_title, _get_sheets_service, _sheet_title_for_gid
 
 SPREAD = "1iRaVEHjRupYRiB6sVv87m43EaZlR_I1laCuCL77CzRw"
 GID = 1079257836

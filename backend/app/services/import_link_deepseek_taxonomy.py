@@ -1,7 +1,10 @@
 """
 Gán danh mục cấp 1–3: đọc taxonomy từ bảng `categories`, gọi DeepSeek theo **chinese_name** (file import)
-hoặc tên Việt. Chỉ ghi được bộ ba đã **có sẵn** trong taxonomy
-(import taxonomy_import.xlsx) — không tạo nhánh mới trong DB và không chấp nhận chuỗi do model bịa ngoài danh sách.
+hoặc tên Việt.
+
+Ưu tiên khớp bộ ba đã có trong taxonomy (taxonomy_import.xlsx). Nếu không khớp và
+``IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED`` bật: bổ sung nhánh thiếu (chỉ tạo mới, không sửa cũ)
+qua ``taxonomy_auto_create.ensure_additive_category_triple`` — lần sau coi như taxonomy chuẩn.
 """
 from __future__ import annotations
 
@@ -327,10 +330,11 @@ QUY TẮC PHÂN LOẠI (bắt buộc — áp dụng khi đọc TÊN sản phẩm
 - KHÔNG nhắc sản phẩm khác, KHÔNG gợi ý phối đồ/kết hợp hàng khác trong khach_hang.
 
 RÀNG BUỘC DANH MỤC:
-- CẤM tạo tên danh mục mới; CẤM ghi cat1/cat2/cat3 không trùng một dòng trong BẢNG (taxonomy đã import DB).
-- Hệ thống chỉ ghi sản phẩm khi bộ ba trùng đúng một nhánh có sẵn — nếu model trả chuỗi lạ → bỏ qua, không tự thêm danh mục vào DB.
-- Không tự bịa cat2/cat3 không có trong bảng.
-- cat1 phải trùng chính xác một dòng ## cấp 1 trong bảng.
+- Ưu tiên SAO CHÉP nguyên văn cat1/cat2/cat3 từ BẢNG (taxonomy đã import DB).
+- Nếu không có nhánh phù hợp trong bảng: vẫn trả cat1/cat2/cat3 tiếng Việt ngắn, đúng loại hàng (hệ thống có thể bổ sung nhánh mới).
+  • Ưu tiên tái dùng đúng tên cat1 (và cat2) đã có trong bảng khi chỉ thiếu cat3 hoặc cat2+cat3.
+  • Chỉ đề xuất cat1 hoàn toàn mới khi sản phẩm không thuộc bất kỳ ## cấp 1 nào trong bảng.
+- Không dùng ký tự CJK trong cat1/cat2/cat3.
 
 QUY TẮC cat1 (chọn đúng nhánh — khớp tên trong bảng):
 - Giày, dép, sandal, boot… → chỉ «Giày dép Nam» HOẶC «Giày dép Nữ» (không xếp giày dép vào «Thời trang»).
@@ -353,7 +357,7 @@ SANDAL NỮ — PHÂN NHÁNH cat3 (nếu bảng có các cat3 tương ứng):
 KIỂM TRA CUỐI:
 - JSON đủ 14 key; không markdown bọc ngoài (trừ \\n trong mo_ta_vi / thong_so_kich_thuoc_vi).
 - Mọi giá trị string không chứa chữ Trung/Nhật/Hàn.
-- Bộ cat1–cat3 là một dòng hợp lệ trong bảng.
+- Ưu tiên bộ cat1–cat3 có trong bảng; nếu thiếu thì đề xuất tên Việt hợp lệ (tái dùng cat1/cat2 khi có thể).
 """
 
 
@@ -673,6 +677,37 @@ def translate_product_listing_gemini_only(
     return tv, mt_vi, warnings
 
 
+def _try_auto_create_taxonomy_triple(
+    db: Session,
+    cat1: str,
+    cat2: str,
+    cat3: str,
+) -> Tuple[Optional[Dict[str, str]], List[str]]:
+    """
+    Khi bộ ba không có trong taxonomy: tạo bổ sung (additive) nếu cấu hình bật.
+    """
+    warnings: List[str] = []
+    if not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
+        warnings.append(
+            f"deepseek_taxonomy: bộ «{cat1} / {cat2} / {cat3}» không trùng taxonomy "
+            "(IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED=false — không tạo mới)."
+        )
+        return None, warnings
+    from app.services.taxonomy_auto_create import ensure_additive_category_triple
+
+    ensured, tw = ensure_additive_category_triple(db, cat1, cat2, cat3)
+    warnings.extend(tw)
+    if not ensured:
+        return None, warnings
+    return {
+        "cat1": ensured["cat1"],
+        "cat2": ensured["cat2"],
+        "cat3": ensured["cat3"],
+        "full_slug": ensured.get("full_slug") or "",
+        "created_levels": str(ensured.get("created_levels") or ""),
+    }, warnings
+
+
 def classify_product_taxonomy_deepseek(
     db: Session,
     product_name: str,
@@ -709,26 +744,34 @@ def classify_product_taxonomy_deepseek(
 
     triples = load_active_category_triples(db)
     if not triples:
+        if not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
+            warnings.append(
+                "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
+            )
+            return None, warnings
         warnings.append(
-            "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
+            "deepseek_taxonomy: chưa có nhánh cat3 active — sẽ đề xuất + tạo taxonomy mới (auto_create)."
         )
-        return None, warnings
-
-    triples_use, fb = filter_triples_by_gender_hint(triples, gender_hint_eff)
-    if fb:
-        warnings.append(
-            "deepseek_taxonomy: gợi ý giới tính từ NCC không khớp nhánh cat1 Nam/Nữ trong taxonomy — phân loại không lọc giới."
+        triples_use: List[Dict[str, str]] = []
+        snap_index: Dict[str, Dict[str, str]] = {}
+        block = (
+            "(Chưa có taxonomy trong DB. Đề xuất cat1/cat2/cat3 tiếng Việt ngắn, đúng ngành hàng thương mại VN.)"
         )
-    elif gender_hint_eff in ("female", "male"):
-        logger.info("deepseek_taxonomy: supplier gender hint=%s → đã lọc nhánh cat1.", gender_hint_eff)
+    else:
+        triples_use, fb = filter_triples_by_gender_hint(triples, gender_hint_eff)
+        if fb:
+            warnings.append(
+                "deepseek_taxonomy: gợi ý giới tính từ NCC không khớp nhánh cat1 Nam/Nữ trong taxonomy — phân loại không lọc giới."
+            )
+        elif gender_hint_eff in ("female", "male"):
+            logger.info("deepseek_taxonomy: supplier gender hint=%s → đã lọc nhánh cat1.", gender_hint_eff)
 
-    block, truncated = _build_taxonomy_prompt_block(triples_use)
-    if truncated:
-        warnings.append(
-            "deepseek_taxonomy: bảng danh mục quá dài — đã cắt bớt phần cuối trong prompt (có thể sai lệch)."
-        )
-
-    snap_index = _build_snap_index(triples_use)
+        block, truncated = _build_taxonomy_prompt_block(triples_use)
+        if truncated:
+            warnings.append(
+                "deepseek_taxonomy: bảng danh mục quá dài — đã cắt bớt phần cuối trong prompt (có thể sai lệch)."
+            )
+        snap_index = _build_snap_index(triples_use)
 
     gender_lines = ""
     if gender_hint_eff == "female":
@@ -749,7 +792,8 @@ def classify_product_taxonomy_deepseek(
         + "\n\n---\n"
         "Nhiệm vụ: đọc BẢNG DANH MỤC, **TÊN** (thường là tiếng Trung từ NCC) và **NGỮ CẢNH THÔNG SỐ/MÔ TẢ**; "
         "ưu tiên trường giới tính do NCC ghi (vd хүйс / Эмэгтэй = nữ; Эрэгтэй = nam). "
-        "Chọn đúng một bộ cat1/cat2/cat3 **sao chép nguyên văn từ bảng**, điền đủ các trường tiếng Việt trong JSON (khách hàng, tên, chất liệu, mô tả, thương hiệu, xuất xứ, phong cách, dịp, trọng lượng, gót/đế…).\n"
+        "Ưu tiên chọn đúng một bộ cat1/cat2/cat3 **có trong bảng**; nếu thiếu nhánh phù hợp thì đề xuất tên Việt "
+        "(ưu tiên giữ cat1/cat2 có sẵn). Điền đủ các trường tiếng Việt trong JSON.\n"
         "Không dùng markdown; không giải thích ngoài JSON."
     )
 
@@ -765,7 +809,8 @@ def classify_product_taxonomy_deepseek(
         f"{gender_lines}"
         f"{ctx_block}"
         f"TÊN SẢN PHẨM (ưu tiên tiếng Trung / tên NCC gốc):\n{name}\n\n"
-        "QUAN TRỌNG: cat1, cat2, cat3 phải là ba chuỗi xuất hiện nguyên văn trong bảng trên — không được phép là danh mục ngoài bảng.\n"
+        "QUAN TRỌNG: ưu tiên cat1/cat2/cat3 nguyên văn trong bảng; nếu thật sự thiếu nhánh phù hợp thì đề xuất tên Việt mới "
+        "(ưu tiên giữ cat1/cat2 có sẵn, chỉ thêm cấp thiếu).\n"
         'Trả về DUY NHẤT một JSON đủ 14 key (mo_ta_vi / thong_so_kich_thuoc_vi có thể dùng \\n giữa các ý):\n'
         '{"cat1":"...","cat2":"...","cat3":"...","khach_hang":"...","ten_tieng_viet":"...","chat_lieu_vi":"","mo_ta_vi":"...",'
         '"thuong_hieu_vi":"","xuat_xu_vi":"","phong_cach_vi":"","dip_vi":"","trong_luong_vi":"","chieu_cao_got_vi":"",'
@@ -838,12 +883,21 @@ def classify_product_taxonomy_deepseek(
     if "mo_ta_vi" not in parsed:
         warnings.append("deepseek_taxonomy: model thiếu key mo_ta_vi trong JSON (coi như rỗng — giữ mô tả NCC).")
 
-    canon = _resolve_triple_only_from_taxonomy(c1, c2, c3, triples_use, snap_index)
+    canon = _resolve_triple_only_from_taxonomy(c1, c2, c3, triples_use, snap_index) if triples_use else None
     if not canon:
+        created, cw = _try_auto_create_taxonomy_triple(db, c1, c2, c3)
+        warnings.extend(cw)
+        if not created:
+            if triples_use:
+                warnings.append(
+                    f"deepseek_taxonomy: bộ «{c1} / {c2} / {c3}» không trùng nhánh nào trong taxonomy hiện có "
+                    "và không tạo được danh mục mới."
+                )
+            return None, warnings
+        canon = created
         warnings.append(
-            f"deepseek_taxonomy: bộ «{c1} / {c2} / {c3}» không trùng nhánh nào trong taxonomy hiện có — không gán danh mục (không tạo danh mục mới)."
+            f"deepseek_taxonomy: đã bổ sung/gán nhánh «{canon['cat1']} / {canon['cat2']} / {canon['cat3']}»."
         )
-        return None, warnings
 
     if _violates_gender_hint(gender_hint_eff, canon.get("cat1") or ""):
         warnings.append(
@@ -1379,8 +1433,9 @@ def _merge_product_info_categories(
 
 def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str, Any]) -> List[str]:
     """
-    Điền category / subcategory / sub_subcategory (+ slug_seo = full_slug cat3) vào product_data
-    **chỉ khi** bộ ba trùng đúng một nhánh taxonomy đã có trong DB — không bao giờ tạo danh mục mới.
+    Điền category / subcategory / sub_subcategory (+ slug_seo = full_slug cat3) vào product_data.
+    Ưu tiên khớp taxonomy có sẵn; nếu thiếu nhánh và ``IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED``
+    thì bổ sung cat thiếu (không sửa nhánh cũ).
 
     Nếu taxonomy có cả nhánh Nam/Nữ cho cùng loại cat1 mà text không cho biết giới tính,
     vẫn để DeepSeek tự chọn từ toàn bộ taxonomy — không fallback sang Gemini.
@@ -1439,7 +1494,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         return warnings
 
     triples = load_active_category_triples(db)
-    if not triples:
+    if not triples and not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
         warnings.append(
             "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
         )
@@ -1451,7 +1506,7 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         apply_listing_year_sanitize_to_product_data(product_data)
         return warnings
 
-    needs_gender = taxonomy_has_ambiguous_gender_cat1(triples)
+    needs_gender = taxonomy_has_ambiguous_gender_cat1(triples) if triples else False
     merged_hint: Optional[str] = None
 
     if needs_gender:
@@ -1493,10 +1548,15 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         warnings.append("deepseek_taxonomy: ten_tieng_viet rỗng hoặc còn chữ ngoại ngữ — giữ nguyên kết quả DeepSeek, không fallback Gemini.")
 
     product_data.pop("taxonomy_import_error", None)
+    product_data.pop("_taxonomy_auto_created_levels", None)
 
     product_data["category"] = triple["cat1"]
     product_data["subcategory"] = triple["cat2"]
     product_data["sub_subcategory"] = triple["cat3"]
+    created_lv = str(triple.get("created_levels") or "").strip()
+    if created_lv:
+        # Danh mục vừa bổ sung — để trống nhóm đánh giá/câu hỏi (admin gán sau).
+        product_data["_taxonomy_auto_created_levels"] = created_lv
     fs = (triple.get("full_slug") or "").strip()
     if fs:
         product_data["slug_seo"] = fs

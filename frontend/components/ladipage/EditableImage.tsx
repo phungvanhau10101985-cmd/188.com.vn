@@ -26,6 +26,8 @@ interface EditableImageProps {
 
   aspectClassName?: string;
 
+  objectFit?: 'cover' | 'contain';
+
 }
 
 
@@ -50,11 +52,15 @@ export default function EditableImage({
 
   aspectClassName = 'aspect-square',
 
+  objectFit = 'cover',
+
 }: EditableImageProps) {
 
   const [showPopover, setShowPopover] = useState(false);
 
   const [prompt, setPrompt] = useState(initialPrompt);
+
+  const fitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
 
 
@@ -74,7 +80,7 @@ export default function EditableImage({
 
           sizes="(max-width: 768px) 100vw, 50vw"
 
-          className="object-cover"
+          className={fitClass}
 
         />
 

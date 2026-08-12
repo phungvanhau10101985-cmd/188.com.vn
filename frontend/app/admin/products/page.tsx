@@ -49,40 +49,6 @@ function isGoogleSheetsRateLimitMessage(message: string): boolean {
   );
 }
 
-/** Tóm tắt toast khi đồng bộ nhiều Google Sheet (primary + _2). */
-function formatGoogleSheetSyncTargetsSummary(
-  targets: Array<{
-    ok: boolean;
-    field?: string;
-    row_mode?: string;
-    sheet_title?: string;
-    sheet_gid?: number;
-    error?: string;
-    updated_rows?: number;
-    unchanged_rows?: number;
-    added_rows?: number;
-    removed_orphan_rows?: number;
-    removed_duplicate_rows?: number;
-  }>,
-): string {
-  return targets
-    .map((t, i) => {
-      const tag = t.sheet_title ? `"${t.sheet_title}"` : `Bảng ${i + 1}`;
-      if (!t.ok) return `${tag}: ${t.error ?? 'lỗi'}`;
-      const parts: string[] = [];
-      if (t.updated_rows != null) parts.push(`${t.updated_rows} cập nhật`);
-      if (t.unchanged_rows != null) parts.push(`${t.unchanged_rows} giữ nguyên`);
-      if (t.added_rows != null && t.added_rows > 0) parts.push(`+${t.added_rows} mới`);
-      if (t.removed_orphan_rows != null && t.removed_orphan_rows > 0)
-        parts.push(`gỡ ${t.removed_orphan_rows} mã thừa (A/B)`);
-      if (t.removed_duplicate_rows != null && t.removed_duplicate_rows > 0)
-        parts.push(`gỡ ${t.removed_duplicate_rows} trùng (A/B)`);
-      const rm = t.row_mode && t.row_mode !== 'full' ? `, ${t.row_mode}` : '';
-      return `${tag} (${t.field ?? '?'}${rm}): ${parts.length ? parts.join(' · ') : 'ổn định'}`;
-    })
-    .join(' — ');
-}
-
 /** Lưu job_id đang chạy để khôi phục khi reload trang giữa chừng. */
 const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 
@@ -888,7 +854,6 @@ export default function AdminProductsPage() {
   /** Admin bấm Hủy ngay — poll/handleImport không hiện lỗi theo dõi trùng. */
   const importUserCancelledRef = useRef(false);
   const [exporting, setExporting] = useState(false);
-  const [googleSheetSyncing, setGoogleSheetSyncing] = useState(false);
   const [googleSheetCatalogSyncing, setGoogleSheetCatalogSyncing] = useState(false);
   /** Còn lại giây trước khi cho phép thử đồng bộ lại (quota 429). null = không giới hạn. */
   const [googleSheetRateLimitSec, setGoogleSheetRateLimitSec] = useState<number | null>(null);
@@ -906,14 +871,9 @@ export default function AdminProductsPage() {
 
   const catalogFeedBase = useMemo(() => getCatalogFeedApiBaseUrl(), []);
 
-  const showAdminGoogleSheetSync =
-    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== '0' &&
-    process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_SYNC !== 'false';
   const showAdminGoogleSheetCatalogSync =
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_CATALOG_SYNC !== '0' &&
     process.env.NEXT_PUBLIC_ADMIN_GOOGLE_SHEET_CATALOG_SYNC !== 'false';
-  const googleSheetsEditorUrl = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL || '').trim();
-  const googleSheetsEditorUrl2 = (process.env.NEXT_PUBLIC_GOOGLE_SHEETS_EDITOR_URL_2 || '').trim();
   const googleSheetsCatalogEditorUrl = (
     process.env.NEXT_PUBLIC_GOOGLE_SHEETS_CATALOG_EDITOR_URL || ''
   ).trim();
@@ -2697,67 +2657,6 @@ export default function AdminProductsPage() {
       exportInProgressRef.current = false;
       setExporting(false);
       void fetchProducts({ silent: true });
-    }
-  };
-
-  const handleSyncGoogleSheet = async () => {
-    if (googleSheetRateLimitSec !== null) return;
-    setGoogleSheetSyncing(true);
-    try {
-      const r = await adminProductAPI.syncGoogleSheetSkus();
-      if (r.skipped) {
-        showToast(
-          'err',
-          r.reason === 'disabled'
-            ? 'Đồng bộ mã đang tắt trên server (kiểm tra GOOGLE_SHEETS_SKU_SYNC_ENABLED).'
-            : 'Không đồng bộ mã.',
-          6000,
-        );
-        return;
-      }
-      if (!r.ok) {
-        const errRaw = r.error ?? 'Đồng bộ mã thất bại';
-        if (isGoogleSheetsRateLimitMessage(errRaw)) {
-          setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
-          return;
-        }
-        if (r.partial && r.targets && r.targets.length > 0) {
-          showToast(
-            'err',
-            `Đồng bộ một phần: ${errRaw}. Chi tiết: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
-            10000,
-          );
-          return;
-        }
-        showToast('err', errRaw.length > 500 ? `${errRaw.slice(0, 500)}…` : errRaw, 8000);
-        return;
-      }
-      if (r.targets && r.targets.length > 1) {
-        showToast(
-          'ok',
-          `Đồng bộ mã: ${formatGoogleSheetSyncTargetsSummary(r.targets)}`,
-          9000,
-        );
-        return;
-      }
-      const parts: string[] = [];
-      if (r.updated_rows != null) parts.push(`${r.updated_rows} hàng cập nhật`);
-      if (r.unchanged_rows != null) parts.push(`${r.unchanged_rows} hàng giữ nguyên`);
-      if (r.added_rows != null && r.added_rows > 0) parts.push(`+${r.added_rows} hàng mới`);
-      if (r.removed_orphan_rows != null && r.removed_orphan_rows > 0)
-        parts.push(`gỡ ${r.removed_orphan_rows} mã thừa (A/B)`);
-      if (r.removed_duplicate_rows != null && r.removed_duplicate_rows > 0)
-        parts.push(`gỡ ${r.removed_duplicate_rows} trùng (A/B)`);
-      showToast('ok', parts.length ? `Đồng bộ mã: ${parts.join(' · ')}` : 'Đã đồng bộ mã', 7000);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Đồng bộ mã lỗi';
-      if (isGoogleSheetsRateLimitMessage(msg)) {
-        setGoogleSheetRateLimitSec(GOOGLE_SHEET_RATE_LIMIT_COOLDOWN_SEC);
-      } else {
-        showToast('err', msg, 8000);
-      }
-    } finally {
-      setGoogleSheetSyncing(false);
     }
   };
 
@@ -5071,58 +4970,6 @@ export default function AdminProductsPage() {
               >
                 {exporting ? 'Đang export...' : 'Export Excel'}
               </button>
-              {showAdminGoogleSheetSync ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => void handleSyncGoogleSheet()}
-                    disabled={googleSheetSyncing || googleSheetRateLimitSec !== null}
-                    className="inline-flex h-9 items-center px-3 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
-                    title={
-                      googleSheetRateLimitSec !== null
-                        ? 'Quota Google Sheet (429): chờ hết đếm ngược rồi thử lại.'
-                        : 'Ghi mã prefix + SKU lên 2 Sheet vận hành. Có thể mất 3–5 phút.'
-                    }
-                    aria-busy={googleSheetSyncing}
-                    aria-label="Đồng bộ mã lên Google Sheet"
-                  >
-                    {googleSheetSyncing
-                      ? 'Đang đồng bộ mã…'
-                      : googleSheetRateLimitSec !== null && googleSheetRateLimitSec > 0
-                        ? `Chờ ${googleSheetRateLimitSec}s…`
-                        : googleSheetRateLimitSec === 0
-                          ? 'Đang mở khóa…'
-                          : 'Đồng bộ mã'}
-                  </button>
-                  {(googleSheetsEditorUrl || googleSheetsEditorUrl2) ? (
-                    <span className="hidden sm:inline text-gray-300" aria-hidden>
-                      |
-                    </span>
-                  ) : null}
-                  {googleSheetsEditorUrl ? (
-                    <a
-                      href={googleSheetsEditorUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-9 items-center text-xs text-sky-800 hover:underline px-1"
-                      title="Bảng primary trên backend"
-                    >
-                      {googleSheetsEditorUrl2 ? 'Sheet prefix' : 'Mở Google Sheet'}
-                    </a>
-                  ) : null}
-                  {googleSheetsEditorUrl2 ? (
-                    <a
-                      href={googleSheetsEditorUrl2}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-9 items-center text-xs text-sky-800 hover:underline px-1"
-                      title="Bảng phụ SKU"
-                    >
-                      Sheet SKU
-                    </a>
-                  ) : null}
-                </>
-              ) : null}
               {showAdminGoogleSheetCatalogSync ? (
                 <>
                   <button
@@ -5130,7 +4977,6 @@ export default function AdminProductsPage() {
                     onClick={() => void handleSyncGoogleSheetCatalog()}
                     disabled={
                       googleSheetCatalogSyncing ||
-                      googleSheetSyncing ||
                       googleSheetRateLimitSec !== null
                     }
                     className="inline-flex h-9 items-center px-3 bg-violet-600 text-white rounded-lg hover:bg-violet-700 text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
@@ -5164,9 +5010,8 @@ export default function AdminProductsPage() {
                 </>
               ) : null}
             </div>
-            {(showAdminGoogleSheetSync || showAdminGoogleSheetCatalogSync) ? (
+            {showAdminGoogleSheetCatalogSync ? (
               <p className="text-xs text-gray-500 pt-1">
-                <span className="font-medium text-sky-800">Đồng bộ mã</span> → prefix + SKU (2 link bên cạnh).{' '}
                 <span className="font-medium text-violet-800">Đồng bộ sản phẩm</span> → bảng đầy đủ 41 cột
                 {googleSheetsCatalogEditorUrl ? (
                   <>

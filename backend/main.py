@@ -765,6 +765,21 @@ async def startup_event():
     except Exception as _e_vps_bk:
         print(f"   ⚠️  VPS backup scheduler startup: {_e_vps_bk}")
 
+    try:
+        from app.services.google_sheets_hang_dat_moi_autofill import (
+            start_hang_dat_moi_autofill_daemon_if_enabled,
+        )
+        from app.core.config import settings as _hdm_settings
+
+        start_hang_dat_moi_autofill_daemon_if_enabled()
+        if getattr(_hdm_settings, "GOOGLE_SHEETS_HANG_DAT_MOI_AUTOFILL_ENABLED", False):
+            print(
+                "   📋 Hàng Đặt Mới autofill: Q→S/T/U/W/AB mỗi "
+                f"{getattr(_hdm_settings, 'GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS', 2)}s."
+            )
+    except Exception as _e_hdm:
+        print(f"   ⚠️  Hàng Đặt Mới autofill startup: {_e_hdm}")
+
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
     if _db_url.startswith("postgresql"):

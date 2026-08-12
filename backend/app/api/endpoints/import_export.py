@@ -1231,18 +1231,17 @@ def _require_cron_secret(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@router.post("/sync/google-sheet-skus")
-def sync_google_sheet_skus(
+@router.post("/sync/google-sheet-hang-dat-moi-autofill")
+def sync_google_sheet_hang_dat_moi_autofill(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_privileged_admin),
 ):
     """
-    Đồng bộ tay Google Sheet với DB (một hoặc hai bảng: GOOGLE_SHEETS_SKU_* + tuỳ chọn *_2).
-    Cột A theo từng bảng (FIELD / _2); ROW_MODE=key_time → chỉ A+B. Bảng full: B–E như COLUMN_COUNT.
+    Chạy một vòng autofill tay: cột Q (Mã đặt) dạng C0156/XL/2 → U giá, W link TQ, AB tên shop TQ.
     """
-    from app.services.google_sheets_sku_sync import sync_product_skus_to_google_sheet
+    from app.services.google_sheets_hang_dat_moi_autofill import process_hang_dat_moi_autofill
 
-    return sync_product_skus_to_google_sheet(db)
+    return process_hang_dat_moi_autofill(db)
 
 
 @router.post("/sync/google-sheet-product-catalog")

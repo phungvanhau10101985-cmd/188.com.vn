@@ -567,7 +567,7 @@ function StudioAiImageSettings({
         </select>
         {materialLocked ? (
           <p className="mt-1 text-[11px] text-amber-800">
-            Ảnh chất liệu luôn dùng Pro 2K (cận cảnh + callout ổn định hơn).
+            Ảnh chất liệu luôn dùng Pro 2K — collage nhiều góc cận cảnh (4:3 ngang).
           </p>
         ) : null}
       </label>
@@ -575,8 +575,8 @@ function StudioAiImageSettings({
         <span className="font-medium text-slate-800">Tỷ lệ khung hình</span>
         <select
           className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
-          value={aspectRatio}
-          disabled={disabled}
+          value={materialLocked ? '4:3' : aspectRatio}
+          disabled={disabled || materialLocked}
           onChange={(e) => {
             const v = e.target.value as StudioAspectRatio;
             onAspectRatioChange(v);
@@ -592,7 +592,7 @@ function StudioAiImageSettings({
       </label>
       <p className={`text-[11px] text-slate-500 ${compact ? 'sm:col-span-2' : 'sm:col-span-2'}`}>
         {materialLocked
-          ? 'Tỷ lệ khung hình vẫn theo lựa chọn của bạn.'
+          ? 'Ảnh chất liệu cố định 4:3 ngang — collage 1 panel lớn + 4 strip cận cảnh.'
           : 'Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.'}
       </p>
     </div>
@@ -1677,43 +1677,6 @@ export default function AdminManualProductCreatePage() {
     }
   }
 
-  async function submitAdopt() {
-    if (!job?.job_id) return;
-    if (formKind !== 'gallery' && formKind !== 'detail') return;
-    if (job.status === 'generating' || job.status === 'publishing') {
-      setFormError('Ảnh đang được tạo — vui lòng đợi vài giây.');
-      return;
-    }
-    const urls = sanitizedFormRefUrls.filter(Boolean);
-    if (!urls.length) {
-      setFormError('Chọn ít nhất 1 ảnh đã tạo để dùng làm ảnh mục này.');
-      return;
-    }
-    setFormError('');
-    setStudioBusy(true);
-    try {
-      const fresh = await manualProductCreateAPI.adoptImages(job.job_id, {
-        kind: formKind,
-        urls,
-      });
-      setJob(fresh);
-      setFormPrompt('');
-      const pool = fresh.studio?.ref_pool || [];
-      setFormRefUrls(studioDefaultRefUrls(pool, formKind, 0));
-      setStudioBusy(false);
-      pushToast({
-        title: formKind === 'gallery' ? 'Đã thêm ảnh gallery' : 'Đã thêm ảnh chi tiết',
-        description: fresh.message || '',
-        variant: 'success',
-      });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Không dùng được ảnh đã chọn';
-      setFormError(msg);
-      setStudioBusy(false);
-      pushToast({ title: 'Không thêm được ảnh', description: msg, variant: 'error' });
-    }
-  }
-
   async function submitGenerate(overrides?: {
     kind?: typeof formKind;
     name?: string;
@@ -2791,7 +2754,7 @@ export default function AdminManualProductCreatePage() {
 
               {formKind === 'material' ? (
                 <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                  Ảnh cận cảnh chất liệu — AI đọc chất liệu đã nhập ở bước 1
+                  Collage chi tiết chất liệu — AI đọc chất liệu đã nhập ở bước 1
                   {material.trim() ? (
                     <>
                       : <strong>{material.trim()}</strong>
@@ -2800,8 +2763,9 @@ export default function AdminManualProductCreatePage() {
                     ' (chưa có — quay lại bước Thuộc tính để nhập)'
                   )}
                   , tự soạn 3 ưu điểm riêng của đúng chất liệu đó (DeepSeek — vd lụa thì nói óng ảnh/mát, da thì nói vân da/bền) rồi in lên ảnh dạng nhãn tiếng Việt.{' '}
-                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI zoom vào vùng chất liệu trực quan nhất
-                  (thân áo/vải chính, mặt túi, upper giày…) và đặt nhãn ưu điểm ở góc, không che vùng texture. Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
+                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI ghép collage «Chi tiết chất liệu»:
+                  1 panel ngang lớn + 4 strip cận cảnh khác nhau (vải, đường may, cổ tay, viền…), nhãn ưu điểm ở margin.
+                  Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
               ) : null}
 
@@ -2829,7 +2793,7 @@ export default function AdminManualProductCreatePage() {
                       : formKind === 'color' && pendingColorIndex >= 1
                         ? 'Upload ảnh mẫu SP khách cho màu này — AI thay sản phẩm theo ảnh mới; chỉ giữ khuôn mặt từ ảnh màu #1.'
                         : formKind === 'gallery' || formKind === 'detail'
-                          ? 'Gồm ảnh màu và ảnh đã tạo. Có thể dùng luôn làm ảnh mục này, hoặc chọn làm tham khảo rồi tạo mới.'
+                          ? 'Gồm ảnh màu và ảnh đã tạo. Chọn làm tham khảo rồi Tạo mới — gallery/chi tiết để đăng chọn ở bước trước khi đăng.'
                           : 'Gồm ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.'}
                   </p>
                   {formKind === 'color' ? (
@@ -2913,20 +2877,6 @@ export default function AdminManualProductCreatePage() {
               ) : null}
 
               <div className="flex flex-wrap gap-2">
-                {(formKind === 'gallery' || formKind === 'detail') && sanitizedFormRefUrls.length > 0 ? (
-                  <button
-                    type="button"
-                    disabled={studioBusy || uploading}
-                    onClick={() => submitAdopt()}
-                    className="px-4 py-2.5 rounded-lg border border-emerald-600 text-emerald-800 bg-emerald-50 text-sm font-medium disabled:opacity-50"
-                  >
-                    {studioBusy
-                      ? 'Đang lưu…'
-                      : formKind === 'gallery'
-                        ? `Dùng ${sanitizedFormRefUrls.length} ảnh đã chọn làm gallery`
-                        : `Dùng ${sanitizedFormRefUrls.length} ảnh đã chọn làm chi tiết`}
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   disabled={studioBusy || uploading}

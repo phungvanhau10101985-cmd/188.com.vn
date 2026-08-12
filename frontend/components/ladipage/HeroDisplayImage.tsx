@@ -9,6 +9,7 @@ interface HeroDisplayImageProps {
   objectPosition?: string | null;
   alt: string;
   aspectClassName?: string;
+  objectFit?: 'cover' | 'contain';
   /** Ảnh hero chính hiển thị ngay khi vào trang (LCP) — tải eager. */
   priority?: boolean;
 }
@@ -19,9 +20,11 @@ export default function HeroDisplayImage({
   objectPosition,
   alt,
   aspectClassName = 'aspect-[4/3]',
+  objectFit = 'cover',
   priority = false,
 }: HeroDisplayImageProps) {
   const pos = parseHeroObjectPosition(objectPosition);
+  const fitClass = objectFit === 'contain' ? 'object-contain' : 'object-cover';
 
   return (
     <div className={`relative overflow-hidden rounded-xl bg-gray-100 ${aspectClassName}`}>
@@ -31,7 +34,7 @@ export default function HeroDisplayImage({
           alt={alt}
           fill
           sizes="(max-width: 768px) 100vw, 50vw"
-          className="object-cover"
+          className={fitClass}
           style={{ objectPosition: `${pos.x}% ${pos.y}%` }}
           priority={priority}
           fetchPriority={priority ? 'high' : undefined}

@@ -1019,13 +1019,14 @@ def generate_material_image(
 
     if candidate_urls and not custom_prompt:
         prompt = (
-            f"Chỉnh sửa ảnh sản phẩm thật đính kèm{category_hint} thành ảnh cận cảnh chất liệu «{material}» "
-            "chuyên nghiệp, đẳng cấp cho thương mại điện tử: zoom cận cảnh vào bề mặt/kết cấu chất liệu thật "
-            "của đúng loại sản phẩm trong ảnh (phải khớp danh mục/chủ đề), ánh sáng studio đẹp, nền trung tính "
-            "sang trọng. GIỮ NGUYÊN CHÍNH XÁC loại sản phẩm, màu sắc/hoạ tiết/kết cấu thật — không đổi thành "
-            "sản phẩm khác loại (vd không biến giày/túi thành loại khác). "
-            f"Trên ảnh in trực tiếp các chú thích ngắn tiếng Việt dạng nhãn callout đẹp mắt, không che sản phẩm: {callout_str}. "
-            "Không watermark, không chữ tiếng Trung, không logo hãng khác. Bố cục vuông, rõ nét, chuyên nghiệp."
+            f"Chỉnh sửa ảnh sản phẩm thật đính kèm{category_hint} thành collage «Chi tiết chất liệu» chuyên nghiệp "
+            f"cho chất liệu «{material}»: "
+            "1 panel ngang lớn phía trên + 4 strip dọc phía dưới — mỗi panel crop cận cảnh KHÁC NHAU "
+            "của cùng sản phẩm (vải/vân da/đường may/cổ tay/viền…), viền trắng mỏng giữa các panel, "
+            "nền beige studio ấm. GIỮ NGUYÊN CHÍNH XÁC loại sản phẩm, màu sắc/hoạ tiết/kết cấu thật. "
+            f"Trên ảnh in trực tiếp các chú thích ngắn tiếng Việt dạng nhãn callout ở margin/góc "
+            f"(không che panel chất liệu): {callout_str}. "
+            "Tỷ lệ 4:3 ngang. Không watermark, không chữ tiếng Trung, không logo hãng khác."
         )
         last_exc: Optional[Exception] = None
         for source_photo in candidate_urls:
@@ -1047,11 +1048,11 @@ def generate_material_image(
             )
 
     prompt = custom_prompt or (
-        f"Ảnh sản phẩm thương mại điện tử cận cảnh chất liệu «{material}»"
-        f"{category_hint}, ánh sáng studio đẹp, nền trung tính sang trọng, tông màu ấm phù hợp thời trang. "
-        "Chỉ hiển thị đúng loại sản phẩm khớp danh mục/chủ đề — không túi xách nếu chủ đề là giày và ngược lại. "
-        f"Trên ảnh in trực tiếp các chú thích ngắn tiếng Việt dạng nhãn callout đẹp mắt, không che sản phẩm: {callout_str}. "
-        "Không watermark, không chữ tiếng Trung, không logo hãng khác. Bố cục vuông, rõ nét, chuyên nghiệp."
+        f"Collage «Chi tiết chất liệu» thương mại điện tử cho chất liệu «{material}»"
+        f"{category_hint}: 1 panel ngang lớn + 4 strip dọc — mỗi panel crop cận cảnh khác nhau "
+        "của cùng loại sản phẩm khớp danh mục, viền trắng mỏng, nền beige studio, ánh sáng mềm. "
+        f"In nhãn callout tiếng Việt ở margin/góc: {callout_str}. "
+        "Tỷ lệ 4:3 ngang. Không watermark, không chữ tiếng Trung, không logo hãng khác."
     )
     raw = gemini_generate_image_from_text(prompt)
     url = _upload_ladipage_image(ladipage_id, raw, name_hint=f"material-{material}")

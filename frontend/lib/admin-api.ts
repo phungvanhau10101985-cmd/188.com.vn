@@ -1221,25 +1221,6 @@ export type AdminProductListSort =
   | 'available_desc'
   | 'available_asc';
 
-/** Một mục tiêu trong POST /import-export/sync/google-sheet-skus */
-export type AdminGoogleSheetSkuSyncTargetResult = {
-  ok: boolean;
-  field?: string;
-  /** full | key_time — backend */
-  row_mode?: string;
-  sheet_title?: string;
-  spreadsheet_id?: string;
-  sheet_gid?: number;
-  error?: string;
-  column_count?: number;
-  updated_rows?: number;
-  unchanged_rows?: number;
-  added_rows?: number;
-  removed_orphan_rows?: number;
-  removed_duplicate_rows?: number;
-  db_key_count?: number;
-};
-
 /** Kết quả POST /import-export/sync/google-sheet-product-catalog */
 export type AdminGoogleSheetProductCatalogSyncResult = {
   ok: boolean;
@@ -1253,26 +1234,6 @@ export type AdminGoogleSheetProductCatalogSyncResult = {
   product_rows?: number;
   cleared_trailing_rows?: number;
   synced_at?: string;
-};
-
-/** Kết quả POST /import-export/sync/google-sheet-skus */
-export type AdminGoogleSheetSkuSyncResult = {
-  ok: boolean;
-  skipped?: boolean;
-  /** Một bảng thành công, một bảng lỗi */
-  partial?: boolean;
-  reason?: string;
-  error?: string;
-  targets?: AdminGoogleSheetSkuSyncTargetResult[];
-  field?: string;
-  sheet_title?: string;
-  column_count?: number;
-  updated_rows?: number;
-  unchanged_rows?: number;
-  added_rows?: number;
-  removed_orphan_rows?: number;
-  removed_duplicate_rows?: number;
-  db_key_count?: number;
 };
 
 export const adminProductAPI = {
@@ -2192,14 +2153,6 @@ export const adminProductAPI = {
         method: 'POST',
         timeoutMs: 30_000,
       });
-    }),
-
-  /** Đồng bộ danh sách/mã lên Google Sheet (cần cấu hình server + quyền admin). */
-  syncGoogleSheetSkus: () =>
-    fetchAdmin<AdminGoogleSheetSkuSyncResult>('/import-export/sync/google-sheet-skus', {
-      method: 'POST',
-      body: JSON.stringify({}),
-      timeoutMs: 300_000,
     }),
 
   /** Đồng bộ toàn bộ catalog (41 cột Excel) lên Google Sheet catalog. */

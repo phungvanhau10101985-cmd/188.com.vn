@@ -4,7 +4,6 @@ Khi sinh hoặc chấp nhận mã, tránh trùng:
 - `products.code` (SP đã đăng),
 - nháp import (`product_import_drafts.product_data`),
 - pool file SKU đã xuất (TTL `INTERNAL_SKU_EXPORT_RESERVE_DAYS`),
-- các ô trên Google Sheet SKU (khi bật đồng bộ — đọc có cache ngắn),
 và không trùng trong một lô import (`batch_reserved`).
 """
 from __future__ import annotations
@@ -95,13 +94,8 @@ def _internal_sku_taken_by_other_product(db: Session, code: str, exclude_product
 
 
 def _customer_sheet_internal_skus_cached() -> Set[str]:
-    """Mã [A-Z][0-9]{4} đang có trên Google Sheet SKU (cache ~60s trong lớp sheet)."""
-    try:
-        from app.services.google_sheets_sku_sync import fetch_internal_sku_keys_from_sheet_cached
-
-        return fetch_internal_sku_keys_from_sheet_cached()
-    except Exception:
-        return set()
+    """Đã gỡ đồng bộ SKU Google Sheet — không đọc sheet khi cấp mã."""
+    return set()
 
 
 def _extract_internal_skus_from_product_data(pd: Any) -> Set[str]:

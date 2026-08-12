@@ -24,7 +24,7 @@ from app.services.excel_importer import (
     PRODUCT_EXCEL_EXPORT_COLUMNS,
     PRODUCT_EXCEL_VIETNAMESE_HEADERS,
 )
-from app.services.google_sheets_sku_sync import (
+from app.services.google_sheets_client import (
     _column_letters_one_based,
     _escape_sheet_title,
     _get_sheets_service,

@@ -712,6 +712,10 @@ class Settings:
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", ""
         ).strip().lower() in ("1", "true", "yes", "on")
+        # Khi bộ cat1/2/3 từ AI không có trong DB: tạo bổ sung (không sửa nhánh cũ).
+        self.IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED: bool = os.getenv(
+            "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
         # Fallback AI khi luật từ-khóa không gán được group_rating (whitelist).
         self.IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_GROUPS_FALLBACK_ENABLED", "true"
@@ -900,66 +904,47 @@ class Settings:
         # GOOGLE OAUTH CONFIGURATION
         # ========================
         self.GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
-        # Đồng bộ SKU lên Google Sheet — mặc định bật; tắt: GOOGLE_SHEETS_SKU_SYNC_ENABLED=false
-        _gs_en = (os.getenv("GOOGLE_SHEETS_SKU_SYNC_ENABLED") or "true").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_ENABLED: bool = _gs_en not in ("0", "false", "no", "off", "disabled")
-        self.GOOGLE_SHEETS_SKU_SPREADSHEET_ID: str = os.getenv(
-            "GOOGLE_SHEETS_SKU_SPREADSHEET_ID", ""
-        ).strip()
-        # sheetId trong URL (gid=...) của tab cần đồng bộ
-        _gid = os.getenv("GOOGLE_SHEETS_SKU_SHEET_GID", "").strip()
-        try:
-            self.GOOGLE_SHEETS_SKU_SHEET_GID: int = int(_gid) if _gid else 0
-        except ValueError:
-            self.GOOGLE_SHEETS_SKU_SHEET_GID = 0
-        # code = mã SKU nội bộ; product_id = Id đầy đủ; web_prefix = phần product_id trước «a188» (vd A…1688 / T…tb)
-        _sf = os.getenv("GOOGLE_SHEETS_SKU_SYNC_FIELD", "code").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_FIELD: str = (
-            _sf if _sf in ("code", "product_id", "web_prefix") else "code"
-        )
-        try:
-            self.GOOGLE_SHEETS_SKU_HEADER_ROWS: int = max(
-                0, int(os.getenv("GOOGLE_SHEETS_SKU_HEADER_ROWS", "1") or "1")
-            )
-        except ValueError:
-            self.GOOGLE_SHEETS_SKU_HEADER_ROWS = 1
+        # Credentials Google (Sheets catalog / Hàng Đặt Mới / Drive backup) — không còn sync SKU list.
         self.GOOGLE_SHEETS_SKU_CREDENTIALS_PATH: str = os.getenv(
             "GOOGLE_SHEETS_SKU_CREDENTIALS_PATH", ""
         ).strip()
-        # Số cột ghi mỗi hàng: 1=chỉ A; 4=A–D (mã, link, shop, giá); 5=A–E (+ thời điểm đồng bộ UTC)
+
+        # Autofill «Hàng Đặt Mới»: cột Q (Mã đặt) → U giá, W link TQ, AB tên shop TQ
+        _hdm_en = (
+            os.getenv("GOOGLE_SHEETS_HANG_DAT_MOI_AUTOFILL_ENABLED") or "false"
+        ).strip().lower()
+        self.GOOGLE_SHEETS_HANG_DAT_MOI_AUTOFILL_ENABLED: bool = _hdm_en not in (
+            "0",
+            "false",
+            "no",
+            "off",
+            "disabled",
+            "",
+        )
+        self.GOOGLE_SHEETS_HANG_DAT_MOI_SPREADSHEET_ID: str = os.getenv(
+            "GOOGLE_SHEETS_HANG_DAT_MOI_SPREADSHEET_ID",
+            "1oO9uvoKKrD1jzvfCg9ZxxnoJT843lJ0oZM75077nQOI",
+        ).strip()
+        _hdm_gid = os.getenv("GOOGLE_SHEETS_HANG_DAT_MOI_SHEET_GID", "303565523").strip()
         try:
-            _n_col = int(os.getenv("GOOGLE_SHEETS_SKU_COLUMN_COUNT", "5") or "5")
-            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT: int = max(1, min(_n_col, 100))
-        except ValueError:
-            self.GOOGLE_SHEETS_SKU_COLUMN_COUNT = 5
-        # Gộp nhiều lần tạo/sửa/xóa SP thành một lần đồng bộ sheet (giây). 0 = mỗi lần gọi chạy ngay.
-        try:
-            self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS: int = max(
-                0, int(os.getenv("GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS", "45") or "45")
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_SHEET_GID: int = (
+                int(_hdm_gid) if _hdm_gid else 0
             )
         except ValueError:
-            self.GOOGLE_SHEETS_SKU_SYNC_DEBOUNCE_SECONDS = 45
-
-        # Bảng Google Sheet thứ hai (tuỳ chọn): cùng schema cột A–E; khác khóa A (vd code vs web_prefix).
-        self.GOOGLE_SHEETS_SKU_SPREADSHEET_ID_2: str = os.getenv(
-            "GOOGLE_SHEETS_SKU_SPREADSHEET_ID_2", ""
-        ).strip()
-        _gid2 = os.getenv("GOOGLE_SHEETS_SKU_SHEET_GID_2", "").strip()
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_SHEET_GID = 0
         try:
-            self.GOOGLE_SHEETS_SKU_SHEET_GID_2: int = int(_gid2) if _gid2 else 0
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_HEADER_ROWS: int = max(
+                0, int(os.getenv("GOOGLE_SHEETS_HANG_DAT_MOI_HEADER_ROWS", "1") or "1")
+            )
         except ValueError:
-            self.GOOGLE_SHEETS_SKU_SHEET_GID_2 = 0
-        _sf2 = os.getenv("GOOGLE_SHEETS_SKU_SYNC_FIELD_2", "code").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_FIELD_2: str = (
-            _sf2 if _sf2 in ("code", "product_id", "web_prefix") else "code"
-        )
-        # full = A–E (theo COLUMN_COUNT); key_time = chỉ A (khóa) + B (thời điểm đồng bộ UTC)
-        _rm = os.getenv("GOOGLE_SHEETS_SKU_SYNC_ROW_MODE", "full").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_ROW_MODE: str = _rm if _rm in ("full", "key_time") else "full"
-        _rm2 = os.getenv("GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2", "").strip().lower()
-        self.GOOGLE_SHEETS_SKU_SYNC_ROW_MODE_2: str = (
-            _rm2 if _rm2 in ("full", "key_time") else "full"
-        )
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_HEADER_ROWS = 1
+        try:
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS: float = max(
+                1.0,
+                float(os.getenv("GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS", "2") or "2"),
+            )
+        except ValueError:
+            self.GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS = 2.0
 
         # Đồng bộ toàn bộ catalog sản phẩm (41 cột Excel) lên Google Sheet — cron 3:30 sáng VN
         _gpc_en = (os.getenv("GOOGLE_SHEETS_PRODUCT_CATALOG_SYNC_ENABLED") or "true").strip().lower()

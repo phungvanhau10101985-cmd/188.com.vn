@@ -387,8 +387,22 @@ def apply_import_rating_question_groups_to_product_data(
     product_data: dict,
     warnings: Optional[List[str]] = None,
 ) -> None:
-    """Gán group_rating + group_question: luật từ-khóa trước, không khớp → DeepSeek/Gemini."""
+    """Gán group_rating + group_question: luật từ-khóa trước, không khớp → DeepSeek/Gemini.
+
+    Nếu SP vừa được bổ sung taxonomy mới (``_taxonomy_auto_created_levels``) → để trống:
+    group_rating = 888, group_question = 0 (không suy luận / không gọi AI).
+    """
     if not isinstance(product_data, dict):
+        return
+
+    auto_lv = str(product_data.get("_taxonomy_auto_created_levels") or "").strip()
+    if auto_lv:
+        product_data["group_rating"] = RATING_GROUP_ID_UNASSIGNED
+        product_data["group_question"] = 0
+        if warnings is not None:
+            warnings.append(
+                f"import_groups: taxonomy vừa tạo cấp [{auto_lv}] — để trống nhóm đánh giá (888) và nhóm câu hỏi (0)."
+            )
         return
 
     pname = str(product_data.get("name") or "").strip()

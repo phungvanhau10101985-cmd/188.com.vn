@@ -47,7 +47,7 @@ export function MaterialImageZoomView({
   url,
   alt = '',
   className = '',
-  imgClassName = 'h-full w-full object-cover',
+  imgClassName = 'object-contain',
   objectPosition,
   zoomEnabled = false,
   lensSize = 96,
@@ -90,12 +90,12 @@ export function MaterialImageZoomView({
 
   if (!zoomEnabled) {
     return (
-      <div className={className}>
+      <div className={`relative overflow-hidden ${className}`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
           alt={alt}
-          className={imgClassName}
+          className={`absolute inset-0 h-full w-full ${imgClassName}`}
           style={objectPosition ? { objectPosition } : undefined}
         />
       </div>
@@ -159,7 +159,7 @@ export function MaterialImageZoomView({
         <img
           src={url}
           alt={alt}
-          className={imgClassName}
+          className={`absolute inset-0 h-full w-full ${imgClassName}`}
           draggable={false}
           style={objectPosition ? { objectPosition } : undefined}
           onLoad={(event) => {

@@ -18,8 +18,8 @@ def test_material_simple_prompt_lists_declared_benefits():
         material_name="Da bò cao cấp",
         material_callouts=["Vân da độc bản tự nhiên", "Càng dùng càng lên màu", "Bền đẹp theo thời gian dùng"],
     )
-    assert "material close-up" in prompt.lower()
-    assert "maximum clarity" in prompt.lower()
+    assert "material details collage" in prompt.lower()
+    assert "TOP PANEL" in prompt
     assert "Da bò cao cấp" in prompt
     assert "Vân da độc bản tự nhiên" in prompt
     assert "verbatim" in prompt.lower()
@@ -127,14 +127,16 @@ def test_build_studio_slot_prompt_material_uses_simple_template():
     prompt = _build_studio_slot_prompt(state, slot)
     assert "Linen" in prompt
     assert "Nhẹ" in prompt
-    assert "material close-up" in prompt.lower()
-    assert "hero zone" in prompt.lower()
-    assert "corners" in prompt.lower()
+    assert "material details collage" in prompt.lower()
+    assert "TOP PANEL" in prompt
+    assert "STRIP" in prompt
+    assert "corners" in prompt.lower() or "margins" in prompt.lower()
 
 
 def test_material_composition_for_bag():
-    from app.services.manual_product_create_service import _material_hero_composition_brief
+    from app.services.manual_product_create_service import _material_collage_panel_brief
 
-    brief = _material_hero_composition_brief("bag")
-    assert "panel" in brief.lower()
-    assert "corners" in brief.lower()
+    brief = _material_collage_panel_brief("bag")
+    assert "TOP" in brief
+    assert "STRIP" in brief
+    assert "grain" in brief.lower()

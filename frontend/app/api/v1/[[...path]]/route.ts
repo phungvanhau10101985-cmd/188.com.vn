@@ -142,9 +142,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       pathSuffix.includes('/admin/source-stock-batch/run-next-from-db') ||
       pathSuffix.includes('/admin/source-stock-batch/run') ||
       pathSuffix.includes('/admin/source-stock-batch/delete-by-db-ids');
-    /** Đồng bộ Google Sheet có thể > 2 phút (đọc sheet + so khớp DB + batchUpdate/append) — phải ≥ fetchAdmin 300s. */
-    const googleSheetSkuSync =
-      pathSuffix.includes('/import-export/sync/google-sheet-skus') && req.method === 'POST';
+    /** Đồng bộ catalog Google Sheet có thể > 2 phút. */
     const googleSheetCatalogSync =
       pathSuffix.includes('/import-export/sync/google-sheet-product-catalog') && req.method === 'POST';
     /** Export toàn bộ catalog (~30k SP) có thể > 2 phút trên VPS. */
@@ -154,7 +152,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       ? 900_000
       : googleSheetCatalogSync
         ? 660_000
-        : adminSourceHeavy || googleSheetSkuSync
+        : adminSourceHeavy
           ? 420_000
           : 120_000;
 

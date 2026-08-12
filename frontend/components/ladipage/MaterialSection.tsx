@@ -7,6 +7,10 @@ import HeroDisplayImage from './HeroDisplayImage';
 import { MaterialImageZoomView, isAiMaterialImage } from './MaterialImageZoomView';
 import type { HeroImageOption, MaterialSectionData } from './types';
 
+/** Ảnh chất liệu AI: collage 4:3 — 1 panel ngang + 4 strip cận cảnh. */
+const MATERIAL_IMAGE_ASPECT = 'aspect-[4/3]';
+const MATERIAL_IMAGE_FIT = 'contain' as const;
+
 interface MaterialSectionProps {
   data: MaterialSectionData;
   editable?: boolean;
@@ -56,7 +60,7 @@ export default function MaterialSection({
           src={data.image_url}
           objectPosition={data.image_object_position}
           alt={data.material ? `Chất liệu ${data.material}` : 'Ảnh chất liệu'}
-          aspectClassName="aspect-square"
+          aspectClassName={MATERIAL_IMAGE_ASPECT}
           imageOptions={productImageOptions}
           isBusy={isBusy}
           onSelectImage={(url) => onSaveField!('image_url', url)}
@@ -73,8 +77,8 @@ export default function MaterialSection({
             url={data.image_url!}
             alt={alt}
             zoomEnabled
-            className="aspect-square w-full overflow-hidden rounded-xl bg-gray-100"
-            imgClassName="h-full w-full object-cover"
+            className={`${MATERIAL_IMAGE_ASPECT} w-full overflow-hidden rounded-xl bg-gray-100`}
+            imgClassName="object-contain"
             lensSize={120}
             zoomScale={6}
             previewSize={420}
@@ -86,7 +90,8 @@ export default function MaterialSection({
           src={data.image_url}
           objectPosition={data.image_object_position}
           alt={alt}
-          aspectClassName="aspect-square"
+          aspectClassName={MATERIAL_IMAGE_ASPECT}
+          objectFit={MATERIAL_IMAGE_FIT}
         />
       );
     }
@@ -99,7 +104,8 @@ export default function MaterialSection({
         isBusy={isBusy}
         initialPrompt={imagePrompt}
         onRegenerate={imageSource === 'ai' ? onRegenerateImage : undefined}
-        aspectClassName="aspect-square"
+        aspectClassName={MATERIAL_IMAGE_ASPECT}
+        objectFit={MATERIAL_IMAGE_FIT}
       />
     );
   };
