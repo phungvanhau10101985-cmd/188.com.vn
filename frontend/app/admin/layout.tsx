@@ -6,7 +6,7 @@ import AdminDestructiveStepUpProvider from '@/components/admin/AdminDestructiveS
 
 export default function AdminRouteLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  if (pathname === '/admin/login') {
+  if (pathname === '/admin/login' || pathname?.startsWith('/admin/auth/handoff')) {
     return <>{children}</>;
   }
   return (

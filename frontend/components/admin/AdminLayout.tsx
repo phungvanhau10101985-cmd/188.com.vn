@@ -69,13 +69,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const token = localStorage.getItem('admin_token');
-    if (!token && pathname !== '/admin/login') {
+    const isPublicAuthPath =
+      pathname === '/admin/login' || pathname.startsWith('/admin/auth/handoff');
+    if (!token && !isPublicAuthPath) {
       router.replace('/admin/login');
     }
   }, [pathname, router]);
 
   useEffect(() => {
-    if (pathname === '/admin/login') return;
+    if (pathname === '/admin/login' || pathname.startsWith('/admin/auth/handoff')) return;
     const role = getStoredAdminRole();
     const mods = getStoredAdminModules();
     if (!isAdminPathAllowedForState(pathname, role, mods)) {

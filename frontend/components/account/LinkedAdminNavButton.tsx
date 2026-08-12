@@ -6,6 +6,10 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/lib/api-client';
 import { defaultAdminHome, setStoredAdminModules } from '@/lib/admin-role';
 import { resetAdminStepUpForNewSession } from '@/lib/admin-step-up';
+import {
+  buildAdminSessionHandoffUrl,
+  shouldHandoffAdminSession,
+} from '@/lib/admin-origin';
 import { useToast } from '@/components/ToastProvider';
 
 type Props = {
@@ -23,13 +27,24 @@ export default function LinkedAdminNavButton({ variant = 'sidebar' }: Props) {
     setBusy(true);
     try {
       const data = await apiClient.exchangeLinkedAdminSession();
-      if (typeof window !== 'undefined') {
-        resetAdminStepUpForNewSession();
-        localStorage.setItem('admin_token', data.access_token);
-        localStorage.setItem('admin_role', data.role || '');
-        setStoredAdminModules(data.modules ?? undefined);
+      if (typeof window === 'undefined') return;
+      resetAdminStepUpForNewSession();
+      localStorage.setItem('admin_token', data.access_token);
+      localStorage.setItem('admin_role', data.role || '');
+      setStoredAdminModules(data.modules ?? undefined);
+      const next = defaultAdminHome();
+      if (shouldHandoffAdminSession()) {
+        window.location.assign(
+          buildAdminSessionHandoffUrl({
+            access_token: data.access_token,
+            role: data.role,
+            modules: data.modules ?? null,
+            next,
+          }),
+        );
+        return;
       }
-      router.push(defaultAdminHome());
+      router.push(next);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không lấy được phiên quản trị.';
       pushToast({ title: 'Không vào được quản trị', description: msg, variant: 'error', durationMs: 3500 });
