@@ -80,6 +80,44 @@ def test_get_published_slug_prefers_single_product_ladipage():
         def query(self, model):
             return FakeQuery(self._rows)
 
+        def get_bind(self):
+            raise RuntimeError("no bind")
+
     db = FakeDb([published_multi, published_single])
     assert get_published_single_product_ladipage_slug(db, 42) == "lp-single"
     assert get_published_single_product_ladipage_slug(db, 99) is None
+
+
+def test_find_single_product_ladipages_for_products_groups_by_id():
+    from types import SimpleNamespace
+
+    from app.services.ladipage_cleanup import find_single_product_ladipages_for_products
+
+    lp42 = SimpleNamespace(source_type="products", product_ids=[42], id=1)
+    lp99 = SimpleNamespace(source_type="products", product_ids=["99"], id=2)
+    lp_multi = SimpleNamespace(source_type="products", product_ids=[42, 43], id=3)
+
+    class FakeQuery:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class FakeDb:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def query(self, model):
+            return FakeQuery(self._rows)
+
+        def get_bind(self):
+            raise RuntimeError("no bind")
+
+    out = find_single_product_ladipages_for_products(FakeDb([lp_multi, lp42, lp99]), [42, 99, 7])
+    assert [lp.id for lp in out[42]] == [1]
+    assert [lp.id for lp in out[99]] == [2]
+    assert out[7] == []

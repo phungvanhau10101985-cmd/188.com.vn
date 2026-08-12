@@ -10,7 +10,7 @@ import {
   promptAdminStepUpAndRetry,
 } from '@/lib/admin-step-up';
 
-const TIMEOUT_RETRY_DELAY_MS = 40_000;
+const TIMEOUT_RETRY_DELAY_MS = 12_000;
 const MAX_CONSECUTIVE_TIMEOUT_RETRIES = 10;
 
 function sleep(ms: number): Promise<void> {
@@ -113,8 +113,9 @@ export async function bulkDeleteAdminProducts(
     return { deleted: [], deleted_count: 0, errors: [] };
   }
 
-  const INITIAL_CHUNK = 3;
+  const INITIAL_CHUNK = 25;
   const MIN_CHUNK = 1;
+  const MAX_CHUNK = 40;
   let chunkSize = INITIAL_CHUNK;
   const deleted: string[] = [];
   const errors: AdminBulkDeleteProductsResult['errors'] = [];
@@ -129,6 +130,9 @@ export async function bulkDeleteAdminProducts(
       deleted.push(...(res.deleted ?? []));
       errors.push(...(res.errors ?? []));
       cursor += chunk.length;
+      if (chunkSize < MAX_CHUNK) {
+        chunkSize = Math.min(MAX_CHUNK, chunkSize + 5);
+      }
     } catch (err) {
       if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
         chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));

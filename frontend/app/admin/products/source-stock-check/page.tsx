@@ -1163,8 +1163,8 @@ export default function AdminSourceStockCheckPage() {
       total: ids.length,
       deleted: 0,
       chunkIndex: 0,
-      chunkTotal: Math.max(1, Math.ceil(ids.length / 3)),
-      chunkSize: 3,
+      chunkTotal: Math.max(1, Math.ceil(ids.length / 25)),
+      chunkSize: 25,
     });
     try {
       const res = await adminProductAPI.deleteSourceStockBatchProductsByDbIds(ids, {
@@ -2119,7 +2119,7 @@ export default function AdminSourceStockCheckPage() {
             <div className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2">
               <p>
                 Sẽ xóa theo khóa <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> — không
-                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~40s rồi tự xóa
+                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~12s rồi tự xóa
                 tiếp — không cần bấm lại. Thích hợp khi chắc chắn không còn bán những mã
                 này.
               </p>
@@ -2190,9 +2190,9 @@ export default function AdminSourceStockCheckPage() {
                     <p className="text-xs text-red-900/90 tabular-nums">
                       Đã xóa {reportOosDeleteProgress.deleted.toLocaleString('vi-VN')} sản · lô{' '}
                       {reportOosDeleteProgress.chunkIndex}/{reportOosDeleteProgress.chunkTotal} (
-                      {reportOosDeleteProgress.chunkSize ?? 3} mã/lô
+                      {reportOosDeleteProgress.chunkSize ?? 25} mã/lô
                       {reportOosDeleteProgress.chunkSize != null &&
-                      reportOosDeleteProgress.chunkSize < 3
+                      reportOosDeleteProgress.chunkSize < 25
                         ? ' — đã giảm vì timeout'
                         : ''}
                       ; Bunny dọn sau)

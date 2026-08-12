@@ -1464,7 +1464,7 @@ export const adminProductAPI = {
         timeoutRetryAttempt?: number;
       }) => void;
       skipStepUp?: boolean;
-      /** Chờ giữa các lần retry khi đã giảm lô xuống 1 (mặc định 40s). */
+      /** Chờ giữa các lần retry khi đã giảm lô xuống 1 (mặc định 12s). */
       timeoutRetryDelayMs?: number;
       /** Số lần retry liên tiếp tối đa khi lô = 1 vẫn 502 (mặc định 10). */
       maxConsecutiveTimeoutRetries?: number;
@@ -1474,11 +1474,15 @@ export const adminProductAPI = {
     if (!unique.length) {
       return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
     }
-    /** Bắt đầu 3 — Cloudflare origin ~100s; lô lớn dễ 502 dù nginx 900s. Gặp 502 thì giảm tiếp. */
-    const INITIAL_CHUNK = 3;
+    /**
+     * Backend đã tối ưu (ladipage 1 query/lô + Bunny nền) — lô 25 vẫn dưới Cloudflare ~100s.
+     * Gặp 502 thì giảm nửa; tối thiểu 1. Thành công liên tiếp thì từ từ tăng lại.
+     */
+    const INITIAL_CHUNK = 25;
     const MIN_CHUNK = 1;
+    const MAX_CHUNK = 40;
     /** Chờ origin/request cũ nguội rồi tự tiếp tục — tránh bấm tay lại. */
-    const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 40_000;
+    const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 12_000;
     const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 10;
     let chunkSize = INITIAL_CHUNK;
     const deleted_db_ids: number[] = [];
@@ -1546,6 +1550,10 @@ export const adminProductAPI = {
         not_found_db_ids.push(...(res.not_found_db_ids ?? []));
         blocked_db_ids.push(...(res.blocked_db_ids ?? []));
         cursor += chunk.length;
+        // Thành công ổn định → từ từ tăng lô lại (tối đa MAX_CHUNK).
+        if (chunkSize < MAX_CHUNK && consecutiveTimeoutRetries === 0) {
+          chunkSize = Math.min(MAX_CHUNK, chunkSize + 5);
+        }
         emitProgress();
       } catch (err) {
         if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {

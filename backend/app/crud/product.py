@@ -5773,22 +5773,35 @@ def _delete_product_orm_only(
     db_product: Product,
     *,
     defer_bunny: bool = False,
-) -> None:
-    """Xóa SP trong session; không commit — dùng bulk import batch. ``defer_bunny`` = dọn CDN nền sau."""
-    try:
-        from app.services.ladipage_cleanup import delete_single_product_ladipages_for_product
+    skip_ladipage: bool = False,
+) -> List[str]:
+    """
+    Xóa SP trong session; không commit — dùng bulk import batch.
+    ``defer_bunny`` = dọn CDN nền sau (kèm URL ladipage trả về / đã enqueue).
+    ``skip_ladipage`` = caller đã xóa ladipage 1-SP (bulk prefetch).
+    """
+    pending_ladipage_bunny: List[str] = []
+    if not skip_ladipage:
+        try:
+            from app.services.ladipage_cleanup import delete_single_product_ladipages_for_product
 
-        delete_single_product_ladipages_for_product(db, db_product.id)
-    except Exception:
-        logger.warning(
-            "Ladipage cleanup khi xóa SP id=%s thất bại (bỏ qua)",
-            getattr(db_product, "id", None),
-            exc_info=True,
-        )
+            pending_ladipage_bunny = delete_single_product_ladipages_for_product(
+                db, db_product.id, defer_bunny=defer_bunny
+            )
+        except Exception:
+            logger.warning(
+                "Ladipage cleanup khi xóa SP id=%s thất bại (bỏ qua)",
+                getattr(db_product, "id", None),
+                exc_info=True,
+            )
     if not defer_bunny:
         delete_bunny_assets_for_product(db_product)
+    elif pending_ladipage_bunny:
+        # Import Excel / caller không gom URL — enqueue durable ngay (dedupe path).
+        _schedule_bunny_cleanup_for_urls(pending_ladipage_bunny)
     _record_product_deletion_tombstone(db, db_product)
     db.delete(db_product)
+    return pending_ladipage_bunny if defer_bunny else []
 
 
 def _bulk_import_is_delete_row(product_data: Dict[str, Any]) -> bool:
@@ -5997,8 +6010,20 @@ def bulk_delete_products_by_db_ids(
 
     from app.services.listing_facet_cache import snapshot_product_for_facet_refresh
     from app.services import warehouse_clearance as wh_clearance_svc
+    from app.services.ladipage_cleanup import (
+        delete_single_product_ladipages_for_products,
+        find_single_product_ladipages_for_products,
+    )
 
     blocked: Dict[int, str] = {}
+    # Một query ladipage cho cả lô — tránh N lần quét ~12k hàng.
+    try:
+        ladipage_by_product = find_single_product_ladipages_for_products(db, ordered_unique)
+    except Exception:
+        logger.warning("Prefetch ladipage khi bulk xóa SP thất bại — fallback từng SP", exc_info=True)
+        ladipage_by_product = None
+
+    deletable_ids: List[int] = []
     for pk in ordered_unique:
         row = by_id.get(pk)
         if row is None:
@@ -6008,13 +6033,43 @@ def bulk_delete_products_by_db_ids(
         except ValueError as exc:
             blocked[pk] = str(exc)
             continue
+        deletable_ids.append(pk)
+
+    if ladipage_by_product is not None and deletable_ids:
+        try:
+            for url in delete_single_product_ladipages_for_products(
+                db,
+                deletable_ids,
+                defer_bunny=True,
+                prefetched={
+                    pk: ladipage_by_product.get(pk, []) for pk in deletable_ids
+                },
+            ):
+                if url not in bunny_url_seen:
+                    bunny_url_seen.add(url)
+                    pending_bunny_urls.append(url)
+        except Exception:
+            logger.warning(
+                "Bulk ladipage cleanup thất bại — fallback từng SP",
+                exc_info=True,
+            )
+            ladipage_by_product = None
+
+    skip_ladipage = ladipage_by_product is not None
+    for pk in deletable_ids:
+        row = by_id[pk]
         deleted_snapshots.append(snapshot_product_for_facet_refresh(row))
         # Thu URL trước khi ORM delete — tránh getattr trên object đã expire sau commit.
         for url in collect_product_image_urls_for_bunny(row):
             if url not in bunny_url_seen:
                 bunny_url_seen.add(url)
                 pending_bunny_urls.append(url)
-        _delete_product_orm_only(db, row, defer_bunny=True)
+        for url in _delete_product_orm_only(
+            db, row, defer_bunny=True, skip_ladipage=skip_ladipage
+        ):
+            if url not in bunny_url_seen:
+                bunny_url_seen.add(url)
+                pending_bunny_urls.append(url)
         deleted.append(pk)
 
     if deleted:
@@ -6070,7 +6125,10 @@ def bulk_delete_products_by_excel_product_ids(
             if url not in bunny_url_seen:
                 bunny_url_seen.add(url)
                 pending_bunny_urls.append(url)
-        _delete_product_orm_only(db, row, defer_bunny=True)
+        for url in _delete_product_orm_only(db, row, defer_bunny=True):
+            if url not in bunny_url_seen:
+                bunny_url_seen.add(url)
+                pending_bunny_urls.append(url)
         deleted_pids.append(pid)
 
     if deleted_pids:
