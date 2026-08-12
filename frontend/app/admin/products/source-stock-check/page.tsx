@@ -764,6 +764,13 @@ export default function AdminSourceStockCheckPage() {
   const [testLinkBusy, setTestLinkBusy] = useState(false);
   const [testLinkResult, setTestLinkResult] = useState<AdminSourceStockPreviewUrlResult | null>(null);
   const recheckPollCancelRef = useRef(false);
+  /**
+   * Khóa đồng bộ (không chờ React re-render) — chặn double-click / bấm chồng
+   * «Đồng ý — xóa» hoặc mở thêm lô xóa khi đang chạy.
+   */
+  const reportOosDeleteInFlightRef = useRef(false);
+  /** Chặn bấm chồng «Xóa DB (tất cả)» khi đang tải danh sách id. */
+  const reportOosBulkLoadInFlightRef = useRef(false);
 
   const reportOosSampleRows = activityReport?.samples?.oos ?? EMPTY_REPORT_SAMPLE_ROWS;
   const reportOosRowById = useMemo(() => {
@@ -1059,6 +1066,10 @@ export default function AdminSourceStockCheckPage() {
 
   const requestReportOosDeleteDbIds = useCallback(
     (rawIds: number[], opts?: { skipStepUp?: boolean; allInWindow?: boolean }) => {
+      if (reportOosDeleteInFlightRef.current) {
+        showToast('info', 'Đang xóa lô trước — đợi xong rồi mới mở lô mới (tránh chồng request).');
+        return;
+      }
       const uniq = [...new Set(rawIds.filter((id) => id > 0))].sort((a, b) => a - b);
       if (!uniq.length) {
         showToast('err', 'Chưa có SP nào được chọn trong bảng mẫu.');
@@ -1183,8 +1194,11 @@ export default function AdminSourceStockCheckPage() {
   );
 
   const executeReportOosDeleteFromDb = useCallback(async () => {
+    // Ref khóa ngay — `disabled={reportOosDeleting}` chưa kịp re-render nếu double-click.
+    if (reportOosDeleteInFlightRef.current) return;
     const ids = reportOosDeleteConfirmIds;
     if (!ids?.length) return;
+    reportOosDeleteInFlightRef.current = true;
     const skipStepUp = reportOosDeleteSkipStepUp;
     setReportOosDeleting(true);
     setReportOosDeleteProgress({
@@ -1220,6 +1234,7 @@ export default function AdminSourceStockCheckPage() {
       void refreshActivityReport();
       void refreshQueueStats();
     } finally {
+      reportOosDeleteInFlightRef.current = false;
       setReportOosDeleting(false);
       setReportOosDeleteProgress(null);
       setReportOosDeleteSkipStepUp(false);
@@ -1248,6 +1263,11 @@ export default function AdminSourceStockCheckPage() {
       windowOosTotal,
       onBulkDeleteAllInWindow: () => {
         void (async () => {
+          if (reportOosDeleteInFlightRef.current || reportOosBulkLoadInFlightRef.current) {
+            showToast('info', 'Đang xử lý lô trước — đợi xong rồi bấm lại.');
+            return;
+          }
+          reportOosBulkLoadInFlightRef.current = true;
           setReportOosBulkBusy(true);
           try {
             const ids = await loadWindowOosDbIds();
@@ -1255,6 +1275,7 @@ export default function AdminSourceStockCheckPage() {
           } catch (e) {
             showToast('err', e instanceof Error ? e.message : String(e));
           } finally {
+            reportOosBulkLoadInFlightRef.current = false;
             setReportOosBulkBusy(false);
           }
         })();
@@ -2285,7 +2306,11 @@ export default function AdminSourceStockCheckPage() {
                 type="button"
                 className="rounded-lg bg-red-700 text-white px-4 py-2 text-sm font-semibold hover:bg-red-800 disabled:opacity-50"
                 disabled={reportOosDeleting}
-                onClick={() => void executeReportOosDeleteFromDb()}
+                aria-busy={reportOosDeleting}
+                onClick={() => {
+                  if (reportOosDeleteInFlightRef.current) return;
+                  void executeReportOosDeleteFromDb();
+                }}
               >
                 {reportOosDeleting &&
                 reportOosDeleteProgress?.waitingRetrySec != null &&

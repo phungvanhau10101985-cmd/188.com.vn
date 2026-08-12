@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
+import resource
 import subprocess
 import threading
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, Tuple
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -49,12 +50,88 @@ def _unregister_process(job_id: str) -> None:
         _job_processes.pop(job_id, None)
 
 
+def _mem_available_mb() -> Optional[int]:
+    """Đọc MemAvailable từ /proc (Linux). None nếu không đọc được."""
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    # giá trị là kB
+                    return int(parts[1]) // 1024
+    except Exception:
+        return None
+    return None
+
+
+def _apply_worker_address_space_limit() -> None:
+    """Giới hạn RLIMIT_AS của worker — OOM trong job ảnh không nuốt hết RAM VPS."""
+    max_mb = int(getattr(settings, "IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", 0) or 0)
+    if max_mb <= 0:
+        return
+    try:
+        limit = max_mb * 1024 * 1024
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        new_hard = hard if hard != resource.RLIM_INFINITY and hard < limit else limit
+        new_soft = min(limit, new_hard) if new_hard != resource.RLIM_INFINITY else limit
+        resource.setrlimit(resource.RLIMIT_AS, (new_soft, new_hard))
+        logger.info(
+            "IMAGE_LOCALIZATION_WORKER RLIMIT_AS soft=%sMB hard=%sMB",
+            new_soft // (1024 * 1024),
+            "inf" if new_hard == resource.RLIM_INFINITY else new_hard // (1024 * 1024),
+        )
+    except Exception:
+        logger.exception("Không set được RLIMIT_AS cho image localization worker")
+
+
+def memory_pressure_blocks_imgloc() -> Tuple[bool, str]:
+    """
+    True = không nên start/resume job ảnh (RAM trống thấp).
+    """
+    min_mb = int(getattr(settings, "IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB", 2800) or 0)
+    if min_mb <= 0:
+        return False, ""
+    avail = _mem_available_mb()
+    if avail is None:
+        return False, ""
+    if avail < min_mb:
+        return True, f"MemAvailable={avail}MB < min={min_mb}MB"
+    return False, f"MemAvailable={avail}MB"
+
+
 def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> None:
     try:
+        _apply_worker_address_space_limit()
         from app.api.endpoints.image_localization import StartImageLocalizationPayload, _run_job
 
         payload = StartImageLocalizationPayload(**payload_dict)
         _run_job(job_id, payload, resume=resume)
+    except MemoryError:
+        logger.exception(
+            "image localization subprocess OOM (MemoryError) job_id=%s — worker bị giới hạn RAM",
+            job_id,
+        )
+        try:
+            from app.crud import image_localization_job as job_crud
+
+            db = SessionLocal()
+            try:
+                job_crud.patch_job(
+                    db,
+                    job_id,
+                    {
+                        "status": "error",
+                        "phase": "error",
+                        "message": (
+                            "Job dừng vì hết RAM worker (RLIMIT). "
+                            "Chạy lại khi server rảnh hoặc giảm MERGE_MAX_PIXELS."
+                        ),
+                    },
+                )
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("failed to mark imgloc job error after MemoryError")
     except Exception:
         logger.exception("image localization subprocess job %s failed", job_id)
     finally:
@@ -64,6 +141,14 @@ def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> No
 
 def start_job_process(job_id: str, payload_dict: dict, *, resume: bool = False) -> None:
     """Chạy job trong subprocess riêng — hủy ngay có thể terminate process."""
+    blocked, detail = memory_pressure_blocks_imgloc()
+    if blocked:
+        logger.warning(
+            "IMAGE_LOCALIZATION_JOB_PROCESS skip job_id=%s — memory pressure (%s)",
+            job_id,
+            detail,
+        )
+        return
     if not mark_job_thread_running(job_id):
         logger.warning("image localization job %s already running in this process", job_id)
         return
@@ -77,7 +162,12 @@ def start_job_process(job_id: str, payload_dict: dict, *, resume: bool = False) 
     proc.start()
     with _proc_lock:
         _job_processes[job_id] = proc
-    logger.info("IMAGE_LOCALIZATION_JOB_PROCESS start job_id=%s pid=%s", job_id, proc.pid)
+    logger.info(
+        "IMAGE_LOCALIZATION_JOB_PROCESS start job_id=%s pid=%s (%s)",
+        job_id,
+        proc.pid,
+        detail or "mem-ok",
+    )
 
 
 def start_job_thread(job_id: str, target, args: tuple, kwargs: dict) -> None:
@@ -162,6 +252,14 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
         return
 
+    blocked, detail = memory_pressure_blocks_imgloc()
+    if blocked:
+        logger.warning(
+            "IMAGE_LOCALIZATION_JOB_RESUME deferred — memory pressure (%s)",
+            detail,
+        )
+        return
+
     from app.crud import image_localization_job as job_crud
 
     db = SessionLocal()
@@ -172,6 +270,8 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
 
     if not rows:
         return
+
+    max_resume = int(getattr(settings, "IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT", 6) or 6)
 
     for row in rows:
         if _job_worker_alive(row.job_id):
@@ -186,6 +286,26 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
             st = (fresh.status or "").strip().lower()
             if st in ("cancelled", "done", "error") or bool(fresh.cancel_requested):
                 logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
+                continue
+            resume_n = int(fresh.resume_count or 0)
+            if max_resume > 0 and resume_n >= max_resume:
+                job_crud.patch_job(
+                    db_check,
+                    row.job_id,
+                    {
+                        "status": "error",
+                        "phase": "error",
+                        "message": (
+                            f"Dừng auto-resume sau {resume_n} lần (có thể do OOM). "
+                            "Bấm chạy lại job thủ công khi server ổn định."
+                        ),
+                    },
+                )
+                logger.error(
+                    "IMAGE_LOCALIZATION_JOB_RESUME aborted job_id=%s resume_count=%s",
+                    row.job_id,
+                    resume_n,
+                )
                 continue
         finally:
             db_check.close()

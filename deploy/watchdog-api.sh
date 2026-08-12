@@ -86,21 +86,50 @@ send_incident_alert() {
   fi
 }
 
+recent_python_oom() {
+  # Kernel OOM kill python trong ~15 phút gần đây → đừng resume job ảnh (vòng chết OOM).
+  dmesg -T 2>/dev/null | awk '
+    /Out of memory: Killed process .* \(python\)/ {
+      # dmesg -T: [Wed Aug 12 20:40:53 2026]
+      if (match($0, /\[[^]]+\]/)) {
+        ts = substr($0, RSTART + 1, RLENGTH - 2)
+        cmd = "date -d \"" ts "\" +%s 2>/dev/null"
+        cmd | getline epoch
+        close(cmd)
+        if (epoch != "" && (systime() - epoch) <= 900) found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  '
+}
+
 soft_start_api() {
-  # Khôi phục API, giữ nguyên job queued/running trong DB để resume sau startup.
-  bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+  local disable_imgloc_resume="${1:-0}"
+  # Khôi phục API. Sau OOM: tắt resume job ảnh để cắt vòng chết.
+  if [[ "${disable_imgloc_resume}" == "1" ]]; then
+    echo "${LOG_PREFIX} OOM gần đây → DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1"
+    DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1 \
+      bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+  else
+    bash "${ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || true
+  fi
   if pm2 describe "${PM2_API}" &>/dev/null; then
     pm2 restart "${PM2_API}" --update-env 2>/dev/null || pm2 start "${PM2_API}" --update-env 2>/dev/null || true
   else
     pm2 start "${ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}" 2>/dev/null || true
   fi
-  pm2 save 2>/dev/null || true
+  # KHÔNG pm2 save ở đây — lần save thiếu 188-web/thu-do-online đã khiến 502 kéo dài.
+  # watchdog-web.sh sẽ save khi web+nanoai đều listen.
 }
 
 recover_api() {
   local reason="$1"
   local incident_dir
   incident_dir="$(capture_incident "${reason}")"
+  local disable_imgloc=0
+  if recent_python_oom; then
+    disable_imgloc=1
+  fi
 
   if [[ "${WATCHDOG_HARD_FREE:-0}" == "1" ]]; then
     echo "${LOG_PREFIX} ${reason} → incident=${incident_dir} → free-api-now (WATCHDOG_HARD_FREE=1)"
@@ -109,9 +138,13 @@ recover_api() {
     return
   fi
 
-  echo "${LOG_PREFIX} ${reason} → incident=${incident_dir} → soft restart (giữ job bản địa hóa)"
+  if [[ "${disable_imgloc}" == "1" ]]; then
+    echo "${LOG_PREFIX} ${reason} → incident=${incident_dir} → soft restart (TẮT resume job ảnh vì OOM)"
+  else
+    echo "${LOG_PREFIX} ${reason} → incident=${incident_dir} → soft restart (giữ job bản địa hóa)"
+  fi
   send_incident_alert "${reason}" "${incident_dir}"
-  soft_start_api
+  soft_start_api "${disable_imgloc}"
 
   # Chờ health; nếu vẫn chết thì mới hard free khi được phép
   local health="000"
@@ -123,7 +156,7 @@ recover_api() {
   if [[ "${health}" != "200" ]]; then
     echo "${LOG_PREFIX} soft restart chưa OK (health=${health}) — thử terminate idle DB + restart lại"
     health_terminate_idle_db_transactions
-    soft_start_api
+    soft_start_api "${disable_imgloc}"
   fi
 }
 

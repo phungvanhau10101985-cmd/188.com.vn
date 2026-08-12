@@ -25,6 +25,12 @@ module.exports = {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'true',
+        // Chặn vòng OOM: worker ảnh ≤3.2GB AS; không resume khi MemAvailable < 2.8GB.
+        IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: '3200',
+        IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: '2800',
+        IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT: '6',
+        // 25MP/batch thay 70MP — giảm spike RAM khi OCR merge trên VPS 11GB.
+        IMAGE_LOCALIZATION_MERGE_MAX_PIXELS: '25000000',
         // Postgres max_connections=100 trên VPS nanoai — 15+20=35 vẫn còn dư địa lớn cho
         // các app khác (thu-do-online, worksheet-worker...). Tăng từ 10+15=25 vì admin bấm
         // nhiều thao tác nặng liên tiếp (tải danh sách + lọc + job ảnh...) từng chạm ngưỡng cũ.
@@ -78,6 +84,7 @@ module.exports = {
       max_restarts: 10,
       min_uptime: '10s',
       restart_delay: 3000,
+      max_memory_restart: '1536M',
     },
   ],
 };

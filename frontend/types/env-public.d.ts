@@ -5,6 +5,8 @@ declare namespace NodeJS {
     NEXT_PUBLIC_CDN_URL?: string;
     NEXT_PUBLIC_SITE_URL?: string;
     NEXT_PUBLIC_DOMAIN?: string;
+    /** Origin admin DNS-only (bypass CF), vd. https://admin.188.com.vn */
+    NEXT_PUBLIC_ADMIN_ORIGIN?: string;
     NEXT_PUBLIC_API_BASE_URL?: string;
     /** Dev: origin FastAPI chỉ để ghép `/static/...` khi API qua `/api/v1` cùng host Next (proxy). Mặc định trong code là http://127.0.0.1:8001 */
     NEXT_PUBLIC_FASTAPI_ORIGIN?: string;

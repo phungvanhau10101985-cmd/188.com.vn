@@ -14,6 +14,10 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8001/api/v1";
 
 const CANON_HOST = "188.com.vn";
+const ADMIN_HOST = "admin.188.com.vn";
+const ADMIN_ORIGIN = (
+  process.env.NEXT_PUBLIC_ADMIN_ORIGIN || `https://${ADMIN_HOST}`
+).replace(/\/$/, "");
 
 /** ?pv2= (Google Shopping automated discount) — không cache HTML để SSR luôn có giá CK. */
 function nextPassthrough(request: NextRequest) {
@@ -26,6 +30,8 @@ function nextPassthrough(request: NextRequest) {
 
 export async function proxy(request: NextRequest) {
   const host = request.headers.get("host")?.split(":")[0]?.toLowerCase();
+  const pathname = request.nextUrl.pathname;
+
   // Một canonical (apex): tránh xen kẽ www và apex làm fetch RSC bị CORS giữa hai origin.
   if (host === "www.188.com.vn") {
     const dest = request.nextUrl.clone();
@@ -33,7 +39,22 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(dest, 308);
   }
 
-  const pathname = request.nextUrl.pathname;
+  // Admin mặc định qua subdomain DNS-only (bypass Cloudflare timeout ~100s).
+  if (
+    host === CANON_HOST &&
+    (pathname === "/admin" || pathname.startsWith("/admin/"))
+  ) {
+    const dest = new URL(`${pathname}${request.nextUrl.search}`, ADMIN_ORIGIN);
+    return NextResponse.redirect(dest, 308);
+  }
+
+  // Vào root admin host → thẳng /admin
+  if (host === ADMIN_HOST && (pathname === "/" || pathname === "")) {
+    const dest = request.nextUrl.clone();
+    dest.pathname = "/admin";
+    dest.search = "";
+    return NextResponse.redirect(dest, 302);
+  }
 
   // Chỉ xử lý /danh-muc/xxx (có ít nhất 1 segment)
   if (!pathname.startsWith("/danh-muc/")) return nextPassthrough(request);

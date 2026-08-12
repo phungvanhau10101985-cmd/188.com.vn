@@ -298,6 +298,17 @@ class Settings:
         self.IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: bool = os.getenv(
             "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
+        # Chặn vòng OOM: không auto-resume khi RAM trống thấp / resume quá nhiều lần.
+        self.IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: int = int(
+            os.getenv("IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB", "2800") or "2800"
+        )
+        self.IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT: int = int(
+            os.getenv("IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT", "6") or "6"
+        )
+        # Giới hạn địa chỉ ảo worker subprocess (MB). 0 = tắt. Tránh 1 job ảnh phình >RAM VPS.
+        self.IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: int = int(
+            os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", "3200") or "3200"
+        )
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
         )

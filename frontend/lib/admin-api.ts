@@ -1244,6 +1244,143 @@ export type AdminGoogleSheetProductCatalogSyncResult = {
   synced_at?: string;
 };
 
+/** Chỉ cho phép một vòng xóa source-stock chạy tại một thời điểm (chặn bấm chồng). */
+let sourceStockDeleteByDbIdsInFlight = false;
+
+async function deleteSourceStockBatchProductsByDbIdsImpl(
+  dbIds: number[],
+  options?: {
+    onProgress?: (progress: {
+      processed: number;
+      total: number;
+      deleted: number;
+      chunkIndex: number;
+      chunkTotal: number;
+      chunkSize?: number;
+      waitingRetrySec?: number;
+      timeoutRetryAttempt?: number;
+    }) => void;
+    skipStepUp?: boolean;
+    timeoutRetryDelayMs?: number;
+    maxConsecutiveTimeoutRetries?: number;
+  },
+): Promise<AdminSourceStockBatchDeleteByDbIdsResult> {
+  const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!unique.length) {
+    return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
+  }
+  /**
+   * Backend đã tối ưu (ladipage 1 query/lô + Bunny nền) — lô 25 vẫn dưới Cloudflare ~100s.
+   * Gặp 502 thì giảm nửa; tối thiểu 1. Thành công liên tiếp thì từ từ tăng lại.
+   */
+  const INITIAL_CHUNK = 25;
+  const MIN_CHUNK = 1;
+  const MAX_CHUNK = 40;
+  /** Chờ origin/request cũ nguội rồi tự tiếp tục — tránh bấm tay lại. */
+  const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 12_000;
+  const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 10;
+  let chunkSize = INITIAL_CHUNK;
+  const deleted_db_ids: number[] = [];
+  const not_found_db_ids: number[] = [];
+  const blocked_db_ids: AdminSourceStockBatchDeleteBlockedItem[] = [];
+  let cursor = 0;
+  let chunkIndex = 0;
+  let consecutiveTimeoutRetries = 0;
+
+  const isGatewayOrTimeout = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    return /\[502\]|\[504\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout/i.test(msg);
+  };
+
+  const emitProgress = (extra?: {
+    waitingRetrySec?: number;
+    timeoutRetryAttempt?: number;
+    chunkTotalOverride?: number;
+  }) => {
+    const remaining = unique.length - cursor;
+    options?.onProgress?.({
+      processed: cursor,
+      total: unique.length,
+      deleted: deleted_db_ids.length,
+      chunkIndex,
+      chunkTotal:
+        extra?.chunkTotalOverride ??
+        chunkIndex + Math.max(0, Math.ceil(remaining / Math.max(1, chunkSize))),
+      chunkSize,
+      waitingRetrySec: extra?.waitingRetrySec,
+      timeoutRetryAttempt: extra?.timeoutRetryAttempt,
+    });
+  };
+
+  const waitBeforeRetry = async (attempt: number) => {
+    const end = Date.now() + TIMEOUT_RETRY_DELAY_MS;
+    while (Date.now() < end) {
+      const secLeft = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      emitProgress({ waitingRetrySec: secLeft, timeoutRetryAttempt: attempt });
+      const slice = Math.min(1000, end - Date.now());
+      if (slice <= 0) break;
+      await new Promise<void>((resolve) => setTimeout(resolve, slice));
+    }
+    emitProgress({ waitingRetrySec: 0, timeoutRetryAttempt: attempt });
+  };
+
+  while (cursor < unique.length) {
+    const chunk = unique.slice(cursor, cursor + chunkSize);
+    const remaining = unique.length - cursor;
+    const chunkTotal = chunkIndex + Math.max(1, Math.ceil(remaining / chunkSize));
+    chunkIndex += 1;
+    emitProgress({ chunkTotalOverride: chunkTotal });
+    try {
+      const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
+        '/products/admin/source-stock-batch/delete-by-db-ids',
+        {
+          method: 'POST',
+          body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
+          /** Dưới ngưỡng Cloudflare ~100s để kịp giảm lô thay vì treo đến 502. */
+          timeoutMs: 90_000,
+        },
+      );
+      consecutiveTimeoutRetries = 0;
+      deleted_db_ids.push(...(res.deleted_db_ids ?? []));
+      not_found_db_ids.push(...(res.not_found_db_ids ?? []));
+      blocked_db_ids.push(...(res.blocked_db_ids ?? []));
+      cursor += chunk.length;
+      // Thành công ổn định → từ từ tăng lô lại (tối đa MAX_CHUNK).
+      if (chunkSize < MAX_CHUNK && consecutiveTimeoutRetries === 0) {
+        chunkSize = Math.min(MAX_CHUNK, chunkSize + 5);
+      }
+      emitProgress();
+    } catch (err) {
+      if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
+        chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
+        chunkIndex -= 1;
+        continue;
+      }
+      if (isGatewayOrTimeout(err) && consecutiveTimeoutRetries < MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
+        consecutiveTimeoutRetries += 1;
+        chunkIndex -= 1;
+        await waitBeforeRetry(consecutiveTimeoutRetries);
+        continue;
+      }
+      const done = deleted_db_ids.length;
+      const left = unique.length - cursor;
+      const base = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        done > 0
+          ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Đã tự thử lại ${consecutiveTimeoutRetries} lần sau mỗi ${Math.round(TIMEOUT_RETRY_DELAY_MS / 1000)}s vẫn lỗi. ${base}`
+          : base,
+      );
+    }
+  }
+  return {
+    ok: true,
+    deleted_count: deleted_db_ids.length,
+    deleted_db_ids,
+    not_found_db_ids,
+    blocked_db_ids,
+  };
+}
+
 export const adminProductAPI = {
   getPandamallAccount: async (): Promise<{ username?: string }> => {
     return fetchAdmin<{ username?: string }>('/admin/pandamall-account');
@@ -1502,120 +1639,17 @@ export const adminProductAPI = {
       maxConsecutiveTimeoutRetries?: number;
     },
   ) => {
-    const unique = [...new Set(dbIds.filter((id) => Number.isFinite(id) && id > 0))];
-    if (!unique.length) {
-      return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
+    if (sourceStockDeleteByDbIdsInFlight) {
+      throw new Error(
+        'Đang có một lượt xóa source-stock chạy — đợi xong rồi mới bấm tiếp (tránh chồng request).',
+      );
     }
-    /**
-     * Backend đã tối ưu (ladipage 1 query/lô + Bunny nền) — lô 25 vẫn dưới Cloudflare ~100s.
-     * Gặp 502 thì giảm nửa; tối thiểu 1. Thành công liên tiếp thì từ từ tăng lại.
-     */
-    const INITIAL_CHUNK = 25;
-    const MIN_CHUNK = 1;
-    const MAX_CHUNK = 40;
-    /** Chờ origin/request cũ nguội rồi tự tiếp tục — tránh bấm tay lại. */
-    const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 12_000;
-    const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 10;
-    let chunkSize = INITIAL_CHUNK;
-    const deleted_db_ids: number[] = [];
-    const not_found_db_ids: number[] = [];
-    const blocked_db_ids: AdminSourceStockBatchDeleteBlockedItem[] = [];
-    let cursor = 0;
-    let chunkIndex = 0;
-    let consecutiveTimeoutRetries = 0;
-
-    const isGatewayOrTimeout = (err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      return /\[502\]|\[504\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout/i.test(msg);
-    };
-
-    const emitProgress = (extra?: {
-      waitingRetrySec?: number;
-      timeoutRetryAttempt?: number;
-      chunkTotalOverride?: number;
-    }) => {
-      const remaining = unique.length - cursor;
-      options?.onProgress?.({
-        processed: cursor,
-        total: unique.length,
-        deleted: deleted_db_ids.length,
-        chunkIndex,
-        chunkTotal:
-          extra?.chunkTotalOverride ??
-          chunkIndex + Math.max(0, Math.ceil(remaining / Math.max(1, chunkSize))),
-        chunkSize,
-        waitingRetrySec: extra?.waitingRetrySec,
-        timeoutRetryAttempt: extra?.timeoutRetryAttempt,
-      });
-    };
-
-    const waitBeforeRetry = async (attempt: number) => {
-      const end = Date.now() + TIMEOUT_RETRY_DELAY_MS;
-      while (Date.now() < end) {
-        const secLeft = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-        emitProgress({ waitingRetrySec: secLeft, timeoutRetryAttempt: attempt });
-        const slice = Math.min(1000, end - Date.now());
-        if (slice <= 0) break;
-        await new Promise<void>((resolve) => setTimeout(resolve, slice));
-      }
-      emitProgress({ waitingRetrySec: 0, timeoutRetryAttempt: attempt });
-    };
-
-    while (cursor < unique.length) {
-      const chunk = unique.slice(cursor, cursor + chunkSize);
-      const remaining = unique.length - cursor;
-      const chunkTotal = chunkIndex + Math.max(1, Math.ceil(remaining / chunkSize));
-      chunkIndex += 1;
-      emitProgress({ chunkTotalOverride: chunkTotal });
-      try {
-        const res = await fetchAdmin<AdminSourceStockBatchDeleteByDbIdsResult>(
-          '/products/admin/source-stock-batch/delete-by-db-ids',
-          {
-            method: 'POST',
-            body: JSON.stringify({ db_ids: chunk, skip_step_up: !!options?.skipStepUp }),
-            /** Dưới ngưỡng Cloudflare ~100s để kịp giảm lô thay vì treo đến 502. */
-            timeoutMs: 90_000,
-          },
-        );
-        consecutiveTimeoutRetries = 0;
-        deleted_db_ids.push(...(res.deleted_db_ids ?? []));
-        not_found_db_ids.push(...(res.not_found_db_ids ?? []));
-        blocked_db_ids.push(...(res.blocked_db_ids ?? []));
-        cursor += chunk.length;
-        // Thành công ổn định → từ từ tăng lô lại (tối đa MAX_CHUNK).
-        if (chunkSize < MAX_CHUNK && consecutiveTimeoutRetries === 0) {
-          chunkSize = Math.min(MAX_CHUNK, chunkSize + 5);
-        }
-        emitProgress();
-      } catch (err) {
-        if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
-          chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
-          chunkIndex -= 1;
-          continue;
-        }
-        if (isGatewayOrTimeout(err) && consecutiveTimeoutRetries < MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
-          consecutiveTimeoutRetries += 1;
-          chunkIndex -= 1;
-          await waitBeforeRetry(consecutiveTimeoutRetries);
-          continue;
-        }
-        const done = deleted_db_ids.length;
-        const left = unique.length - cursor;
-        const base = err instanceof Error ? err.message : String(err);
-        throw new Error(
-          done > 0
-            ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Đã tự thử lại ${consecutiveTimeoutRetries} lần sau mỗi ${Math.round(TIMEOUT_RETRY_DELAY_MS / 1000)}s vẫn lỗi. ${base}`
-            : base,
-        );
-      }
+    sourceStockDeleteByDbIdsInFlight = true;
+    try {
+      return await deleteSourceStockBatchProductsByDbIdsImpl(dbIds, options);
+    } finally {
+      sourceStockDeleteByDbIdsInFlight = false;
     }
-    return {
-      ok: true,
-      deleted_count: deleted_db_ids.length,
-      deleted_db_ids,
-      not_found_db_ids,
-      blocked_db_ids,
-    };
   },
 
   getGeminiImageLocalizationAuth: (language = 'vi') =>
