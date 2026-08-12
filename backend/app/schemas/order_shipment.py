@@ -168,6 +168,41 @@ class EmsShippingTimelineStatsResponse(BaseModel):
     totals: EmsShippingTimelineTotalsResponse = Field(default_factory=EmsShippingTimelineTotalsResponse)
 
 
+class EmsShippingReceivedTimelineItemResponse(BaseModel):
+    period_key: str
+    period_label: str
+    period_start: str
+    period_end: str
+    cod_received_count: int = 0
+    cod_received_total: int = 0
+    return_received_count: int = 0
+    return_received_cod_total: int = 0
+
+
+class EmsShippingReceivedTimelineTotalsResponse(BaseModel):
+    cod_received_count: int = 0
+    cod_received_total: int = 0
+    return_received_count: int = 0
+    return_received_cod_total: int = 0
+
+
+class EmsShippingReceivedTimelineStatsResponse(BaseModel):
+    granularity: str
+    timezone: str = "Asia/Ho_Chi_Minh"
+    date_field: str = "received"
+    limit: int = 36
+    filter_from: Optional[str] = None
+    filter_to: Optional[str] = None
+    filter_label: Optional[str] = None
+    preset: Optional[str] = None
+    year: Optional[int] = None
+    available_years: List[int] = Field(default_factory=list)
+    items: List[EmsShippingReceivedTimelineItemResponse] = []
+    totals: EmsShippingReceivedTimelineTotalsResponse = Field(
+        default_factory=EmsShippingReceivedTimelineTotalsResponse
+    )
+
+
 class EmsShippingDeleteRequest(BaseModel):
     ids: List[int] = Field(..., min_length=1)
 

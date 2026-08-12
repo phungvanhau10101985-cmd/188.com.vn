@@ -130,6 +130,48 @@ def _is_cod_paid(record: EmsShippingRecord) -> bool:
     return (record.cod_settlement_status or "").strip().lower() == "matched"
 
 
+def _record_cod_paid_date(record: EmsShippingRecord) -> date | None:
+    """Ngày EMS trả COD về shop (từ file đối soát)."""
+    paid = record.cod_paid_date
+    if paid is None:
+        return None
+    if isinstance(paid, datetime):
+        local = _to_vn_datetime(paid)
+        return local.date() if local else None
+    if isinstance(paid, date):
+        return paid
+    return None
+
+
+def _record_cod_paid_amount(record: EmsShippingRecord) -> int:
+    """Số tiền EMS đã trả shop (ưu tiên cod_paid_amount)."""
+    try:
+        return max(0, int(record.cod_paid_amount or record.cod_amount or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _cod_paid_period_key(paid_date: date, granularity: TimelineGranularity) -> str:
+    local_dt = datetime(paid_date.year, paid_date.month, paid_date.day, tzinfo=_VN_TZ)
+    return _timeline_period_key(local_dt, granularity)
+
+
+def _record_shop_return_received_date(record: EmsShippingRecord) -> date | None:
+    """Ngày admin xác nhận shop đã nhận hoàn — không dùng ngày import EMS."""
+    if not is_ems_record_shop_return_received(record):
+        return None
+    at = getattr(record, "shop_return_received_at", None)
+    if at is not None:
+        if isinstance(at, datetime):
+            local = _to_vn_datetime(at)
+            return local.date() if local else None
+        if isinstance(at, date):
+            return at
+    # Chỉ có order_status=returned, chưa có mốc thời gian riêng → dùng updated_at
+    local = _to_vn_datetime(record.updated_at)
+    return local.date() if local else None
+
+
 def _cod_bucket(record: EmsShippingRecord, delivery: DeliveryBucket) -> CodBucket | None:
     if not _has_cod(record):
         return None
@@ -571,6 +613,106 @@ def get_shipping_timeline_stats(
     }
 
 
+def _empty_received_timeline_bucket() -> dict[str, Any]:
+    return {
+        "cod_received_count": 0,
+        "cod_received_total": 0,
+        "return_received_count": 0,
+        "return_received_cod_total": 0,
+    }
+
+
+def get_shipping_received_timeline_stats(
+    db: Session,
+    *,
+    granularity: str = "month",
+    limit: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+) -> dict[str, Any]:
+    """Thống kê thực nhận theo tháng: COD theo ngày EMS trả, hoàn theo ngày admin nhận."""
+    key = (granularity or "month").strip().lower()
+    if key not in _TIMELINE_GRANULARITIES:
+        raise ValueError("granularity phải là year, month, week hoặc day.")
+
+    filter_start, filter_end, filter_label = _resolve_timeline_filter(
+        preset=preset,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    max_items = limit if limit is not None else _TIMELINE_DEFAULT_LIMITS[key]
+    max_items = max(1, min(int(max_items), 200))
+
+    records = db.query(EmsShippingRecord).all()
+    available_years: set[int] = set()
+    grouped: dict[str, dict[str, Any]] = {}
+
+    for record in records:
+        if _is_cod_paid(record):
+            paid_date = _record_cod_paid_date(record)
+            if paid_date is not None:
+                available_years.add(paid_date.year)
+                if not (filter_start and paid_date < filter_start) and not (
+                    filter_end and paid_date > filter_end
+                ):
+                    period_key = _cod_paid_period_key(paid_date, key)  # type: ignore[arg-type]
+                    if period_key not in grouped:
+                        grouped[period_key] = _empty_received_timeline_bucket()
+                    bucket = grouped[period_key]
+                    bucket["cod_received_count"] += 1
+                    bucket["cod_received_total"] += _record_cod_paid_amount(record)
+
+        recv_date = _record_shop_return_received_date(record)
+        if recv_date is not None:
+            available_years.add(recv_date.year)
+            if not (filter_start and recv_date < filter_start) and not (
+                filter_end and recv_date > filter_end
+            ):
+                period_key = _cod_paid_period_key(recv_date, key)  # type: ignore[arg-type]
+                if period_key not in grouped:
+                    grouped[period_key] = _empty_received_timeline_bucket()
+                bucket = grouped[period_key]
+                bucket["return_received_count"] += 1
+                bucket["return_received_cod_total"] += _record_cod_amount(record)
+
+    sorted_keys = sorted(grouped.keys(), reverse=True)[:max_items]
+    items: list[dict[str, Any]] = []
+    totals = _empty_received_timeline_bucket()
+
+    for period_key in sorted_keys:
+        bucket = grouped[period_key]
+        start, end, label = _timeline_period_bounds(period_key, key)  # type: ignore[arg-type]
+        item = {
+            "period_key": period_key,
+            "period_label": label,
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            **bucket,
+        }
+        items.append(item)
+        for field in totals:
+            totals[field] += int(bucket.get(field) or 0)
+
+    return {
+        "granularity": key,
+        "timezone": "Asia/Ho_Chi_Minh",
+        "date_field": "received",
+        "limit": max_items,
+        "filter_from": filter_start.isoformat() if filter_start else None,
+        "filter_to": filter_end.isoformat() if filter_end else None,
+        "filter_label": filter_label,
+        "preset": (preset or "").strip().lower() or None,
+        "year": int(year) if year is not None else None,
+        "available_years": sorted(available_years, reverse=True),
+        "items": items,
+        "totals": totals,
+    }
+
+
 _OPS_BUCKET_LABELS: dict[str, str] = {
     "total": "Tổng vận đơn",
     "in_transit": "Đang giao",
@@ -583,6 +725,7 @@ _OPS_BUCKET_LABELS: dict[str, str] = {
     "cod_in_transit_unpaid": "COD đang giao · chưa trả",
     "cod_delivered_unpaid": "Giao OK · EMS chưa trả COD cho shop",
     "cod_paid": "COD EMS đã trả shop",
+    "cod_received_in_period": "COD nhận trong kỳ",
     "cod_returned_unpaid": "COD hoàn · chưa trả",
     "cod_pending_unpaid": "COD chưa rõ trạng thái",
     "freight_unsettled": "Chưa đối soát cước",
@@ -606,8 +749,8 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
         return delivery == "delivered"
     if bucket == "returned" or bucket == "return_pending_shop":
         return delivery == "return_pending_shop"
-    if bucket == "return_shop_received":
-        return delivery == "return_shop_received"
+    if bucket == "return_shop_received" or bucket == "shop_return_received":
+        return is_ems_record_shop_return_received(record)
     if bucket == "pending":
         return delivery == "pending"
     if bucket == "has_cod":
@@ -618,6 +761,8 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
         return cod_bucket == "delivered_unpaid"
     if bucket == "cod_paid":
         return cod_bucket == "paid"
+    if bucket == "cod_received_in_period":
+        return _is_cod_paid(record) and _record_cod_paid_date(record) is not None
     if bucket == "cod_returned_unpaid":
         return cod_bucket == "returned_unpaid"
     if bucket == "cod_pending_unpaid":
@@ -630,8 +775,6 @@ def _matches_ops_bucket(record: EmsShippingRecord, bucket: str) -> bool:
         )
     if bucket == "shop_linked":
         return record.order_id is not None
-    if bucket == "shop_return_received":
-        return (record.order_status or "").strip().lower() == OrderStatus.RETURNED.value
     if bucket == "shop_shipping":
         return (record.order_status or "").strip().lower() == OrderStatus.SHIPPING.value
     return False
@@ -698,6 +841,98 @@ def list_timeline_bucket_records(
     rows = [_enrich_row_from_live_order(db, _record_to_dict(record)) for record in page_records]
 
     bucket_label = _OPS_BUCKET_LABELS[key]
+    if period:
+        _, _, period_label = _timeline_period_bounds(period, gran)  # type: ignore[arg-type]
+        bucket_label = f"{bucket_label} — {period_label}"
+    elif filter_label:
+        bucket_label = f"{bucket_label} — {filter_label}"
+
+    return {
+        "ok": True,
+        "bucket": key,
+        "bucket_label": bucket_label,
+        "period_key": period,
+        "granularity": gran,
+        "pagination": {
+            "skip": skip,
+            "limit": limit,
+            "total": total,
+            "filtered_total": total,
+        },
+        "rows": rows,
+    }
+
+
+def list_received_timeline_bucket_records(
+    db: Session,
+    bucket: str,
+    *,
+    granularity: str = "month",
+    period_key: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+    skip: int = 0,
+    limit: int = 25,
+) -> dict[str, Any]:
+    """Danh sách theo trục thực nhận (ngày EMS trả COD / ngày admin nhận hoàn)."""
+    from app.services.ems_shipment_import import _enrich_row_from_live_order, _record_to_dict
+
+    key = (bucket or "").strip().lower()
+    if key not in ("cod_received_in_period", "shop_return_received", "return_shop_received"):
+        raise ValueError(f"Nhóm thống kê thực nhận không hợp lệ: {bucket}")
+
+    gran = (granularity or "month").strip().lower()
+    if gran not in _TIMELINE_GRANULARITIES:
+        raise ValueError("granularity phải là year, month, week hoặc day.")
+
+    period = (period_key or "").strip() or None
+    filter_start, filter_end, filter_label = _resolve_timeline_filter(
+        preset=preset,
+        year=year,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    skip = max(0, int(skip or 0))
+    limit = max(1, min(int(limit or 25), 100))
+
+    records = (
+        db.query(EmsShippingRecord)
+        .order_by(EmsShippingRecord.updated_at.desc(), EmsShippingRecord.id.desc())
+        .all()
+    )
+    matched: list[EmsShippingRecord] = []
+    by_cod = key == "cod_received_in_period"
+
+    for record in records:
+        if by_cod:
+            event_date = _record_cod_paid_date(record)
+            if event_date is None or not _is_cod_paid(record):
+                continue
+        else:
+            event_date = _record_shop_return_received_date(record)
+            if event_date is None:
+                continue
+        if filter_start and event_date < filter_start:
+            continue
+        if filter_end and event_date > filter_end:
+            continue
+        if period and _cod_paid_period_key(event_date, gran) != period:  # type: ignore[arg-type]
+            continue
+        matched.append(record)
+
+    total = len(matched)
+    page_records = matched[skip : skip + limit]
+    rows = [_enrich_row_from_live_order(db, _record_to_dict(record)) for record in page_records]
+
+    labels = {
+        "cod_received_in_period": "COD nhận trong kỳ",
+        "shop_return_received": "Hoàn admin nhận trong kỳ",
+        "return_shop_received": "Hoàn admin nhận trong kỳ",
+    }
+    bucket_label = labels[key]
     if period:
         _, _, period_label = _timeline_period_bounds(period, gran)  # type: ignore[arg-type]
         bucket_label = f"{bucket_label} — {period_label}"

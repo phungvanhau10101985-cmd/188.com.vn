@@ -4278,6 +4278,25 @@ export const adminShippingAPI = {
     return data;
   },
 
+  getReceivedTimelineStats: async (params: EmsShippingTimelineParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.granularity) qs.set('granularity', params.granularity);
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    if (params.date_from) qs.set('date_from', params.date_from);
+    if (params.date_to) qs.set('date_to', params.date_to);
+    if (params.preset) qs.set('preset', params.preset);
+    if (params.year != null) qs.set('year', String(params.year));
+    const data = await fetchAdmin<EmsShippingReceivedTimelineStats>(
+      `/orders/admin/shipping/operations-stats/received-timeline?${qs.toString()}`,
+    );
+    if (!Array.isArray(data.items) || typeof data.granularity !== 'string') {
+      throw new Error(
+        'Backend chưa cập nhật API thống kê thực nhận. Restart FastAPI (port 8001) rồi thử lại.',
+      );
+    }
+    return data;
+  },
+
   listOperationsRecords: (params: { bucket: string; skip?: number; limit?: number }) => {
     const qs = new URLSearchParams();
     qs.set('bucket', params.bucket);
@@ -4301,6 +4320,22 @@ export const adminShippingAPI = {
     if (params.limit != null) qs.set('limit', String(params.limit));
     return fetchAdmin<EmsShippingOperationsRecords>(
       `/orders/admin/shipping/operations-stats/timeline/records?${qs.toString()}`,
+    );
+  },
+
+  listReceivedTimelineRecords: (params: EmsShippingTimelineRecordsParams) => {
+    const qs = new URLSearchParams();
+    qs.set('bucket', params.bucket);
+    if (params.granularity) qs.set('granularity', params.granularity);
+    if (params.period_key) qs.set('period_key', params.period_key);
+    if (params.date_from) qs.set('date_from', params.date_from);
+    if (params.date_to) qs.set('date_to', params.date_to);
+    if (params.preset) qs.set('preset', params.preset);
+    if (params.year != null) qs.set('year', String(params.year));
+    if (params.skip != null && params.skip > 0) qs.set('skip', String(params.skip));
+    if (params.limit != null) qs.set('limit', String(params.limit));
+    return fetchAdmin<EmsShippingOperationsRecords>(
+      `/orders/admin/shipping/operations-stats/received-timeline/records?${qs.toString()}`,
     );
   },
 
@@ -4709,6 +4744,38 @@ export interface EmsShippingTimelineStats {
   >;
 }
 
+export interface EmsShippingReceivedTimelineItem {
+  period_key: string;
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  cod_received_count: number;
+  cod_received_total: number;
+  return_received_count: number;
+  return_received_cod_total: number;
+}
+
+export interface EmsShippingReceivedTimelineStats {
+  granularity: EmsShippingTimelineGranularity;
+  timezone: string;
+  date_field: string;
+  limit: number;
+  filter_from?: string | null;
+  filter_to?: string | null;
+  filter_label?: string | null;
+  preset?: string | null;
+  year?: number | null;
+  available_years: number[];
+  items: EmsShippingReceivedTimelineItem[];
+  totals: Pick<
+    EmsShippingReceivedTimelineItem,
+    | 'cod_received_count'
+    | 'cod_received_total'
+    | 'return_received_count'
+    | 'return_received_cod_total'
+  >;
+}
+
 export type OpsBucketKey =
   | 'total'
   | 'in_transit'
@@ -4719,12 +4786,15 @@ export type OpsBucketKey =
   | 'cod_in_transit_unpaid'
   | 'cod_delivered_unpaid'
   | 'cod_paid'
+  | 'cod_received_in_period'
   | 'cod_returned_unpaid'
   | 'cod_pending_unpaid'
   | 'freight_unsettled'
   | 'shop_linked'
   | 'shop_return_received'
   | 'shop_shipping';
+
+export type ReceivedOpsBucketKey = 'cod_received_in_period' | 'shop_return_received';
 
 export interface EmsShippingOperationsRecords {
   ok: boolean;

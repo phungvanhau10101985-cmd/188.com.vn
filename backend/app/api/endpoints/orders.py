@@ -1075,6 +1075,35 @@ def admin_shipping_timeline_stats(
 
 
 @router.get(
+    "/admin/shipping/operations-stats/received-timeline",
+    response_model=shipment_schemas.EmsShippingReceivedTimelineStatsResponse,
+)
+def admin_shipping_received_timeline_stats(
+    granularity: str = "month",
+    limit: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
+):
+    """Thống kê thực nhận: COD theo ngày EMS trả, hoàn theo ngày admin nhận."""
+    try:
+        return shipping_ops_svc.get_shipping_received_timeline_stats(
+            db,
+            granularity=granularity,
+            limit=limit,
+            date_from=date_from,
+            date_to=date_to,
+            preset=preset,
+            year=year,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
     "/admin/shipping/operations-stats/records",
     response_model=shipment_schemas.EmsShippingOperationsRecordsResponse,
 )
@@ -1117,6 +1146,41 @@ def admin_shipping_timeline_records(
     """Danh sách vận đơn EMS theo kỳ timeline và nhóm thống kê."""
     try:
         return shipping_ops_svc.list_timeline_bucket_records(
+            db,
+            bucket,
+            granularity=granularity,
+            period_key=period_key,
+            date_from=date_from,
+            date_to=date_to,
+            preset=preset,
+            year=year,
+            skip=skip,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get(
+    "/admin/shipping/operations-stats/received-timeline/records",
+    response_model=shipment_schemas.EmsShippingOperationsRecordsResponse,
+)
+def admin_shipping_received_timeline_records(
+    bucket: str,
+    granularity: str = "month",
+    period_key: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    preset: str | None = None,
+    year: int | None = None,
+    skip: int = 0,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
+):
+    """Danh sách theo kỳ thực nhận (COD đã nhận / hoàn admin nhận)."""
+    try:
+        return shipping_ops_svc.list_received_timeline_bucket_records(
             db,
             bucket,
             granularity=granularity,

@@ -25,8 +25,11 @@ import {
   type EmsShippingTimelinePreset,
   type EmsShippingTimelineRecordsParams,
   type EmsShippingTimelineStats,
+  type EmsShippingReceivedTimelineItem,
+  type EmsShippingReceivedTimelineStats,
   type EmsTrackingRefreshJob,
   type OpsBucketKey,
+  type ReceivedOpsBucketKey,
   type ShopReturnConfirmResult,
   type ShopReturnConfirmRow,
   type ReturnWarehouseLookupResult,
@@ -74,12 +77,18 @@ const TIMELINE_BUCKET_LABELS: Record<OpsBucketKey, string> = {
   cod_in_transit_unpaid: 'COD đang giao · chưa trả',
   cod_delivered_unpaid: 'Giao OK · EMS chưa trả COD',
   cod_paid: 'COD EMS trả shop',
+  cod_received_in_period: 'COD nhận trong kỳ',
   cod_returned_unpaid: 'COD hoàn · chưa trả',
   cod_pending_unpaid: 'COD chưa rõ trạng thái',
   freight_unsettled: 'Chưa đối soát cước',
   shop_linked: 'Ghép đơn shop',
   shop_return_received: 'Đơn hoàn đã trả shop',
   shop_shipping: 'Đơn shop đang giao',
+};
+
+const RECEIVED_BUCKET_LABELS: Record<ReceivedOpsBucketKey, string> = {
+  cod_received_in_period: 'COD nhận trong kỳ',
+  shop_return_received: 'Hoàn admin nhận trong kỳ',
 };
 
 type TimelineFilterState = {
@@ -117,11 +126,13 @@ function buildTimelineApiParams(
 type TimelineBucketContext =
   | {
       mode: 'period';
+      axis: 'import' | 'received';
       periodKey: string;
       periodLabel: string;
     }
   | {
       mode: 'range';
+      axis: 'import' | 'received';
       periodLabel: string;
       recordsParams: Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'>;
     };
@@ -129,7 +140,7 @@ type TimelineBucketContext =
 function buildTimelineRangeRecordsQuery(
   granularity: EmsShippingTimelineGranularity,
   filter: TimelineFilterState,
-  items: EmsShippingTimelineItem[] | undefined,
+  items: Array<{ period_start: string; period_end: string }> | undefined,
 ): Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'> {
   const filterParams = buildTimelineApiParams(granularity, filter);
   if (filterParams.preset || filterParams.year || filterParams.date_from || filterParams.date_to) {
@@ -157,7 +168,7 @@ function buildTimelineRecordsQuery(
   granularity: EmsShippingTimelineGranularity,
   filter: TimelineFilterState,
   context: TimelineBucketContext,
-  items: EmsShippingTimelineItem[] | undefined,
+  items: Array<{ period_start: string; period_end: string }> | undefined,
 ): Omit<EmsShippingTimelineRecordsParams, 'bucket' | 'skip' | 'limit'> {
   if (context.mode === 'period') {
     return { granularity, period_key: context.periodKey };
@@ -1011,8 +1022,11 @@ export default function AdminShippingPage() {
   const [timelineFilter, setTimelineFilter] = useState<TimelineFilterState>(EMPTY_TIMELINE_FILTER);
   const [timelineMonthPick, setTimelineMonthPick] = useState('');
   const [timelineStats, setTimelineStats] = useState<EmsShippingTimelineStats | null>(null);
+  const [receivedTimelineStats, setReceivedTimelineStats] =
+    useState<EmsShippingReceivedTimelineStats | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [receivedTimelineError, setReceivedTimelineError] = useState<string | null>(null);
   const [activeOpsBucket, setActiveOpsBucket] = useState<OpsBucketKey | null>(null);
   const [opsBucketLabel, setOpsBucketLabel] = useState('');
   const [opsBucketRows, setOpsBucketRows] = useState<EmsShippingImportRow[]>([]);
@@ -1120,14 +1134,34 @@ export default function AdminShippingPage() {
     ) => {
       setTimelineLoading(true);
       setTimelineError(null);
-      try {
-        const data = await adminShippingAPI.getTimelineStats(buildTimelineApiParams(granularity, filter));
-        setTimelineStats(data);
-      } catch (err) {
-        setTimelineError(err instanceof Error ? err.message : 'Không tải được thống kê theo thời gian');
-      } finally {
-        setTimelineLoading(false);
+      setReceivedTimelineError(null);
+      const params = buildTimelineApiParams(granularity, filter);
+      const [importResult, receivedResult] = await Promise.allSettled([
+        adminShippingAPI.getTimelineStats(params),
+        adminShippingAPI.getReceivedTimelineStats(params),
+      ]);
+      if (importResult.status === 'fulfilled') {
+        setTimelineStats(importResult.value);
+      } else {
+        setTimelineStats(null);
+        setTimelineError(
+          importResult.reason instanceof Error
+            ? importResult.reason.message
+            : 'Không tải được thống kê theo đơn nhập',
+        );
       }
+      if (receivedResult.status === 'fulfilled') {
+        setReceivedTimelineStats(receivedResult.value);
+        setReceivedTimelineError(null);
+      } else {
+        setReceivedTimelineStats(null);
+        setReceivedTimelineError(
+          receivedResult.reason instanceof Error
+            ? receivedResult.reason.message
+            : 'Không tải được thống kê thực nhận',
+        );
+      }
+      setTimelineLoading(false);
     },
     [timelineFilter],
   );
@@ -1139,11 +1173,13 @@ export default function AdminShippingPage() {
       setTimelineLoading(true);
       setOpsStatsError(null);
       setTimelineError(null);
+      setReceivedTimelineError(null);
     }
     const timelineParams = buildTimelineApiParams(timelineGranularity, timelineFilter);
-    const [opsResult, timelineResult] = await Promise.allSettled([
+    const [opsResult, timelineResult, receivedResult] = await Promise.allSettled([
       adminShippingAPI.getOperationsStats(),
       adminShippingAPI.getTimelineStats(timelineParams),
+      adminShippingAPI.getReceivedTimelineStats(timelineParams),
     ]);
     if (opsResult.status === 'fulfilled') {
       setOpsStats(opsResult.value);
@@ -1162,7 +1198,18 @@ export default function AdminShippingPage() {
       setTimelineError(
         timelineResult.reason instanceof Error
           ? timelineResult.reason.message
-          : 'Không tải được thống kê theo thời gian',
+          : 'Không tải được thống kê theo đơn nhập',
+      );
+    }
+    if (receivedResult.status === 'fulfilled') {
+      setReceivedTimelineStats(receivedResult.value);
+      if (!silent) setReceivedTimelineError(null);
+    } else if (!silent) {
+      setReceivedTimelineStats(null);
+      setReceivedTimelineError(
+        receivedResult.reason instanceof Error
+          ? receivedResult.reason.message
+          : 'Không tải được thống kê thực nhận',
       );
     }
     if (!silent) {
@@ -1179,18 +1226,29 @@ export default function AdminShippingPage() {
         const skip = (page - 1) * OPS_LIST_PAGE_SIZE;
         const timelineContext = context === undefined ? timelineBucketContext : context;
         const useTimelineApi = Boolean(timelineContext);
+        const axis = timelineContext?.axis ?? 'import';
+        const recordsQuery = timelineContext
+          ? buildTimelineRecordsQuery(
+              timelineGranularity,
+              timelineFilter,
+              timelineContext,
+              axis === 'received' ? receivedTimelineStats?.items : timelineStats?.items,
+            )
+          : null;
         const data = useTimelineApi
-          ? await adminShippingAPI.listTimelineRecords({
-              bucket,
-              skip,
-              limit: OPS_LIST_PAGE_SIZE,
-              ...buildTimelineRecordsQuery(
-                timelineGranularity,
-                timelineFilter,
-                timelineContext!,
-                timelineStats?.items,
-              ),
-            })
+          ? axis === 'received'
+            ? await adminShippingAPI.listReceivedTimelineRecords({
+                bucket,
+                skip,
+                limit: OPS_LIST_PAGE_SIZE,
+                ...recordsQuery!,
+              })
+            : await adminShippingAPI.listTimelineRecords({
+                bucket,
+                skip,
+                limit: OPS_LIST_PAGE_SIZE,
+                ...recordsQuery!,
+              })
           : await adminShippingAPI.listOperationsRecords({
               bucket,
               skip,
@@ -1209,7 +1267,13 @@ export default function AdminShippingPage() {
         setOpsBucketLoading(false);
       }
     },
-    [timelineBucketContext, timelineFilter, timelineGranularity, timelineStats?.items],
+    [
+      timelineBucketContext,
+      timelineFilter,
+      timelineGranularity,
+      timelineStats?.items,
+      receivedTimelineStats?.items,
+    ],
   );
 
   const closeOpsBucketModal = useCallback(() => {
@@ -1236,6 +1300,7 @@ export default function AdminShippingPage() {
     (item: EmsShippingTimelineItem, bucket: OpsBucketKey) => {
       const context: TimelineBucketContext = {
         mode: 'period',
+        axis: 'import',
         periodKey: item.period_key,
         periodLabel: item.period_label,
       };
@@ -1253,6 +1318,7 @@ export default function AdminShippingPage() {
       const periodLabel = timelineStats?.filter_label || 'Tổng các kỳ hiển thị';
       const context: TimelineBucketContext = {
         mode: 'range',
+        axis: 'import',
         periodLabel,
         recordsParams: buildTimelineRangeRecordsQuery(
           timelineGranularity,
@@ -1267,6 +1333,51 @@ export default function AdminShippingPage() {
       void loadOpsBucketRecords(bucket, 1, context);
     },
     [loadOpsBucketRecords, timelineFilter, timelineGranularity, timelineStats?.filter_label, timelineStats?.items],
+  );
+
+  const openReceivedTimelineBucket = useCallback(
+    (item: EmsShippingReceivedTimelineItem, bucket: ReceivedOpsBucketKey) => {
+      const context: TimelineBucketContext = {
+        mode: 'period',
+        axis: 'received',
+        periodKey: item.period_key,
+        periodLabel: item.period_label,
+      };
+      setTimelineBucketContext(context);
+      setOpsBucketFromTimeline(true);
+      setOpsBucketLabel(`${RECEIVED_BUCKET_LABELS[bucket]} — ${item.period_label}`);
+      setActiveOpsBucket(bucket);
+      void loadOpsBucketRecords(bucket, 1, context);
+    },
+    [loadOpsBucketRecords],
+  );
+
+  const openReceivedTimelineBucketTotals = useCallback(
+    (bucket: ReceivedOpsBucketKey) => {
+      const periodLabel = receivedTimelineStats?.filter_label || 'Tổng các kỳ hiển thị';
+      const context: TimelineBucketContext = {
+        mode: 'range',
+        axis: 'received',
+        periodLabel,
+        recordsParams: buildTimelineRangeRecordsQuery(
+          timelineGranularity,
+          timelineFilter,
+          receivedTimelineStats?.items,
+        ),
+      };
+      setTimelineBucketContext(context);
+      setOpsBucketFromTimeline(true);
+      setOpsBucketLabel(`${RECEIVED_BUCKET_LABELS[bucket]} — ${periodLabel}`);
+      setActiveOpsBucket(bucket);
+      void loadOpsBucketRecords(bucket, 1, context);
+    },
+    [
+      loadOpsBucketRecords,
+      timelineFilter,
+      timelineGranularity,
+      receivedTimelineStats?.filter_label,
+      receivedTimelineStats?.items,
+    ],
   );
 
   const opsBucketTotalPages = Math.max(1, Math.ceil(opsBucketTotal / OPS_LIST_PAGE_SIZE));
@@ -2315,7 +2426,7 @@ export default function AdminShippingPage() {
               </div>
               <p className="mt-1 text-xs text-orange-800">
                 Ô «Đơn hoàn chưa trả shop» ở đây = <strong>tất cả</strong> đơn cần xác nhận (toàn hệ thống). Bấm số
-                trong bảng <strong>Theo dõi theo thời gian</strong> bên dưới để xem đúng từng tháng/tuần.
+                trong bảng <strong>Theo dõi theo đơn nhập</strong> / <strong>Thực nhận</strong> bên dưới để xem đúng từng tháng/tuần.
               </p>
               <p className="mt-1.5 text-xs text-gray-500 tabular-nums">
                 {opsStats.in_transit_count +
@@ -2444,9 +2555,9 @@ export default function AdminShippingPage() {
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Theo dõi theo thời gian</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Theo dõi theo đơn nhập</h2>
             <p className="text-sm text-gray-600 mt-1">
-              Thống kê vận đơn EMS theo ngày import vào hệ thống (múi giờ Việt Nam).
+              Thống kê vận đơn EMS theo ngày import vào hệ thống (múi giờ Việt Nam). Các cột trạng thái cộng khớp tổng kỳ.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2616,7 +2727,14 @@ export default function AdminShippingPage() {
                 className="mt-1 block min-w-[140px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm bg-white"
               >
                 <option value="">Tất cả các năm</option>
-                {(timelineStats?.available_years ?? []).map((y) => (
+                {(
+                  Array.from(
+                    new Set([
+                      ...(timelineStats?.available_years ?? []),
+                      ...(receivedTimelineStats?.available_years ?? []),
+                    ]),
+                  ).sort((a, b) => b - a)
+                ).map((y) => (
                   <option key={y} value={String(y)}>
                     {y}
                   </option>
@@ -2872,7 +2990,7 @@ export default function AdminShippingPage() {
               {' · '}
               Giao OK · chưa trả COD = đã giao, EMS chưa trả tiền thu hộ về shop
               {' · '}
-              COD EMS trả shop = chỉ khi import file đối soát COD
+              COD EMS trả shop = đơn import trong kỳ đã đối soát COD (có thể EMS trả ở tháng khác)
             </p>
           </div>
         ) : timelineError ? null : (
@@ -2882,6 +3000,121 @@ export default function AdminShippingPage() {
               : 'Chưa có dữ liệu vận đơn để thống kê.'}
           </p>
         )}
+
+        <div className="pt-4 border-t border-gray-100 space-y-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Theo dữ liệu thực nhận</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              COD theo ngày EMS chuyển tiền về shop · Hoàn theo ngày admin xác nhận nhận hoàn (không theo ngày
+              import).
+            </p>
+          </div>
+
+          {receivedTimelineError ? (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+              {receivedTimelineError}{' '}
+              <button
+                type="button"
+                onClick={() => void loadTimelineStats(timelineGranularity)}
+                className="underline font-medium"
+              >
+                Thử lại
+              </button>
+            </div>
+          ) : null}
+
+          {timelineLoading && !receivedTimelineStats ? (
+            <p className="text-sm text-gray-500 py-4 text-center">Đang tải thống kê thực nhận…</p>
+          ) : receivedTimelineStats?.items.length ? (
+            <div className="space-y-3">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-teal-50/80 text-teal-900">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">
+                        {TIMELINE_GRANULARITY_LABELS[receivedTimelineStats.granularity]}
+                      </th>
+                      <th className="px-3 py-2 text-right font-medium">COD nhận trong kỳ</th>
+                      <th className="px-3 py-2 text-right font-medium">Hoàn admin nhận trong kỳ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {receivedTimelineStats.items.map((item) => (
+                      <tr key={`recv-${item.period_key}`} className="hover:bg-gray-50/80">
+                        <td className="px-3 py-2.5 text-gray-900">
+                          <div className="font-medium">{item.period_label}</div>
+                          {item.period_start !== item.period_end ? (
+                            <div className="text-xs text-gray-500">
+                              {item.period_start.slice(8, 10)}/{item.period_start.slice(5, 7)} –{' '}
+                              {item.period_end.slice(8, 10)}/{item.period_end.slice(5, 7)}/
+                              {item.period_end.slice(0, 4)}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-teal-800">
+                          <TimelineCodCountCell
+                            count={item.cod_received_count}
+                            amount={item.cod_received_total}
+                            onClick={() => openReceivedTimelineBucket(item, 'cod_received_in_period')}
+                            className="text-teal-800 hover:text-teal-950"
+                            amountClassName="text-teal-700/90"
+                          />
+                        </td>
+                        <td className="px-3 py-2.5 text-right text-orange-900">
+                          <TimelineCodCountCell
+                            count={item.return_received_count}
+                            amount={item.return_received_cod_total}
+                            onClick={() => openReceivedTimelineBucket(item, 'shop_return_received')}
+                            className="text-orange-900 hover:text-orange-950"
+                            amountClassName="text-orange-800/90"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {receivedTimelineStats.totals.cod_received_count > 0 ||
+                  receivedTimelineStats.totals.return_received_count > 0 ? (
+                    <tfoot className="bg-teal-50/70 text-teal-950">
+                      <tr>
+                        <td className="px-3 py-2.5 font-semibold">
+                          Tổng ({receivedTimelineStats.items.length} kỳ hiển thị)
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold">
+                          <TimelineCodCountCell
+                            count={receivedTimelineStats.totals.cod_received_count}
+                            amount={receivedTimelineStats.totals.cod_received_total}
+                            onClick={() => openReceivedTimelineBucketTotals('cod_received_in_period')}
+                            className="text-teal-900 hover:text-teal-950"
+                            amountClassName="text-teal-800"
+                          />
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-semibold">
+                          <TimelineCodCountCell
+                            count={receivedTimelineStats.totals.return_received_count}
+                            amount={receivedTimelineStats.totals.return_received_cod_total}
+                            onClick={() => openReceivedTimelineBucketTotals('shop_return_received')}
+                            className="text-orange-950 hover:text-orange-900"
+                            amountClassName="text-orange-900"
+                          />
+                        </td>
+                      </tr>
+                    </tfoot>
+                  ) : null}
+                </table>
+              </div>
+              <p className="text-xs text-gray-500">
+                Bấm số để xem danh sách · COD nhận = ngày EMS trả tiền (file đối soát) · Hoàn admin nhận = ngày
+                xác nhận nhận hoàn.
+              </p>
+            </div>
+          ) : receivedTimelineError ? null : (
+            <p className="text-sm text-gray-500 py-4 text-center">
+              {receivedTimelineStats?.filter_label
+                ? 'Không có dữ liệu thực nhận trong khoảng đã chọn.'
+                : 'Chưa có dữ liệu COD/hoàn thực nhận để thống kê.'}
+            </p>
+          )}
+        </div>
       </section>
 
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
