@@ -618,6 +618,20 @@ export interface AdminSourceStockClearOosFlagResult {
   detail?: string;
 }
 
+/** Toàn bộ products.id gắn cờ OOS trong cửa sổ báo cáo (không phân trang mẫu). */
+export interface AdminSourceStockWindowOosDbIdsResult {
+  ok: boolean;
+  domain: string;
+  active_only: boolean;
+  window_days: number;
+  window_since_utc_iso: string;
+  total: number;
+  returned: number;
+  truncated: boolean;
+  limit: number;
+  db_ids: number[];
+}
+
 /** Xếp worker PDP kiểm tra lại (force). */
 export interface AdminSourceStockForceWorkerRecheckResult {
   ok: boolean;
@@ -1397,6 +1411,24 @@ export const adminProductAPI = {
     sp.set('sample_page_size', String(params.samplePageSize ?? 200));
     return fetchAdmin<AdminSourceStockActivityReport>(
       `/products/admin/source-stock-batch/report?${sp.toString()}`,
+      { timeoutMs: 120_000 },
+    );
+  },
+
+  /** Toàn bộ id DB gắn cờ hết hàng trong cửa sổ báo cáo (không chỉ 200 dòng trang mẫu). */
+  fetchSourceStockWindowOosDbIds: (params: {
+    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    activeOnly?: boolean;
+    windowDays?: number;
+    limit?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    sp.set('domain', params.domain);
+    sp.set('active_only', String(params.activeOnly ?? true));
+    sp.set('window_days', String(params.windowDays ?? 30));
+    if (params.limit != null) sp.set('limit', String(params.limit));
+    return fetchAdmin<AdminSourceStockWindowOosDbIdsResult>(
+      `/products/admin/source-stock-batch/oos-db-ids?${sp.toString()}`,
       { timeoutMs: 120_000 },
     );
   },

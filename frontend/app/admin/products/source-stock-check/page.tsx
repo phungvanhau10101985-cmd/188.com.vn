@@ -300,9 +300,11 @@ type ReportSampleOosBulkSelection = {
   onBulkDeleteSelected: () => void;
   onBulkClearFlagSelected: () => void;
   onBulkRecheckSelected: () => void;
-  onBulkDeleteAllDisplayed: () => void;
-  onBulkClearFlagAllDisplayed: () => void;
-  onBulkRecheckAllDisplayed: () => void;
+  /** Toàn bộ SP gắn cờ hết trong cửa sổ báo cáo (không chỉ trang 200). */
+  windowOosTotal: number;
+  onBulkDeleteAllInWindow: () => void;
+  onBulkClearFlagAllInWindow: () => void;
+  onBulkRecheckAllInWindow: () => void;
 };
 
 /** Một ô trong bảng mẫu: URL sau quy đổi + ghi chú lỗi quy đổi (nếu có). */
@@ -434,28 +436,34 @@ function SourceStockReportSampleTable({
               PDP lại
             </button>
             <span className="mx-1 h-4 w-px bg-slate-300 shrink-0" aria-hidden />
-            <span className="font-semibold text-slate-600 mr-0.5">Toàn bộ mẫu:</span>
+            <span className="font-semibold text-slate-600 mr-0.5">
+              Cờ hết trong cửa sổ
+              {oosBulkSelection.windowOosTotal > 0
+                ? ` (${oosBulkSelection.windowOosTotal.toLocaleString('vi-VN')})`
+                : ''}
+              :
+            </span>
             <button
               type="button"
-              disabled={oosBulkSelection.bulkBarBusy}
+              disabled={oosBulkSelection.bulkBarBusy || oosBulkSelection.windowOosTotal <= 0}
               className="rounded-md border border-red-400 bg-red-50 px-2 py-1 font-semibold text-red-950 hover:bg-red-100 disabled:opacity-45"
-              onClick={() => oosBulkSelection.onBulkDeleteAllDisplayed()}
+              onClick={() => oosBulkSelection.onBulkDeleteAllInWindow()}
             >
               Xóa DB (tất cả)
             </button>
             <button
               type="button"
-              disabled={oosBulkSelection.bulkBarBusy}
+              disabled={oosBulkSelection.bulkBarBusy || oosBulkSelection.windowOosTotal <= 0}
               className="rounded-md border border-slate-300 bg-white px-2 py-1 font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-45"
-              onClick={() => oosBulkSelection.onBulkClearFlagAllDisplayed()}
+              onClick={() => oosBulkSelection.onBulkClearFlagAllInWindow()}
             >
               Gỡ cờ (tất cả)
             </button>
             <button
               type="button"
-              disabled={oosBulkSelection.bulkBarBusy}
+              disabled={oosBulkSelection.bulkBarBusy || oosBulkSelection.windowOosTotal <= 0}
               className="rounded-md border border-emerald-400 bg-emerald-50 px-2 py-1 font-semibold text-emerald-950 hover:bg-emerald-100 disabled:opacity-45"
-              onClick={() => oosBulkSelection.onBulkRecheckAllDisplayed()}
+              onClick={() => oosBulkSelection.onBulkRecheckAllInWindow()}
             >
               PDP lại (tất cả)
             </button>
@@ -1050,25 +1058,46 @@ export default function AdminSourceStockCheckPage() {
   }, []);
 
   const requestReportOosDeleteDbIds = useCallback(
-    (rawIds: number[], opts?: { skipStepUp?: boolean }) => {
+    (rawIds: number[], opts?: { skipStepUp?: boolean; allInWindow?: boolean }) => {
       const uniq = [...new Set(rawIds.filter((id) => id > 0))].sort((a, b) => a - b);
       if (!uniq.length) {
         showToast('err', 'Chưa có SP nào được chọn trong bảng mẫu.');
         return;
       }
-      const cap =
-        typeof activityReport?.samples_pagination?.page_size === 'number'
-          ? activityReport.samples_pagination.page_size
-          : SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE;
-      if (uniq.length > cap) {
-        showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần (giới hạn trên một trang mẫu).`);
-        return;
+      if (!opts?.allInWindow) {
+        const cap =
+          typeof activityReport?.samples_pagination?.page_size === 'number'
+            ? activityReport.samples_pagination.page_size
+            : SOURCE_STOCK_REPORT_SAMPLE_PAGE_SIZE;
+        if (uniq.length > cap) {
+          showToast('err', `Chỉ xử lý tối đa ${cap} SP mỗi lần khi chọn trên trang mẫu.`);
+          return;
+        }
       }
       setReportOosDeleteSkipStepUp(!!opts?.skipStepUp);
       setReportOosDeleteConfirmIds(uniq);
     },
     [activityReport?.samples_pagination?.page_size, showToast],
   );
+
+  const loadWindowOosDbIds = useCallback(async () => {
+    const res = await adminProductAPI.fetchSourceStockWindowOosDbIds({
+      domain,
+      activeOnly: true,
+      windowDays: 30,
+    });
+    const ids = [...new Set((res.db_ids ?? []).filter((id) => Number.isFinite(id) && id > 0))];
+    if (!ids.length) {
+      throw new Error('Không có SP gắn cờ hết hàng trong cửa sổ báo cáo.');
+    }
+    if (res.truncated) {
+      showToast(
+        'info',
+        `Cửa sổ có ${res.total.toLocaleString('vi-VN')} mã OOS — lần này lấy ${ids.length.toLocaleString('vi-VN')} mã (giới hạn API). Chạy lại sau nếu còn.`,
+      );
+    }
+    return ids;
+  }, [domain, showToast]);
 
   const runBulkReportOosClearFlags = useCallback(
     async (dbIds: number[]) => {
@@ -1204,6 +1233,7 @@ export default function AdminSourceStockCheckPage() {
 
   const reportOosBulkSelection = useMemo<ReportSampleOosBulkSelection | undefined>(() => {
     if (!reportOosSampleRows.length) return undefined;
+    const windowOosTotal = activityReport?.counts?.source_stock_oos_signal_in_window ?? 0;
     return {
       selectedDbIds: reportOosSampleSelectedIds,
       displayedCount: reportOosSampleRows.length,
@@ -1215,15 +1245,51 @@ export default function AdminSourceStockCheckPage() {
       onBulkDeleteSelected: () => requestReportOosDeleteDbIds([...reportOosSampleSelectedIds]),
       onBulkClearFlagSelected: () => void runBulkReportOosClearFlags([...reportOosSampleSelectedIds]),
       onBulkRecheckSelected: () => void runBulkReportOosEnqueueRecheckNoPoll([...reportOosSampleSelectedIds]),
-      onBulkDeleteAllDisplayed: () =>
-        requestReportOosDeleteDbIds(reportOosSampleRows.map((r) => r.id), { skipStepUp: true }),
-      onBulkClearFlagAllDisplayed: () =>
-        void runBulkReportOosClearFlags(reportOosSampleRows.map((r) => r.id)),
-      onBulkRecheckAllDisplayed: () =>
-        void runBulkReportOosEnqueueRecheckNoPoll(reportOosSampleRows.map((r) => r.id)),
+      windowOosTotal,
+      onBulkDeleteAllInWindow: () => {
+        void (async () => {
+          setReportOosBulkBusy(true);
+          try {
+            const ids = await loadWindowOosDbIds();
+            requestReportOosDeleteDbIds(ids, { skipStepUp: true, allInWindow: true });
+          } catch (e) {
+            showToast('err', e instanceof Error ? e.message : String(e));
+          } finally {
+            setReportOosBulkBusy(false);
+          }
+        })();
+      },
+      onBulkClearFlagAllInWindow: () => {
+        void (async () => {
+          setReportOosBulkBusy(true);
+          try {
+            const ids = await loadWindowOosDbIds();
+            setReportOosBulkBusy(false);
+            await runBulkReportOosClearFlags(ids);
+          } catch (e) {
+            setReportOosBulkBusy(false);
+            showToast('err', e instanceof Error ? e.message : String(e));
+          }
+        })();
+      },
+      onBulkRecheckAllInWindow: () => {
+        void (async () => {
+          setReportOosBulkBusy(true);
+          try {
+            const ids = await loadWindowOosDbIds();
+            setReportOosBulkBusy(false);
+            await runBulkReportOosEnqueueRecheckNoPoll(ids);
+          } catch (e) {
+            setReportOosBulkBusy(false);
+            showToast('err', e instanceof Error ? e.message : String(e));
+          }
+        })();
+      },
     };
   }, [
+    activityReport?.counts?.source_stock_oos_signal_in_window,
     clearReportOosSampleSelection,
+    loadWindowOosDbIds,
     reportOosBulkBusy,
     reportOosDeleting,
     reportOosSampleRows,
@@ -1232,6 +1298,7 @@ export default function AdminSourceStockCheckPage() {
     runBulkReportOosClearFlags,
     runBulkReportOosEnqueueRecheckNoPoll,
     selectAllReportOosDisplayed,
+    showToast,
     toggleReportOosSampleSelect,
   ]);
 
@@ -2114,14 +2181,18 @@ export default function AdminSourceStockCheckPage() {
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="report-oos-del-title" className="text-lg font-bold text-gray-900">
-              Xóa vĩnh viễn {reportOosDeleteConfirmIds.length} sản khỏi DB cửa hàng?
+              Xóa vĩnh viễn {reportOosDeleteConfirmIds.length.toLocaleString('vi-VN')} sản khỏi DB cửa
+              hàng?
             </h3>
             <div className="text-sm text-gray-700 mt-3 leading-relaxed space-y-2">
               <p>
                 Sẽ xóa theo khóa <code className="text-xs bg-gray-100 px-1 rounded">products.id</code> — không
-                hoàn tác. Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~12s rồi tự xóa
-                tiếp — không cần bấm lại. Thích hợp khi chắc chắn không còn bán những mã
-                này.
+                hoàn tác
+                {reportOosDeleteSkipStepUp
+                  ? ' (toàn bộ SP gắn cờ hết hàng trong cửa sổ báo cáo, không chỉ trang mẫu).'
+                  : '.'}{' '}
+                Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~12s rồi tự xóa tiếp —
+                không cần bấm lại.
               </p>
               {!reportOosDeleting ? (
                 <ul className="mt-2 max-h-48 overflow-auto border border-gray-100 rounded-lg divide-y divide-gray-100 text-[13px]">

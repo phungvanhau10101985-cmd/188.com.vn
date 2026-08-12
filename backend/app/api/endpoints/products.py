@@ -44,6 +44,7 @@ from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
     admin_clear_false_source_oos_flag,
     admin_force_worker_source_stock_recheck,
+    admin_list_window_oos_db_ids,
     admin_reset_source_stock_pdp_cycle,
     admin_source_stock_activity_report,
     admin_source_stock_queue_stats,
@@ -2004,6 +2005,28 @@ def admin_source_stock_batch_report(
         samples_in_stock_page=int(samples_in_stock_page),
         samples_batch_ttl_page=int(samples_batch_ttl_page),
         sample_page_size=int(sample_page_size),
+    )
+
+
+@router.get("/admin/source-stock-batch/oos-db-ids", response_model=dict, include_in_schema=False)
+def admin_source_stock_batch_oos_db_ids(
+    domain: Literal["hibox", "cssbuy", "vipomall"] = Query("cssbuy"),
+    active_only: bool = Query(True),
+    window_days: int = Query(30, ge=1, le=366),
+    limit: int = Query(20_000, ge=1, le=50_000),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """
+    Danh sách ``products.id`` gắn cờ hết hàng nguồn trong cửa sổ báo cáo (không phân trang 200).
+    Dùng cho thao tác «tất cả» trên bảng mẫu OOS.
+    """
+    return admin_list_window_oos_db_ids(
+        db,
+        domain=str(domain),
+        active_only=bool(active_only),
+        window_days=int(window_days),
+        limit=int(limit),
     )
 
 

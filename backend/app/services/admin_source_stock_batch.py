@@ -534,6 +534,53 @@ def admin_source_stock_activity_report(
     }
 
 
+def admin_list_window_oos_db_ids(
+    db: Session,
+    *,
+    domain: str,
+    active_only: bool,
+    window_days: int = 30,
+    limit: int = 20_000,
+) -> Dict[str, Any]:
+    """
+    Toàn bộ ``products.id`` gắn cờ ``out_of_stock`` trong cùng cửa sổ/bộ lọc báo cáo
+    (không phân trang mẫu 200). Dùng cho nút «Xóa DB (tất cả)» / gỡ cờ / PDP lại cả cửa sổ.
+    """
+    domain_l = (domain or "cssbuy").strip().lower()
+    wd = max(1, min(int(window_days), 366))
+    since = _utcnow() - timedelta(days=wd)
+    base = admin_product_source_link_base_filters(Product, domain_l, active_only=active_only)
+    lim = max(1, min(int(limit), 50_000))
+
+    oos_filters = (
+        *base,
+        Product.source_stock_checked_at.isnot(None),
+        Product.source_stock_checked_at >= since,
+        Product.source_stock_status == "out_of_stock",
+    )
+    total = int(db.query(func.count(Product.id)).filter(*oos_filters).scalar() or 0)
+    rows = (
+        db.query(Product.id)
+        .filter(*oos_filters)
+        .order_by(Product.source_stock_checked_at.desc(), Product.id.desc())
+        .limit(lim)
+        .all()
+    )
+    db_ids = [int(r[0]) for r in rows if r and r[0] is not None]
+    return {
+        "ok": True,
+        "domain": domain_l,
+        "active_only": bool(active_only),
+        "window_days": wd,
+        "window_since_utc_iso": since.isoformat(),
+        "total": total,
+        "returned": len(db_ids),
+        "truncated": total > len(db_ids),
+        "limit": lim,
+        "db_ids": db_ids,
+    }
+
+
 def admin_collect_distinct_product_urls_from_db(
     db: Session,
     *,
