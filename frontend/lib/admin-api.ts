@@ -1074,12 +1074,6 @@ export interface AdminImport1688CookieSettings {
   message?: string | null;
 }
 
-export interface AdminImport1688ExcelBatchModeSettings {
-  minimal_excel_only: boolean;
-  mode: 'minimal' | 'full' | string;
-  message?: string | null;
-}
-
 export interface AdminSearchMapping {
   id: number;
   keyword_input: string;
@@ -2128,18 +2122,6 @@ export const adminProductAPI = {
         method: 'DELETE',
         timeoutMs: 60_000,
       });
-    }),
-
-  getImport1688ExcelBatchModeSettings: () =>
-    fetchAdmin<AdminImport1688ExcelBatchModeSettings>('/import-1688/settings/excel-batch-mode', {
-      timeoutMs: 30_000,
-    }),
-
-  saveImport1688ExcelBatchModeSettings: (minimalExcelOnly: boolean) =>
-    fetchAdmin<AdminImport1688ExcelBatchModeSettings>('/import-1688/settings/excel-batch-mode', {
-      method: 'PUT',
-      body: JSON.stringify({ minimal_excel_only: minimalExcelOnly }),
-      timeoutMs: 30_000,
     }),
 
   restartBackendApi: () =>

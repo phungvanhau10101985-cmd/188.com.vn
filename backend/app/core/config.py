@@ -536,11 +536,6 @@ class Settings:
         # Delay giữa từng job trong batch import link: mặc định 0 để không chậm hàng đợi.
         # Có thể tăng (vd. 0.2 - 1.0s) khi cần giảm tải CPU/network trên VPS nhỏ.
         self.IMPORT_1688_BATCH_INTER_JOB_DELAY_SECONDS: float = max(0.0, _import_batch_delay)
-        # Batch import link Excel: true = Vipomall scrape nhanh — chỉ Variant; ID SP từ cột A.
-        # false = scrape đầy đủ (mọi trường / mọi nguồn).
-        self.IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY: bool = os.getenv(
-            "IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY", "true"
-        ).strip().lower() in ("1", "true", "yes")
         # CN¥ listing → Excel batch / quy đổi Giá Tệ: VNĐ/CN¥ (mặc định khớp frontend parse HTML listing `3580`).
         _listing_cny_rate = os.getenv("LISTING_IMPORT_VND_PER_CNY", "3580").strip().replace(",", ".")
         try:

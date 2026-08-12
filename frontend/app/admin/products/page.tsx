@@ -13,7 +13,6 @@ import {
   adminProductAPI,
   type AdminImport1688Draft,
   type AdminImport1688CookieSettings,
-  type AdminImport1688ExcelBatchModeSettings,
   type AdminImport1688ExcelBatchSummary,
   type AdminImport1688BatchStatus,
   type AdminImport1688Job,
@@ -788,9 +787,6 @@ export default function AdminProductsPage() {
   const [excelBatchChoiceOpen, setExcelBatchChoiceOpen] = useState(false);
   /** Đợt đích khi modal mở — cố định, tránh đổi token giữa lúc chọn và submit. */
   const [excelBatchAppendTarget, setExcelBatchAppendTarget] = useState<string | null>(null);
-  const [excelBatchMinimalMode, setExcelBatchMinimalMode] = useState<boolean | null>(null);
-  const [excelBatchModeLoading, setExcelBatchModeLoading] = useState(false);
-  const [excelBatchModeSaving, setExcelBatchModeSaving] = useState(false);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
   /** Tab trong khối Import Hibox — tách luồng để giao diện không chồng chéo. */
@@ -1405,43 +1401,6 @@ export default function AdminProductsPage() {
   useEffect(() => {
     void loadImportScraperCookieSettings();
   }, [loadImportScraperCookieSettings]);
-
-  const loadExcelBatchModeSettings = useCallback(async () => {
-    setExcelBatchModeLoading(true);
-    try {
-      const st = await adminProductAPI.getImport1688ExcelBatchModeSettings();
-      setExcelBatchMinimalMode(st.minimal_excel_only);
-    } catch {
-      setExcelBatchMinimalMode(null);
-    } finally {
-      setExcelBatchModeLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (import1688SectionTab !== 'excel') return;
-    void loadExcelBatchModeSettings();
-  }, [import1688SectionTab, loadExcelBatchModeSettings]);
-
-  const handleExcelBatchModeChange = async (minimal: boolean) => {
-    if (excelBatchModeSaving || excelBatchBusy || excelBatchMinimalMode === minimal) return;
-    setExcelBatchModeSaving(true);
-    try {
-      const st = await adminProductAPI.saveImport1688ExcelBatchModeSettings(minimal);
-      setExcelBatchMinimalMode(st.minimal_excel_only);
-      showToast(
-        'ok',
-        st.message ||
-          (st.minimal_excel_only
-            ? 'Đã bật chế độ nhanh — chỉ scrape Variant, export 2 cột.'
-            : 'Đã bật chế độ đầy đủ — scrape mọi trường, export ~40 cột.'),
-      );
-    } catch (err) {
-      showToast('err', err instanceof Error ? err.message : 'Không đổi được chế độ import Excel', 9000);
-    } finally {
-      setExcelBatchModeSaving(false);
-    }
-  };
 
   const handleSaveImportScraperCookie = async () => {
     const cookie = importScraperCookieText.trim();
@@ -3293,64 +3252,9 @@ export default function AdminProductsPage() {
                 className="rounded-xl border border-slate-200/80 bg-slate-50/50 p-4 shadow-sm sm:p-5"
               >
                 <h3 className="text-sm font-semibold text-slate-900">Import hàng loạt từ Excel</h3>
-                <div className="mt-3 rounded-lg border border-amber-200/80 bg-amber-50/60 p-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-slate-800">Chế độ import Excel batch</p>
-                      <p className="mt-0.5 text-[11px] text-slate-600">
-                        {excelBatchMinimalMode === false
-                          ? 'Scrape đầy đủ mọi trường; export file ~40 cột như mẫu listing.'
-                          : 'Scrape Vipomall chỉ Variant (màu); export 2 cột id + Variant. File import giữ nguyên mẫu hiện tại.'}
-                      </p>
-                    </div>
-                    <div
-                      role="group"
-                      aria-label="Chế độ import Excel batch"
-                      className="flex shrink-0 flex-wrap gap-1 rounded-xl bg-white/90 p-1 ring-1 ring-amber-200/70"
-                    >
-                      <button
-                        type="button"
-                        aria-pressed={excelBatchMinimalMode !== false}
-                        disabled={excelBatchModeLoading || excelBatchModeSaving || excelBatchBusy}
-                        onClick={() => void handleExcelBatchModeChange(true)}
-                        className={`inline-flex min-h-[36px] items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1 disabled:opacity-60 ${
-                          excelBatchMinimalMode !== false
-                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
-                            : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
-                        }`}
-                      >
-                        {excelBatchModeSaving && excelBatchMinimalMode === false ? 'Đang lưu…' : 'Nhanh — chỉ Variant'}
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={excelBatchMinimalMode === false}
-                        disabled={excelBatchModeLoading || excelBatchModeSaving || excelBatchBusy}
-                        onClick={() => void handleExcelBatchModeChange(false)}
-                        className={`inline-flex min-h-[36px] items-center justify-center rounded-lg px-3 py-1.5 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-1 disabled:opacity-60 ${
-                          excelBatchMinimalMode === false
-                            ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/80'
-                            : 'text-slate-600 hover:bg-white/80 hover:text-slate-900'
-                        }`}
-                      >
-                        {excelBatchModeSaving && excelBatchMinimalMode !== false ? 'Đang lưu…' : 'Đầy đủ'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
                 <p className="mt-2 text-xs text-gray-500">
-                  {excelBatchMinimalMode === false ? (
-                    <>
-                      <strong>Chế độ đầy đủ:</strong> tiêu đề phải có <strong>Link</strong> (vd. Link SP / item_url) và{' '}
-                      <strong>Giá Tệ</strong> / China price.
-                    </>
-                  ) : (
-                    <>
-                      <strong className="text-amber-800">Chế độ nhanh:</strong> file import{' '}
-                      <strong>giữ nguyên mẫu hiện tại</strong> (Link, Giá Tệ, …); scrape Vipomall{' '}
-                      <strong>chỉ lấy Variant (màu)</strong>; <strong>ID SP</strong> lấy từ <strong>cột A</strong> Excel.
-                      File export chỉ có <strong>2 cột: id + Variant</strong>.
-                    </>
-                  )}
+                  <strong>Scrape đầy đủ</strong> mọi trường; export ~40 cột như mẫu listing. Tiêu đề phải có{' '}
+                  <strong>Link</strong> (vd. Link SP / item_url) và <strong>Giá Tệ</strong> / China price.
                   <span className="mt-1 block">
                     Chỉ nhận file <strong>.xlsx</strong> mẫu <strong>tái nhập listing</strong> (hai hàng đầu là nhãn EN/VI).
                     Mỗi lần upload tối đa <strong>3.000</strong> dòng link (không tính 2 hàng tiêu đề); file lớn hơn hãy chia nhỏ hoặc

@@ -50,7 +50,6 @@ from openpyxl import Workbook, load_workbook
 
 
 
-from app.core.config import settings
 from app.crud.product import parse_json_field
 from app.schemas.import_1688 import MAX_IMPORT_1688_EXCEL_BATCH_ROWS
 from app.services.listing_cny_grid import (
@@ -74,29 +73,6 @@ MAX_IMPORT_COL_1BASED = 40
 DATA_FIRST_ROW = 3
 
 _MAX_ROWS = MAX_IMPORT_1688_EXCEL_BATCH_ROWS
-
-# Mẫu export đầy đủ ~40 cột: A = id, O = Variant (màu sắc / biến thể).
-_EXCEL_COL_PRODUCT_ID_1BASED = 1
-_EXCEL_COL_VARIANT_1BASED = 15
-
-
-def import_batch_minimal_excel_only() -> bool:
-    """Chế độ tạm: batch Excel — scrape Vipomall chỉ lấy Variant; ID SP từ cột A."""
-    return bool(getattr(settings, "IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY", True))
-
-
-def set_import_batch_minimal_excel_only(enabled: bool) -> None:
-    """Bật/tắt chế độ nhanh — cập nhật runtime + ghi .env.local (không cần restart)."""
-    from app.services.import_scraper_cookies import upsert_scraper_cookie_env_local
-
-    settings.IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY = bool(enabled)
-    upsert_scraper_cookie_env_local(
-        {"IMPORT_1688_BATCH_MINIMAL_EXCEL_ONLY": "true" if enabled else "false"}
-    )
-
-
-
-
 
 
 def _merged_labels_for_cols(
@@ -415,33 +391,6 @@ def _resolve_sub_subcategory_column(by_col: Dict[int, set[str]]) -> Optional[int
     return _first_col_matching(by_col, needles)
 
 
-def _resolve_product_id_column(by_col: Dict[int, set[str]]) -> int:
-    needles = frozenset(
-        _norm_header(x)
-        for x in (
-            "id",
-            "id sp",
-            "id sản phẩm",
-            "id san pham",
-            "id sản phẩm",
-        )
-    )
-    return _first_col_matching(by_col, needles) or _EXCEL_COL_PRODUCT_ID_1BASED
-
-
-def _resolve_variant_column(by_col: Dict[int, set[str]]) -> int:
-    needles = frozenset(
-        _norm_header(x)
-        for x in (
-            "variant",
-            "biến thể",
-            "bien the",
-            "variant_colors",
-        )
-    )
-    return _first_col_matching(by_col, needles) or _EXCEL_COL_VARIANT_1BASED
-
-
 def _resolve_product_url_column(by_col: Dict[int, set[str]]) -> Optional[int]:
     needles = frozenset(
         _norm_header(x)
@@ -487,16 +436,6 @@ def _norm_header(text: Any) -> str:
     s = unicodedata.normalize("NFKC", str(text)).strip().casefold()
 
     return _ws_re.sub(" ", s)
-
-
-_HEADER_TOKENS_PRODUCT_ID = frozenset(
-    {
-        _norm_header("id"),
-        _norm_header("id sp"),
-        _norm_header("id sản phẩm"),
-        _norm_header("id san pham"),
-    }
-)
 
 
 _CATEGORY_PLACEHOLDER_HEADERS = frozenset(
@@ -993,10 +932,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
         base_vnd_rate = _default_listing_import_vnd_per_cny()
 
-        pid_col = _resolve_product_id_column(label_by_col) if import_batch_minimal_excel_only() else None
-
-
-
         data_iter = ws.iter_rows(
 
             min_row=DATA_FIRST_ROW,
@@ -1140,18 +1075,6 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 continue
 
             overlays["price"] = float(vnd_px)
-
-
-
-            if import_batch_minimal_excel_only():
-                pid_raw = _cell_str(coord(pid_col or _EXCEL_COL_PRODUCT_ID_1BASED))
-                if pid_raw and _norm_header(pid_raw) in _HEADER_TOKENS_PRODUCT_ID:
-                    continue
-                if not pid_raw or pid_raw.lower() == "nan":
-                    skip.append(f"Dòng {excel_row}: thiếu ID SP (cột A).")
-                    continue
-                overlays["product_id"] = pid_raw
-                overlays["_vipo_variant_only"] = True
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 
