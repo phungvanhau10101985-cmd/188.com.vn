@@ -5,7 +5,7 @@ import logging
 import re
 import secrets
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import func
@@ -113,11 +113,35 @@ def verify_shipping_lookup_auth(request: Request) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
 
-def phone_last9(phone: str) -> str:
+def normalize_vn_phone(phone: str) -> str:
+    """Quy SĐT VN về bỏ 0 đầu (và +84/84). 0369597965 = 369597965 = +84369597965."""
     digits = _PHONE_DIGIT_RE.sub("", phone or "")
     if digits.startswith("84") and len(digits) >= 11:
-        digits = "0" + digits[2:]
-    return digits[-9:] if len(digits) >= 9 else digits
+        digits = digits[2:]
+    return digits.lstrip("0")
+
+
+def phone_last9(phone: str) -> str:
+    """Alias: khóa khớp SĐT = số đã bỏ 0 đầu."""
+    return normalize_vn_phone(phone)
+
+
+def _sql_normalize_vn_phone(column):
+    """Cùng quy tắc normalize_vn_phone trên cột SQL (PostgreSQL)."""
+    raw = func.regexp_replace(func.coalesce(column, ""), r"[^0-9]", "", "g")
+    without_cc = func.case(
+        (func.and_(raw.like("84%"), func.length(raw) >= 11), func.substr(raw, 3)),
+        else_=raw,
+    )
+    return func.ltrim(without_cc, "0")
+
+
+def recipient_label_matches_phone(label: str, phone: str) -> bool:
+    """SĐT trong nhãn EMS (vd. «Lương Văn Thiện · 369597965 — …» hoặc «0369597965»)."""
+    norm = normalize_vn_phone(phone)
+    if len(norm) < 9:
+        return False
+    return norm in normalize_vn_phone(label) or norm in _PHONE_DIGIT_RE.sub("", label or "")
 
 
 def looks_like_phone(value: str) -> bool:
@@ -183,18 +207,49 @@ def _date_str(value: Any) -> Optional[str]:
 
 
 def get_latest_order_by_phone(db: Session, phone: str) -> Optional[Order]:
-    last9 = phone_last9(phone)
-    if len(last9) < 9:
+    norm = normalize_vn_phone(phone)
+    if len(norm) < 9:
         return None
-    digits_expr = func.regexp_replace(Order.customer_phone, r"[^0-9]", "", "g")
-    last9_expr = func.right(digits_expr, 9)
-    # 84xxxxxxxxx → last 9 digits trùng 0xxxxxxxxx
     return (
         db.query(Order)
-        .filter(last9_expr == last9)
+        .filter(_sql_normalize_vn_phone(Order.customer_phone) == norm)
         .order_by(Order.created_at.desc(), Order.id.desc())
         .first()
     )
+
+
+def get_latest_ems_record_by_phone(db: Session, phone: str) -> Optional[EmsShippingRecord]:
+    """Vận đơn EMS gần nhất theo SĐT trong recipient_label (kể cả chưa gắn mã shop DH)."""
+    norm = normalize_vn_phone(phone)
+    if len(norm) < 9:
+        return None
+    digits_expr = func.regexp_replace(
+        func.coalesce(EmsShippingRecord.recipient_label, ""),
+        r"[^0-9]",
+        "",
+        "g",
+    )
+    # Nhãn có thể ghi 036… hoặc 36… — khớp phần đã bỏ số 0.
+    return (
+        db.query(EmsShippingRecord)
+        .filter(digits_expr.like(f"%{norm}%"))
+        .order_by(EmsShippingRecord.updated_at.desc(), EmsShippingRecord.id.desc())
+        .first()
+    )
+
+
+def _ems_linked_to_order(record: EmsShippingRecord, order: Order) -> bool:
+    if record.order_id and record.order_id == order.id:
+        return True
+    rec_code = (record.order_code or "").strip().upper()
+    ord_code = (order.order_code or "").strip().upper()
+    return bool(rec_code and ord_code and rec_code == ord_code)
+
+
+def _sortable_ts(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    return datetime.min
 
 
 def _order_by_tracking(db: Session, tracking: str) -> Optional[Order]:
@@ -449,7 +504,7 @@ def _build_payload(
     return payload
 
 
-def _not_found(message: str, *, query: str = "", query_type: str = "") -> None:
+def _not_found(message: str, *, query: str = "", query_type: str = "") -> NoReturn:
     payload: dict[str, Any] = {"ok": False, "detail": message}
     if query:
         payload["query"] = query
@@ -480,21 +535,68 @@ def lookup_by_order_code(db: Session, order_code: str, *, query: Optional[str] =
 
 
 def lookup_by_phone(db: Session, phone: str, *, query: Optional[str] = None) -> dict[str, Any]:
-    order = get_latest_order_by_phone(db, phone)
-    if not order:
+    shop_order = get_latest_order_by_phone(db, phone)
+    ems_record = get_latest_ems_record_by_phone(db, phone)
+    if shop_order is None and ems_record is None:
         _not_found(
             "Không tìm thấy đơn hàng với số điện thoại này.",
             query=query or (phone or "").strip(),
             query_type="phone",
         )
-    records = _ems_records_for_order(db, order)
+
+    use_ems_primary = False
+    if ems_record is not None and shop_order is None:
+        use_ems_primary = True
+    elif (
+        ems_record is not None
+        and shop_order is not None
+        and not _ems_linked_to_order(ems_record, shop_order)
+    ):
+        ems_ts = _sortable_ts(getattr(ems_record, "updated_at", None) or getattr(ems_record, "created_at", None))
+        shop_ts = _sortable_ts(getattr(shop_order, "created_at", None))
+        if ems_ts >= shop_ts:
+            use_ems_primary = True
+
+    if use_ems_primary and ems_record is not None:
+        order: Optional[Order] = None
+        if ems_record.order_id:
+            order = db.query(Order).filter(Order.id == ems_record.order_id).first()
+        if order is None and (ems_record.order_code or "").strip():
+            order = order_crud.get_order_by_code(db, ems_record.order_code)
+        tracking = (
+            (ems_record.ems_tracking_code or getattr(ems_record, "tracking_number_saved", None) or "")
+            .strip()
+            or None
+        )
+        return _build_payload(
+            db,
+            query=query or phone.strip(),
+            query_type="phone",
+            matched_by="ems_recipient_phone",
+            order=order,
+            record=ems_record,
+            is_latest_order=True,
+            force_ems=bool(tracking),
+            fallback_ems_code=tracking,
+        )
+
+    if shop_order is None:
+        _not_found(
+            "Không tìm thấy đơn hàng với số điện thoại này.",
+            query=query or (phone or "").strip(),
+            query_type="phone",
+        )
+
+    records = _ems_records_for_order(db, shop_order)
     record = records[0] if records else None
+    if ems_record is not None and _ems_linked_to_order(ems_record, shop_order):
+        record = ems_record
     return _build_payload(
         db,
         query=query or phone.strip(),
         query_type="phone",
         matched_by="phone",
-        order=order,
+        order=shop_order,
         record=record,
         is_latest_order=True,
     )
@@ -592,7 +694,7 @@ def lookup_shipping(
     order = order_crud.get_order_by_code(db, raw)
     if order:
         return lookup_by_order_code(db, raw, query=raw)
-    if len(phone_last9(raw)) >= 9:
+    if len(normalize_vn_phone(raw)) >= 9:
         return lookup_by_phone(db, raw, query=raw)
     _not_found(
         f"Không nhận diện được mã tra cứu: {raw}",

@@ -9,7 +9,7 @@ Một endpoint, ba cách gọi:
 | Đầu vào | Hành vi |
 |---------|---------|
 | **Mã đơn web** (`DH042`, `DC009`) | Trả chi tiết đơn + mã vận đơn + timeline shop + EMS (nếu có) |
-| **Số điện thoại khách** | Trả **đơn gần nhất** (theo `created_at`) của SĐT đó, kèm vận chuyển |
+| **Số điện thoại khách** | Trả **đơn gần nhất** của SĐT đó: ưu tiên đơn shop (`orders.customer_phone`), nếu chưa gắn mã DH thì lấy **vận đơn EMS gần nhất** theo SĐT trong nhãn người nhận |
 | **Mã EMS** (`EH042737692VN`) | Tra **live MyEMS**: toàn bộ mốc trạng thái cụ thể + chi tiết đơn shop nếu đã ghép |
 
 ## 1. Endpoint
@@ -85,10 +85,10 @@ GET /api/v1/shipping/lookup?ems_code=EH042737692VN
 `q` tự nhận diện:
 
 - `DHxxx` / `DCxxx` → mã đơn web
-- `09…` / `84…` / `+84…` → SĐT (đơn gần nhất)
+- `09…` / `03…` / `84…` / `+84…` / không có số 0 đầu (`369597965`) → SĐT (đơn gần nhất)
 - `EHxxxxxxxxxVN` (mã EMS kết thúc `VN`) → tra EMS live + đơn
 
-SĐT được chuẩn hoá: `0901234567`, `84901234567`, `+84 901 234 567` cùng một khách.
+SĐT **quy về bỏ số 0 đầu** (và bỏ +84/84): `0369597965`, `369597965`, `84369597965`, `+84 369 597 965` cùng một khách.
 
 ## 4. Ví dụ curl
 
@@ -234,7 +234,7 @@ curl -sS -H "Authorization: Bearer YOUR_KEY" \
 
 Khi tra **mã EMS**: luôn gọi live MyEMS. `events` là danh sách trạng thái cụ thể (chấp nhận gửi, đến bưu cục, giao bưu tá, phát thành công, …). Nếu mã EMS chưa ghép đơn shop, `order` có thể `null` nhưng `ems_tracking` vẫn đủ hành trình.
 
-Khi tra **SĐT**: chỉ một đơn — đơn tạo gần nhất của số đó.
+Khi tra **SĐT**: một kết quả — đơn shop mới nhất của số đó, hoặc vận đơn EMS mới nhất nếu SĐT chỉ có trên nhãn người nhận (chưa có mã DH). `is_latest_order` = `true`. `matched_by` = `phone` (đơn shop) hoặc `ems_recipient_phone` (chỉ EMS).
 
 ## 6. Lỗi
 

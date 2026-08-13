@@ -34,7 +34,7 @@ const SHIPPING_LOOKUP_ROWS: { method: string; suffix: string; note: string }[] =
   {
     method: 'GET',
     suffix: '/shipping/lookup?q=0901234567',
-    note: 'Số điện thoại khách — đơn gần nhất. Không có đơn: 404 «Không tìm thấy đơn hàng với số điện thoại này» (không phải Endpoint not found).',
+    note: 'Số điện thoại khách — đơn shop gần nhất, hoặc vận đơn EMS gần nhất nếu SĐT chỉ có trên nhãn người nhận. Không có: 404 «Không tìm thấy đơn hàng với số điện thoại này».',
   },
   {
     method: 'GET',

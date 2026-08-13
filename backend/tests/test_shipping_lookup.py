@@ -23,15 +23,30 @@ def test_classify_ems_code():
 
 def test_classify_phone():
     assert svc.classify_query("0901234567") == "phone"
+    assert svc.classify_query("0369597965") == "phone"
+    assert svc.classify_query("369597965") == "phone"
     assert svc.classify_query("+84 901 234 567") == "phone"
     assert svc.classify_query("84901234567") == "phone"
 
 
-def test_phone_last9_normalizes_vn():
-    assert svc.phone_last9("0901234567") == "901234567"
-    assert svc.phone_last9("+84901234567") == "901234567"
-    assert svc.phone_last9("84901234567") == "901234567"
-    assert svc.phone_last9("901234567") == "901234567"
+def test_normalize_vn_phone_strips_leading_zero():
+    assert svc.normalize_vn_phone("0369597965") == "369597965"
+    assert svc.normalize_vn_phone("369597965") == "369597965"
+    assert svc.normalize_vn_phone("0901234567") == "901234567"
+    assert svc.normalize_vn_phone("901234567") == "901234567"
+    assert svc.normalize_vn_phone("+84369597965") == "369597965"
+    assert svc.normalize_vn_phone("84369597965") == "369597965"
+    assert svc.normalize_vn_phone("0369 597 965") == "369597965"
+    assert svc.phone_last9("0369597965") == svc.normalize_vn_phone("369597965")
+
+
+def test_recipient_label_matches_phone_with_or_without_leading_zero():
+    label_no_zero = "Lương Văn Thiện · 369597965 — Mỏ đá vôi Lý Quốc, Cao Bằng"
+    label_with_zero = "Lương Văn Thiện · 0369597965 — Mỏ đá vôi Lý Quốc, Cao Bằng"
+    for label in (label_no_zero, label_with_zero):
+        assert svc.recipient_label_matches_phone(label, "0369597965")
+        assert svc.recipient_label_matches_phone(label, "369597965")
+    assert not svc.recipient_label_matches_phone(label_no_zero, "0901234567")
 
 
 def test_serialize_order_includes_status_label_and_items():
@@ -192,7 +207,9 @@ def test_lookup_by_order_code_not_found():
 
 def test_lookup_by_phone_not_found_is_business_404():
     db = MagicMock()
-    with patch.object(svc, "get_latest_order_by_phone", return_value=None):
+    with patch.object(svc, "get_latest_order_by_phone", return_value=None), patch.object(
+        svc, "get_latest_ems_record_by_phone", return_value=None
+    ):
         with pytest.raises(HTTPException) as exc:
             svc.lookup_by_phone(db, "0369597965")
         assert exc.value.status_code == 404
@@ -201,6 +218,36 @@ def test_lookup_by_phone_not_found_is_business_404():
         assert exc.value.detail["query"] == "0369597965"
         assert "số điện thoại" in exc.value.detail["detail"]
         assert "Endpoint not found" not in exc.value.detail["detail"]
+
+
+def test_lookup_by_phone_falls_back_to_ems_recipient_without_shop_order():
+    db = MagicMock()
+    record = SimpleNamespace(
+        id=1921,
+        order_id=None,
+        order_code=None,
+        ems_tracking_code="EH045793631VN",
+        tracking_number_saved=None,
+        updated_at=datetime(2026, 8, 11, 10, 0, 0),
+        created_at=datetime(2026, 8, 11, 10, 0, 0),
+        recipient_label="Lương Văn Thiện · 369597965 — Cao Bằng",
+    )
+    with patch.object(svc, "get_latest_order_by_phone", return_value=None), patch.object(
+        svc, "get_latest_ems_record_by_phone", return_value=record
+    ), patch.object(
+        svc,
+        "_build_payload",
+        return_value={"ok": True, "query_type": "phone", "matched_by": "ems_recipient_phone"},
+    ) as build:
+        out = svc.lookup_by_phone(db, "0369597965")
+    assert out["matched_by"] == "ems_recipient_phone"
+    kwargs = build.call_args.kwargs
+    assert kwargs["record"] is record
+    assert kwargs["order"] is None
+    assert kwargs["query_type"] == "phone"
+    assert kwargs["matched_by"] == "ems_recipient_phone"
+    assert kwargs["is_latest_order"] is True
+    assert kwargs["fallback_ems_code"] == "EH045793631VN"
 
 
 def test_lookup_shipping_routes_phone_and_ems():
