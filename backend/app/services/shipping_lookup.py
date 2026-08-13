@@ -449,15 +449,24 @@ def _build_payload(
     return payload
 
 
-def _not_found(message: str) -> None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+def _not_found(message: str, *, query: str = "", query_type: str = "") -> None:
+    payload: dict[str, Any] = {"ok": False, "detail": message}
+    if query:
+        payload["query"] = query
+    if query_type:
+        payload["query_type"] = query_type
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=payload)
 
 
 def lookup_by_order_code(db: Session, order_code: str, *, query: Optional[str] = None) -> dict[str, Any]:
     code = (order_code or "").strip()
     order = order_crud.get_order_by_code(db, code)
     if not order:
-        _not_found(f"Không tìm thấy đơn hàng {code}.")
+        _not_found(
+            f"Không tìm thấy đơn hàng {code}.",
+            query=query or code,
+            query_type="order_code",
+        )
     records = _ems_records_for_order(db, order)
     record = records[0] if records else None
     return _build_payload(
@@ -473,7 +482,11 @@ def lookup_by_order_code(db: Session, order_code: str, *, query: Optional[str] =
 def lookup_by_phone(db: Session, phone: str, *, query: Optional[str] = None) -> dict[str, Any]:
     order = get_latest_order_by_phone(db, phone)
     if not order:
-        _not_found("Không tìm thấy đơn hàng với số điện thoại này.")
+        _not_found(
+            "Không tìm thấy đơn hàng với số điện thoại này.",
+            query=query or (phone or "").strip(),
+            query_type="phone",
+        )
     records = _ems_records_for_order(db, order)
     record = records[0] if records else None
     return _build_payload(
@@ -531,7 +544,11 @@ def lookup_by_ems_code(db: Session, ems_code: str, *, query: Optional[str] = Non
     has_events = bool(live.get("events"))
     has_status = bool(live.get("current_status_description"))
     if order is None and record is None and not has_events and not has_status:
-        _not_found(f"Không tìm thấy vận đơn EMS {token}.")
+        _not_found(
+            f"Không tìm thấy vận đơn EMS {token}.",
+            query=query or token,
+            query_type="ems_code",
+        )
     return payload
 
 
@@ -577,4 +594,8 @@ def lookup_shipping(
         return lookup_by_order_code(db, raw, query=raw)
     if len(phone_last9(raw)) >= 9:
         return lookup_by_phone(db, raw, query=raw)
-    _not_found(f"Không nhận diện được mã tra cứu: {raw}")
+    _not_found(
+        f"Không nhận diện được mã tra cứu: {raw}",
+        query=raw,
+        query_type="unknown",
+    )

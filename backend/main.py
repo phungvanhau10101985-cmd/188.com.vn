@@ -878,16 +878,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Giữ detail từ HTTPException (vd. Product not found) — không ghi đè Endpoint not found."""
+    from app.core.http_errors import business_404_content
     from app.services.auth_failure_alert import maybe_notify_auth_login_failure
 
     if exc.status_code >= 400:
         maybe_notify_auth_login_failure(request, status_code=exc.status_code, detail=exc.detail)
     if exc.status_code == 404:
-        detail = exc.detail
-        if isinstance(detail, dict):
-            content = detail
-        else:
-            content = {"detail": detail if detail else "Not found"}
+        content = business_404_content(exc) or {"detail": exc.detail if exc.detail else "Not found"}
         return JSONResponse(status_code=404, content=content)
     if exc.status_code == 400 and isinstance(exc.detail, (str, dict)):
         content = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
@@ -897,8 +894,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(404)
 async def not_found_exception_handler(request: Request, exc):
-    """404 thật (không khớp route) — gợi ý path; HTTPException 404 xử lý ở handler trên."""
+    """Starlette ưu tiên handler(404) hơn HTTPException — phải giữ detail nghiệp vụ.
+
+    Tra cứu SĐT/mã đơn không có dữ liệu là HTTP 404 tiếng Việt, không phải «Endpoint not found».
+    """
     from fastapi.responses import JSONResponse
+
+    from app.core.http_errors import business_404_content
+
+    business = business_404_content(exc)
+    if business is not None:
+        return JSONResponse(status_code=404, content=business)
 
     paths = sorted(
         {route.path for route in app.routes if hasattr(route, "path") and route.path},

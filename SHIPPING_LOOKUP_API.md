@@ -246,11 +246,18 @@ Khi tra **SĐT**: chỉ một đơn — đơn tạo gần nhất của số đó
 | 429 | Vượt rate limit IP | Thử lại sau vài giây |
 | 503 | Chưa cấu hình `SHIPPING_LOOKUP_API_KEY` | API chưa bật |
 
-Ví dụ 404:
+Ví dụ 404 (đơn / SĐT / EMS không có dữ liệu — **không** phải «Endpoint not found»):
 
 ```json
-{ "detail": "Không tìm thấy đơn hàng DH999." }
+{
+  "ok": false,
+  "detail": "Không tìm thấy đơn hàng với số điện thoại này.",
+  "query": "0901234567",
+  "query_type": "phone"
+}
 ```
+
+`error: "Endpoint not found"` chỉ khi URL sai path (route không tồn tại). Tra `?phone=` / `?q=09…` mà không có đơn vẫn là 404 với `detail` tiếng Việt như trên.
 
 ## 7. Trạng thái đơn shop (`order.status`)
 

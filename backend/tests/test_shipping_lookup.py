@@ -185,6 +185,22 @@ def test_lookup_by_order_code_not_found():
         with pytest.raises(HTTPException) as exc:
             svc.lookup_by_order_code(db, "DH999")
         assert exc.value.status_code == 404
+        assert exc.value.detail["ok"] is False
+        assert "DH999" in exc.value.detail["detail"]
+        assert exc.value.detail["query_type"] == "order_code"
+
+
+def test_lookup_by_phone_not_found_is_business_404():
+    db = MagicMock()
+    with patch.object(svc, "get_latest_order_by_phone", return_value=None):
+        with pytest.raises(HTTPException) as exc:
+            svc.lookup_by_phone(db, "0369597965")
+        assert exc.value.status_code == 404
+        assert exc.value.detail["ok"] is False
+        assert exc.value.detail["query_type"] == "phone"
+        assert exc.value.detail["query"] == "0369597965"
+        assert "số điện thoại" in exc.value.detail["detail"]
+        assert "Endpoint not found" not in exc.value.detail["detail"]
 
 
 def test_lookup_shipping_routes_phone_and_ems():
@@ -241,3 +257,4 @@ def test_lookup_by_ems_unknown_without_live_data_is_404():
         with pytest.raises(HTTPException) as exc:
             svc.lookup_by_ems_code(db, "EH000000000VN")
         assert exc.value.status_code == 404
+        assert "EH000000000VN" in exc.value.detail["detail"]
