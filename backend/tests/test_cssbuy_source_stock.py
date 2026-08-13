@@ -122,3 +122,11 @@ def test_all_platforms_blocked_stops():
     merged = _merge_all_platforms_blocked_or_error(css, vm, panda)
     assert merged.status == "blocked"
     assert "đều bị Cloudflare" in (merged.error or "")
+
+
+def test_bulk_clear_oos_empty_ids_is_noop():
+    from app.services.admin_source_stock_batch import admin_clear_false_source_oos_flags_bulk
+
+    out = admin_clear_false_source_oos_flags_bulk(None, db_ids=[])  # type: ignore[arg-type]
+    assert out["ok"] is True
+    assert out["cleared"] == 0

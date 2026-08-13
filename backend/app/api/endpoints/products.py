@@ -43,6 +43,7 @@ from app.services.source_stock_checker import (
 from app.services.admin_source_stock_batch import (
     admin_collect_distinct_product_urls_from_db,
     admin_clear_false_source_oos_flag,
+    admin_clear_false_source_oos_flags_bulk,
     admin_force_worker_source_stock_recheck,
     admin_list_window_oos_db_ids,
     admin_reset_source_stock_pdp_cycle,
@@ -168,6 +169,16 @@ class AdminBulkDeleteProductsByDbIdBody(BaseModel):
 
 class AdminSingleProductDbIdBody(BaseModel):
     db_id: int = Field(..., gt=0, description="Khóa chính products.id")
+
+
+class AdminClearOosFlagsBulkBody(BaseModel):
+    """Gỡ cờ hết hàng một lần: danh sách id, hoặc toàn bộ OOS trong cửa sổ báo cáo."""
+
+    db_ids: Optional[List[int]] = None
+    all_in_window: bool = False
+    domain: Literal["cssbuy", "vipomall"] = "cssbuy"
+    active_only: bool = True
+    window_days: int = Field(30, ge=1, le=366)
 
 
 class AdminSourceStockWorkerPauseBody(BaseModel):
@@ -1875,6 +1886,28 @@ def admin_source_stock_clear_oos_flag_route(
     if detail == "product_not_found":
         raise HTTPException(status_code=404, detail=f"Không có product id={body.db_id}")
     raise HTTPException(status_code=400, detail=detail)
+
+
+@router.post("/admin/source-stock-batch/clear-oos-flag-bulk", response_model=dict, include_in_schema=False)
+def admin_source_stock_clear_oos_flag_bulk_route(
+    body: AdminClearOosFlagsBulkBody,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Gỡ cờ hết hàng một UPDATE — không gọi từng SP (nút «Gỡ cờ (tất cả)» / chọn nhiều)."""
+    if not body.all_in_window and not (body.db_ids or []):
+        raise HTTPException(status_code=400, detail="Cần db_ids hoặc all_in_window=true.")
+    out = admin_clear_false_source_oos_flags_bulk(
+        db,
+        db_ids=list(body.db_ids or []),
+        all_in_window=bool(body.all_in_window),
+        domain=str(body.domain),
+        active_only=bool(body.active_only),
+        window_days=int(body.window_days),
+    )
+    if not out.get("ok"):
+        raise HTTPException(status_code=400, detail=str(out.get("detail") or "unknown_error"))
+    return out
 
 
 @router.post("/admin/source-stock-batch/force-worker-recheck", response_model=dict, include_in_schema=False)

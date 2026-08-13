@@ -615,6 +615,16 @@ export interface AdminSourceStockClearOosFlagResult {
   detail?: string;
 }
 
+export interface AdminSourceStockClearOosFlagsBulkResult {
+  ok: boolean;
+  cleared: number;
+  restored_available: number;
+  all_in_window?: boolean;
+  domain?: string;
+  window_days?: number | null;
+  detail?: string;
+}
+
 /** Toàn bộ products.id gắn cờ OOS trong cửa sổ báo cáo (không phân trang mẫu). */
 export interface AdminSourceStockWindowOosDbIdsResult {
   ok: boolean;
@@ -1575,6 +1585,25 @@ export const adminProductAPI = {
       method: 'POST',
       body: JSON.stringify({ db_id: dbId }),
       timeoutMs: 60_000,
+    }),
+
+  clearSourceStockOosFlagsBulk: (params: {
+    dbIds?: number[];
+    allInWindow?: boolean;
+    domain?: 'cssbuy' | 'vipomall';
+    activeOnly?: boolean;
+    windowDays?: number;
+  }) =>
+    fetchAdmin<AdminSourceStockClearOosFlagsBulkResult>('/products/admin/source-stock-batch/clear-oos-flag-bulk', {
+      method: 'POST',
+      body: JSON.stringify({
+        db_ids: params.dbIds ?? [],
+        all_in_window: !!params.allInWindow,
+        domain: params.domain ?? 'cssbuy',
+        active_only: params.activeOnly ?? true,
+        window_days: params.windowDays ?? 30,
+      }),
+      timeoutMs: 120_000,
     }),
 
   forceWorkerSourceStockRecheckByDbId: (dbId: number) =>

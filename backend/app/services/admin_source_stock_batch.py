@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, case, exists, func, not_, or_, select, update
 from sqlalchemy.orm import Session
@@ -1151,6 +1151,87 @@ def run_admin_source_url_scan(
         },
         anchor_product_db_id=anchor_product_db_id or None,
     )
+
+def _clear_oos_flag_values() -> Dict[Any, Any]:
+    return {
+        Product.source_stock_status: "unknown",
+        Product.source_stock_error: None,
+        Product.source_stock_checked_at: None,
+        Product.source_stock_next_check_at: None,
+        Product.source_stock_check_platform: None,
+    }
+
+
+def admin_clear_false_source_oos_flags_bulk(
+    db: Session,
+    *,
+    db_ids: Optional[List[int]] = None,
+    all_in_window: bool = False,
+    domain: str = "cssbuy",
+    active_only: bool = True,
+    window_days: int = 30,
+) -> Dict[str, Any]:
+    """
+    Gỡ cờ ``out_of_stock`` một lần (UPDATE hàng loạt) — cùng nghiệp vụ nút từng dòng:
+    ``unknown``, xóa mốc PDP, tồn ≤ 0 → 500. Không đụng TTL batch admin.
+    """
+    domain_l = (domain or "cssbuy").strip().lower()
+    wd = max(1, min(int(window_days), 366))
+    if all_in_window:
+        since = _utcnow() - timedelta(days=wd)
+        base = admin_product_source_link_base_filters(Product, domain_l, active_only=active_only)
+        oos_filters = (
+            *base,
+            Product.source_stock_checked_at.isnot(None),
+            Product.source_stock_checked_at >= since,
+            Product.source_stock_status == "out_of_stock",
+        )
+    else:
+        ids = sorted({int(x) for x in (db_ids or []) if int(x) > 0})
+        if not ids:
+            return {
+                "ok": True,
+                "cleared": 0,
+                "restored_available": 0,
+                "all_in_window": False,
+                "detail": "empty_db_ids",
+            }
+        if len(ids) > 50_000:
+            ids = ids[:50_000]
+        oos_filters = (
+            Product.id.in_(ids),
+            Product.source_stock_status == "out_of_stock",
+        )
+
+    try:
+        restored = int(
+            db.query(Product)
+            .filter(*oos_filters)
+            .filter(or_(Product.available.is_(None), Product.available <= 0))
+            .update({Product.available: 500}, synchronize_session=False)
+            or 0
+        )
+        cleared = int(
+            db.query(Product)
+            .filter(*oos_filters)
+            .update(_clear_oos_flag_values(), synchronize_session=False)
+            or 0
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("clear_false_oos_flags_bulk failed: %s", exc)
+        return {"ok": False, "detail": "database_error", "cleared": 0, "restored_available": 0}
+
+    return {
+        "ok": True,
+        "cleared": cleared,
+        "restored_available": restored,
+        "all_in_window": bool(all_in_window),
+        "domain": domain_l,
+        "window_days": wd if all_in_window else None,
+    }
+
 
 def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, Any]:
     """

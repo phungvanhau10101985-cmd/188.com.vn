@@ -1113,32 +1113,24 @@ export default function AdminSourceStockCheckPage() {
       }
       setReportOosBulkBusy(true);
       try {
-        let ok = 0;
-        let failed = 0;
-        for (const id of ids) {
-          bumpReportBusy(id, 'Hàng loạt · gỡ cờ…');
-          try {
-            await adminProductAPI.clearSourceStockOosFlagByDbId(id);
-            ok++;
-          } catch {
-            failed++;
-          } finally {
-            clearReportBusy(id);
-          }
-          await sleepMs(140);
-        }
+        const out = await adminProductAPI.clearSourceStockOosFlagsBulk({ dbIds: ids });
         showToast(
-          failed ? 'info' : 'ok',
-          `Gỡ cờ hàng loạt: thành công ${ok}, lỗi ${failed}. Làm mới báo cáo nếu danh sách chưa đổi.`,
+          'ok',
+          `Đã gỡ cờ ${out.cleared.toLocaleString('vi-VN')} SP` +
+            (out.restored_available
+              ? ` · mở tồn 500 cho ${out.restored_available.toLocaleString('vi-VN')} SP đang 0.`
+              : '.'),
         );
         setReportOosSampleSelectedIds((prev) => prev.filter((tid) => !ids.includes(tid)));
         void refreshActivityReport();
         void refreshQueueStats();
+      } catch (e) {
+        showToast('err', e instanceof Error ? e.message : String(e));
       } finally {
         setReportOosBulkBusy(false);
       }
     },
-    [bumpReportBusy, clearReportBusy, refreshActivityReport, refreshQueueStats, showToast],
+    [refreshActivityReport, refreshQueueStats, showToast],
   );
 
   const runBulkReportOosEnqueueRecheckNoPoll = useCallback(
@@ -1276,14 +1268,34 @@ export default function AdminSourceStockCheckPage() {
       },
       onBulkClearFlagAllInWindow: () => {
         void (async () => {
+          if (reportOosBulkLoadInFlightRef.current || reportOosBulkBusy) {
+            showToast('info', 'Đang xử lý lô trước — đợi xong rồi bấm lại.');
+            return;
+          }
+          reportOosBulkLoadInFlightRef.current = true;
           setReportOosBulkBusy(true);
           try {
-            const ids = await loadWindowOosDbIds();
-            setReportOosBulkBusy(false);
-            await runBulkReportOosClearFlags(ids);
+            const out = await adminProductAPI.clearSourceStockOosFlagsBulk({
+              allInWindow: true,
+              domain,
+              activeOnly: true,
+              windowDays: 30,
+            });
+            showToast(
+              'ok',
+              `Đã gỡ cờ ${out.cleared.toLocaleString('vi-VN')} SP trong cửa sổ 30 ngày` +
+                (out.restored_available
+                  ? ` · mở tồn 500 cho ${out.restored_available.toLocaleString('vi-VN')} SP đang 0.`
+                  : '.'),
+            );
+            setReportOosSampleSelectedIds([]);
+            void refreshActivityReport();
+            void refreshQueueStats();
           } catch (e) {
-            setReportOosBulkBusy(false);
             showToast('err', e instanceof Error ? e.message : String(e));
+          } finally {
+            reportOosBulkLoadInFlightRef.current = false;
+            setReportOosBulkBusy(false);
           }
         })();
       },
@@ -1304,7 +1316,10 @@ export default function AdminSourceStockCheckPage() {
   }, [
     activityReport?.counts?.source_stock_oos_signal_in_window,
     clearReportOosSampleSelection,
+    domain,
     loadWindowOosDbIds,
+    refreshActivityReport,
+    refreshQueueStats,
     reportOosBulkBusy,
     reportOosDeleting,
     reportOosSampleRows,
