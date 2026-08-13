@@ -1375,6 +1375,15 @@ def _integration_secret_configured(val: Optional[str], min_len: int = 8) -> bool
     return len((val or "").strip()) >= min_len
 
 
+def _shipping_lookup_configured() -> bool:
+    try:
+        from app.services.shipping_lookup import api_configured
+
+        return api_configured()
+    except Exception:
+        return _integration_secret_configured(settings.SHIPPING_LOOKUP_API_KEY, min_len=8)
+
+
 def _google_sheets_credentials_configured() -> bool:
     raw = (settings.GOOGLE_SHEETS_SKU_CREDENTIALS_PATH or "").strip()
     if not raw:
@@ -1429,8 +1438,8 @@ def admin_integrations_api_keys_overview(
                 AdminIntegrationKeyRow(
                     env_var="SHIPPING_LOOKUP_API_KEY",
                     label="API GET|POST /api/v1/shipping/lookup — mã đơn / SĐT / mã EMS",
-                    configured=_integration_secret_configured(settings.SHIPPING_LOOKUP_API_KEY, min_len=8),
-                    hint="Header X-Api-Key hoặc Authorization: Bearer. Nhiều key cách nhau bằng dấu phẩy. Để trống = API tắt (503).",
+                    configured=_shipping_lookup_configured(),
+                    hint="Cấp key trên form admin (có hiệu lực ngay) hoặc SHIPPING_LOOKUP_API_KEY trong .env. Header X-Api-Key / Bearer.",
                 ),
             ],
         ),
@@ -1523,8 +1532,75 @@ def admin_integrations_api_keys_overview(
 
     return AdminIntegrationKeysOverviewOut(
         groups=groups,
-        disclaimer="Trang chỉ hiển thị đã cấu hình hay chưa — không đọc và không hiển thị giá trị bí mật. Sau khi sửa .env, cần khởi động lại backend.",
+        disclaimer="Trang chỉ hiển thị đã cấu hình hay chưa — không đọc và không hiển thị giá trị bí mật. Key tra cứu vận chuyển cấp trên form này có hiệu lực ngay; sửa .env thì cần khởi động lại backend.",
     )
+
+
+class ShippingLookupKeyCreate(BaseModel):
+    label: str
+    token: Optional[str] = None
+
+
+@router.get("/shipping-lookup-keys")
+def admin_list_shipping_lookup_keys(
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Danh sách key đã cấp (không trả token đầy đủ)."""
+    from app.services import shipping_lookup as shipping_lookup_svc
+    from app.services import shipping_lookup_keys as keys_svc
+
+    env_raw = (getattr(settings, "SHIPPING_LOOKUP_API_KEY", "") or "").strip()
+    env_key_count = len([p for p in env_raw.split(",") if p.strip()])
+    data = keys_svc.list_for_admin()
+    return {
+        "keys": data["keys"],
+        "env_key_count": env_key_count,
+        "configured": shipping_lookup_svc.api_configured(),
+    }
+
+
+@router.post("/shipping-lookup-keys")
+def admin_create_shipping_lookup_key(
+    payload: ShippingLookupKeyCreate,
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Tạo key mới (trả token đầy đủ một lần) hoặc dán key có sẵn kèm nhãn."""
+    from app.services import shipping_lookup_keys as keys_svc
+
+    try:
+        return keys_svc.create_key(payload.label, payload.token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/shipping-lookup-keys/{key_id}")
+def admin_reveal_shipping_lookup_key(
+    key_id: str,
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Xem lại token đầy đủ (chỉ privileged admin)."""
+    from app.services import shipping_lookup_keys as keys_svc
+
+    try:
+        return keys_svc.get_key_token(key_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.delete("/shipping-lookup-keys/{key_id}")
+def admin_revoke_shipping_lookup_key(
+    key_id: str,
+    _: models.AdminUser = Depends(require_privileged_admin),
+):
+    """Thu hồi key đã cấp trên form (không đụng key trong .env)."""
+    from app.services import shipping_lookup_keys as keys_svc
+
+    try:
+        return keys_svc.revoke_key(key_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 class PandamallAccountUpdate(BaseModel):

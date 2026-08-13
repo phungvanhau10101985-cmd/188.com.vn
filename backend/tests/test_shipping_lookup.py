@@ -148,16 +148,32 @@ def _request(headers: dict[str, str]) -> Request:
 
 
 def test_auth_missing_config_returns_503():
-    with patch.object(svc.settings, "SHIPPING_LOOKUP_API_KEY", ""):
+    with patch.object(svc.settings, "SHIPPING_LOOKUP_API_KEY", ""), patch(
+        "app.services.shipping_lookup.issued_tokens", return_value=[]
+    ):
         with pytest.raises(HTTPException) as exc:
             svc.verify_shipping_lookup_auth(_request({"x-api-key": "abc"}))
         assert exc.value.status_code == 503
 
 
 def test_auth_accepts_x_api_key_and_bearer():
-    with patch.object(svc.settings, "SHIPPING_LOOKUP_API_KEY", "secret-key-1"):
+    with patch.object(svc.settings, "SHIPPING_LOOKUP_API_KEY", "secret-key-1"), patch(
+        "app.services.shipping_lookup.issued_tokens", return_value=[]
+    ):
         svc.verify_shipping_lookup_auth(_request({"x-api-key": "secret-key-1"}))
         svc.verify_shipping_lookup_auth(_request({"authorization": "Bearer secret-key-1"}))
+        with pytest.raises(HTTPException) as exc:
+            svc.verify_shipping_lookup_auth(_request({"x-api-key": "wrong"}))
+        assert exc.value.status_code == 401
+
+
+def test_auth_accepts_issued_file_key(tmp_path, monkeypatch):
+    from app.services import shipping_lookup_keys as keys_svc
+
+    monkeypatch.setattr(keys_svc, "keys_file", lambda: tmp_path / "shipping-lookup-keys.json")
+    created = keys_svc.create_key("NanoAI")
+    with patch.object(svc.settings, "SHIPPING_LOOKUP_API_KEY", ""):
+        svc.verify_shipping_lookup_auth(_request({"x-api-key": created["token"]}))
         with pytest.raises(HTTPException) as exc:
             svc.verify_shipping_lookup_auth(_request({"x-api-key": "wrong"}))
         assert exc.value.status_code == 401

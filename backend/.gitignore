@@ -32,9 +32,11 @@ MANIFEST
 scraper-cookies.json
 1688-cookies.json
 pandamall-account.json
+shipping-lookup-keys.json
 scraper-cookies.json.pre-deploy.bak
 pandamall-account.json.pre-deploy.bak
 1688-cookies.json.pre-deploy.bak
+shipping-lookup-keys.json.pre-deploy.bak
 
 # Logs
 *.log

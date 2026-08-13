@@ -6,6 +6,7 @@ import {
   type AdminIntegrationKeysOverview,
 } from '@/lib/admin-api';
 import { getApiBaseUrl, getBackendOriginUrl, getCatalogFeedApiBaseUrl } from '@/lib/api-base';
+import ShippingLookupKeysPanel from '@/components/admin/ShippingLookupKeysPanel';
 
 /** Base API công khai shop — dùng trong tài liệu tích hợp cho đối tác / cron server */
 const PRODUCTION_PRODUCTS_API_BASE = 'https://188.com.vn/api/v1';
@@ -190,11 +191,11 @@ export default function AdminApiKeysPage() {
           {shippingKeyRow ? (
             shippingKeyRow.configured ? (
               <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-900">
-                Đã cấu hình SHIPPING_LOOKUP_API_KEY
+                API tra cứu vận chuyển đang bật
               </span>
             ) : (
               <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-950">
-                Chưa bật — thiếu SHIPPING_LOOKUP_API_KEY
+                Chưa bật — cấp key ở form bên dưới
               </span>
             )
           ) : loading ? (
@@ -220,6 +221,9 @@ export default function AdminApiKeysPage() {
             — nhóm tag <strong>shipping-lookup</strong>.
           </p>
         ) : null}
+
+        <ShippingLookupKeysPanel />
+
         <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead>
@@ -252,8 +256,9 @@ export default function AdminApiKeysPage() {
         </div>
         <p className="mt-3 text-xs text-gray-600">
           Auth: header <code className="bg-gray-100 px-1 rounded">X-Api-Key</code> hoặc{' '}
-          <code className="bg-gray-100 px-1 rounded">Authorization: Bearer {'<'}key{'>'}</code>. Key đặt trong{' '}
-          <code className="bg-gray-100 px-1 rounded">SHIPPING_LOOKUP_API_KEY</code> (nhiều key cách nhau bằng dấu phẩy).
+          <code className="bg-gray-100 px-1 rounded">Authorization: Bearer {'<'}key{'>'}</code>. Cấp key trên form
+          phía trên (có hiệu lực ngay) hoặc biến{' '}
+          <code className="bg-gray-100 px-1 rounded">SHIPPING_LOOKUP_API_KEY</code> trong .env.
         </p>
 
         <div className="mt-8 rounded-lg border border-blue-200 bg-blue-50/80 px-4 py-4 text-sm text-gray-800">
@@ -329,9 +334,8 @@ export default function AdminApiKeysPage() {
                 <li>
                   <code className="bg-white/80 px-1 rounded">401</code> sai/thiếu key ·{' '}
                   <code className="bg-white/80 px-1 rounded">404</code> không tìm thấy ·{' '}
-                  <code className="bg-white/80 px-1 rounded">503</code> chưa đặt{' '}
-                  <code className="bg-white/80 px-1 rounded">SHIPPING_LOOKUP_API_KEY</code> (cần restart backend sau khi sửa
-                  .env).
+                  <code className="bg-white/80 px-1 rounded">503</code> chưa cấp key trên form phía trên (hoặc chưa đặt{' '}
+                  <code className="bg-white/80 px-1 rounded">SHIPPING_LOOKUP_API_KEY</code> trong .env).
                 </li>
                 <li>CORS: gọi từ domain khác có thể bị chặn — gọi từ server đối tác.</li>
               </ul>

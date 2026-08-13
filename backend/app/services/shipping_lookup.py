@@ -17,6 +17,7 @@ from app.models.order import Order
 from app.models.order_shipment import EmsShippingRecord
 from app.services import ems_tracking as ems_tracking_svc
 from app.services import order_shipment_timeline as timeline_svc
+from app.services.shipping_lookup_keys import issued_tokens
 from app.services.shipping_operations import find_ems_record_by_token
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,10 @@ def configured_api_keys() -> list[str]:
         if key and key not in seen:
             seen.add(key)
             keys.append(key)
+    for key in issued_tokens():
+        if key and key not in seen:
+            seen.add(key)
+            keys.append(key)
     return keys
 
 
@@ -101,7 +106,7 @@ def verify_shipping_lookup_auth(request: Request) -> None:
     if not keys:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API tra cứu vận chuyển chưa được cấu hình (thiếu SHIPPING_LOOKUP_API_KEY).",
+            detail="API tra cứu vận chuyển chưa được cấu hình (chưa cấp key).",
         )
     provided = extract_request_api_key(request)
     if not provided or not any(_token_matches(provided, key) for key in keys):

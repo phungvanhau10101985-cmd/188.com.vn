@@ -2841,9 +2841,39 @@ export interface AdminIntegrationKeysOverview {
   disclaimer: string;
 }
 
+export interface AdminShippingLookupKeyRow {
+  id: string;
+  label: string;
+  last4: string;
+  created_at: string;
+}
+
+export interface AdminShippingLookupKeysList {
+  keys: AdminShippingLookupKeyRow[];
+  env_key_count: number;
+  configured: boolean;
+}
+
+export interface AdminShippingLookupKeyCreated extends AdminShippingLookupKeyRow {
+  token: string;
+}
+
 export const adminIntegrationsAPI = {
   getApiKeysOverview: () =>
     fetchAdmin<AdminIntegrationKeysOverview>('/admin/integrations/api-keys-overview'),
+  listShippingLookupKeys: () =>
+    fetchAdmin<AdminShippingLookupKeysList>('/admin/shipping-lookup-keys'),
+  createShippingLookupKey: (data: { label: string; token?: string }) =>
+    fetchAdmin<AdminShippingLookupKeyCreated>('/admin/shipping-lookup-keys', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  revealShippingLookupKey: (id: string) =>
+    fetchAdmin<AdminShippingLookupKeyCreated>(`/admin/shipping-lookup-keys/${encodeURIComponent(id)}`),
+  revokeShippingLookupKey: (id: string) =>
+    fetchAdmin<{ ok: boolean; id: string }>(`/admin/shipping-lookup-keys/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
 };
 
 export interface AdminBirthdayPromoTestSettings {

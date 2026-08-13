@@ -119,6 +119,7 @@ _deploy_secret_files=(
   backend/scraper-cookies.json
   backend/pandamall-account.json
   backend/1688-cookies.json
+  backend/shipping-lookup-keys.json
 )
 
 deploy_preserve_untracked_secrets() {

@@ -43,19 +43,15 @@ hoặc
 Authorization: Bearer YOUR_SHIPPING_LOOKUP_API_KEY
 ```
 
-Cấu hình server (`backend/.env`):
+Cấp key trên admin: **API & tích hợp** → form «Cấp API key» (có hiệu lực ngay, không cần restart).
+
+Key trong `.env` vẫn nhận (cần restart backend):
 
 ```env
 SHIPPING_LOOKUP_API_KEY=doi-mat-khau-dai-ngau-nhien
 ```
 
-Nhiều đối tác: cách nhau bằng dấu phẩy.
-
-```env
-SHIPPING_LOOKUP_API_KEY=key-chatbot,key-kho,key-cskh
-```
-
-Để trống = tắt API.
+Nhiều key `.env`: cách nhau bằng dấu phẩy. Cả form lẫn `.env` đều trống = tắt API (503).
 
 ## 3. Cách gửi đầu vào
 
