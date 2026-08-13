@@ -55,6 +55,7 @@ import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
 import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
 import { cdnUrl } from '@/lib/cdn-url';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
 
 interface ProductDetailClientProps {
@@ -446,7 +447,7 @@ export default function ProductDetailClient({
               <div className={`min-w-0 ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
                 <div className="flex min-w-0 items-center gap-2">
                   <Link
-                    href="/"
+                    href={getStorefrontHomeHref()}
                     className="flex shrink-0 items-center rounded-md py-0.5 hover:bg-white/10 transition-colors"
                     aria-label="Về trang chủ 188.com.vn"
                   >

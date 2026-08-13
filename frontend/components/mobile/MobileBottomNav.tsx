@@ -11,6 +11,7 @@ import {
   NANO_AI_CTX_SOURCE_SHOP_HOME,
 } from '@/lib/nanoai-hosted-chat';
 import { useNanoAiTryOnOpener } from '@/lib/use-nanoai-try-on';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 
 interface MobileBottomNavProps {
   notificationCount?: number;
@@ -99,7 +100,7 @@ export default function MobileBottomNav({ notificationCount: initialNotifCount =
     }`;
 
     return (
-      <Link key={item.href} href={item.href} className={className}>
+      <Link key={item.href} href={item.icon === 'home' ? getStorefrontHomeHref() : item.href} className={className}>
         <span className="relative inline-flex items-center justify-center">
           {item.icon === 'home' && (
             <svg className={NAV_ICON_CLASS} fill={isActive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { getOptimizedImage, isAlibabaCdnImageUrl, stripAlicdnToBaseJpg } from '@/lib/image-utils';
 
 function buildRemoteImgSrc(raw: string, size: number, rawOverride?: string): string {
@@ -131,10 +131,18 @@ type ProductFillImageProps = {
   src: string;
   alt: string;
   frameClassName?: string;
+  frameStyle?: CSSProperties;
   /** Ảnh chính hiển thị ngay khi vào trang (LCP) — tải eager, không lazy. */
   priority?: boolean;
   onBroken?: () => void;
-  children?: React.ReactNode;
+  /**
+   * cover: crop fill khung (mặc định).
+   * contain: hiện đủ ảnh trong khung.
+   * natural: chiều cao theo tỉ lệ gốc (w-full h-auto).
+   */
+  fit?: 'cover' | 'contain' | 'natural';
+  onNaturalSize?: (width: number, height: number) => void;
+  children?: ReactNode;
 };
 
 /** Ảnh chính gallery — luôn hiện khung; chỉ gỡ khi ảnh lỗi. */
@@ -142,8 +150,11 @@ export function ProductFillImage({
   src,
   alt,
   frameClassName = 'aspect-[4/5] max-h-[70vh] relative',
+  frameStyle,
   priority = false,
   onBroken,
+  fit = 'cover',
+  onNaturalSize,
   children,
 }: ProductFillImageProps) {
   const [failed, setFailed] = useState(false);
@@ -158,19 +169,28 @@ export function ProductFillImage({
       const img = e.currentTarget;
       if (img.naturalWidth < 2 && img.naturalHeight < 2) {
         markFailed();
+        return;
       }
+      onNaturalSize?.(img.naturalWidth, img.naturalHeight);
     },
-    [markFailed],
+    [markFailed, onNaturalSize],
   );
 
   if (failed || !src.trim()) return null;
 
+  const imgClassName =
+    fit === 'natural'
+      ? 'block w-full h-auto max-h-[85vh] object-contain object-center'
+      : fit === 'contain'
+        ? 'absolute inset-0 h-full w-full object-contain object-center'
+        : 'absolute inset-0 h-full w-full object-cover';
+
   return (
-    <div className={frameClassName}>
+    <div className={frameClassName} style={frameStyle}>
       <RemoteProductImg
         src={src}
         alt={alt}
-        className="absolute inset-0 h-full w-full object-cover"
+        className={imgClassName}
         displaySize={960}
         priority={priority}
         onLoad={handleLoad}

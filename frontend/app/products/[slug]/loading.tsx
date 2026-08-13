@@ -4,7 +4,7 @@ export default function ProductLoading() {
     <div className="min-h-screen bg-white pb-28 md:bg-gray-50 md:pb-12" aria-busy="true" aria-label="Đang tải sản phẩm">
       {/* Mobile — khớp layout ProductDetailMobile */}
       <div className="md:hidden animate-pulse">
-        <div className="mx-auto w-full max-w-[min(100vw,52dvh)] aspect-square bg-gray-200" />
+        <div className="w-full aspect-[3/4] max-h-[85vh] bg-gray-200" />
         <div className="px-4 py-3 space-y-3">
           <div className="h-4 bg-gray-200 rounded w-3/4" />
           <div className="h-5 bg-gray-200 rounded w-full" />

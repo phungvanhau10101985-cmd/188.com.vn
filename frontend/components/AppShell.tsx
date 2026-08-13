@@ -373,7 +373,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   };
 
   const showMobileBottomNav =
-    !isProductDetailPage && !isShopVideoFeedPage && !isCartAddLandingPage;
+    !isAdminPage && !isProductDetailPage && !isShopVideoFeedPage && !isCartAddLandingPage;
 
   return (
     <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>
@@ -391,7 +391,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         } as CSSProperties
       }
     >
-      {!isShopVideoFeedPage && !isCartAddLandingPage && (
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && (
       <div className="hidden md:block">
       {keepDesktopHeaderPinned ? (
         <>
@@ -454,7 +454,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       </div>
       )}
       {/* Mobile: header site — gồm /auth/* để đồng bộ với bottom nav */}
-      {!isShopVideoFeedPage && !isCartAddLandingPage && (
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
           viewedProductsCount={viewedProductsCount}
@@ -475,8 +475,8 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       </main>
 
       {/* Footer: hiển thị cả mobile và desktop */}
-      {!isShopVideoFeedPage && !isCartAddLandingPage && <Footer />}
-      {!isShopVideoFeedPage && !isCartAddLandingPage && <BackToTopButton />}
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && <Footer />}
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && <BackToTopButton />}
       {/* Mobile: Bottom nav — hiển thị trên /auth/* để điều hướng giống các trang khác */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
       {!isAuthPage && !isShopVideoFeedPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && (

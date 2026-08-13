@@ -15,6 +15,7 @@ import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import ButtonSpinner from '@/components/ui/ButtonSpinner';
 import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
 import { cdnUrl } from '@/lib/cdn-url';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import {
   PRODUCT_RELATED_TABS,
   parseRelatedTabFromSearch,
@@ -373,7 +374,7 @@ export default function MobileHeader({
             {...(isScrolled ? ({ inert: true as const } as object) : {})}
           >
             <Link
-              href="/"
+              href={getStorefrontHomeHref()}
               tabIndex={isScrolled ? -1 : undefined}
               className={`block ${isScrolled ? 'pointer-events-none' : ''}`}
               aria-hidden={isScrolled}

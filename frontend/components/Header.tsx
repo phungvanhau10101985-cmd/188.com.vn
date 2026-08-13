@@ -13,6 +13,7 @@ import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { cdnUrl } from '@/lib/cdn-url';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 
 const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
   width: 320,
@@ -183,7 +184,7 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
-          <Link href="/" className="flex items-center h-full group">
+          <Link href={getStorefrontHomeHref()} className="flex items-center h-full group">
             <Image
               src={LOGO_URL}
               data-allow-png

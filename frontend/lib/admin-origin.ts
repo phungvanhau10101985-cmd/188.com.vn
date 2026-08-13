@@ -3,7 +3,7 @@
  * cần handoff token qua hash — localStorage không chia sẻ giữa hai origin.
  */
 
-export function getStorefrontOrigin(): string {
+function envStorefrontOrigin(): string {
   const fromEnv = (
     process.env.NEXT_PUBLIC_SITE_URL ||
     process.env.NEXT_PUBLIC_DOMAIN ||
@@ -11,13 +11,36 @@ export function getStorefrontOrigin(): string {
   )
     .trim()
     .replace(/\/$/, '');
+  if (fromEnv.toLowerCase().includes('admin.188.com.vn')) {
+    return 'https://188.com.vn';
+  }
+  return fromEnv || 'https://188.com.vn';
+}
+
+export function isAdminBrowserHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hostname.toLowerCase() === 'admin.188.com.vn';
+}
+
+export function getStorefrontOrigin(): string {
   if (typeof window !== 'undefined') {
     const host = window.location.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1') {
       return window.location.origin;
     }
+    if (host === 'admin.188.com.vn') {
+      return 'https://188.com.vn';
+    }
   }
-  return fromEnv || 'https://188.com.vn';
+  return envStorefrontOrigin();
+}
+
+/** Logo / nút trang chủ: trên admin host phải ra shop, không về `/` (proxy đẩy `/` → `/admin` rồi 404). */
+export function getStorefrontHomeHref(): string {
+  if (isAdminBrowserHost()) {
+    return `${getStorefrontOrigin()}/`;
+  }
+  return '/';
 }
 
 export function getAdminOrigin(): string {

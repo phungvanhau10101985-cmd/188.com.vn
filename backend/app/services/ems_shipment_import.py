@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from openpyxl import load_workbook
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, exists, func, or_
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -1397,15 +1397,46 @@ def _apply_search_filter(query, search: Optional[str]):
     if not term:
         return query
     like = f"%{term.upper()}%"
-    return query.filter(
-        or_(
-            func.upper(EmsShippingRecord.reference_code).like(like),
-            func.upper(EmsShippingRecord.order_code).like(like),
-            func.upper(EmsShippingRecord.ems_tracking_code).like(like),
-            func.upper(EmsShippingRecord.ems_reference_code).like(like),
-            func.upper(EmsShippingRecord.tracking_number_saved).like(like),
+    clauses = [
+        func.upper(EmsShippingRecord.reference_code).like(like),
+        func.upper(EmsShippingRecord.order_code).like(like),
+        func.upper(EmsShippingRecord.ems_tracking_code).like(like),
+        func.upper(EmsShippingRecord.ems_reference_code).like(like),
+        func.upper(EmsShippingRecord.tracking_number_saved).like(like),
+        func.upper(func.coalesce(EmsShippingRecord.recipient_label, "")).like(like),
+    ]
+    from app.services.shipping_lookup import normalize_vn_phone
+
+    phone_norm = normalize_vn_phone(term)
+    if len(phone_norm) >= 9:
+        label_digits = func.regexp_replace(
+            func.coalesce(EmsShippingRecord.recipient_label, ""),
+            r"[^0-9]",
+            "",
+            "g",
         )
-    )
+        order_digits = func.regexp_replace(
+            func.coalesce(Order.customer_phone, ""),
+            r"[^0-9]",
+            "",
+            "g",
+        )
+        clauses.append(label_digits.like(f"%{phone_norm}%"))
+        clauses.append(
+            exists().where(
+                Order.id == EmsShippingRecord.order_id,
+                func.right(order_digits, 9) == phone_norm,
+            )
+        )
+        clauses.append(
+            exists().where(
+                func.upper(Order.order_code) == func.upper(EmsShippingRecord.order_code),
+                EmsShippingRecord.order_code.isnot(None),
+                EmsShippingRecord.order_code != "",
+                func.right(order_digits, 9) == phone_norm,
+            )
+        )
+    return query.filter(or_(*clauses))
 
 
 def _apply_sync_status_filter(query, sync_status: Optional[str]):

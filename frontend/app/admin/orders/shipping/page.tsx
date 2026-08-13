@@ -2285,18 +2285,18 @@ export default function AdminShippingPage() {
       <section className="bg-white border border-gray-200 rounded-xl p-4 sm:p-5 shadow-sm">
         <h2 className="text-base font-semibold text-gray-900">Tra cứu vận đơn</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Tìm theo <strong>mã đơn shop</strong> (DH/DC), <strong>mã tham chiếu</strong> (cột A file EMS),{' '}
-          <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop. Nếu đơn{' '}
-          <strong>chưa giao / chưa thu COD xong</strong>, hệ thống tự tra EMS ngay.
+          Tìm theo <strong>mã đơn shop</strong> (DH/DC), <strong>số điện thoại</strong> (có hoặc không số 0 đầu),{' '}
+          <strong>mã tham chiếu</strong> (cột A file EMS), <strong>mã EMS</strong> hoặc mã vận đơn đã lưu trên đơn shop.
+          Nếu đơn <strong>chưa giao / chưa thu COD xong</strong>, hệ thống tự tra EMS ngay.
         </p>
         <form onSubmit={submitSearch} className="mt-3 flex flex-col sm:flex-row gap-2">
           <input
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="VD: DH033, H19052609, EH044086535VN, DC37667…"
+            placeholder="VD: 0369597965, DH033, H19052609, EH044086535VN…"
             className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            aria-label="Tra cứu mã đơn, mã tham chiếu hoặc mã EMS"
+            aria-label="Tra cứu mã đơn, số điện thoại hoặc mã EMS"
           />
           <div className="flex gap-2 shrink-0">
             <button

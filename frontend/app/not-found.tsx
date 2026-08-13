@@ -1,15 +1,23 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { getStorefrontHomeHref, isAdminBrowserHost } from '@/lib/admin-origin';
 
 export default function NotFound() {
   const router = useRouter();
+  const [homeHref, setHomeHref] = useState('/');
 
   useEffect(() => {
+    const href = getStorefrontHomeHref();
+    setHomeHref(href);
     const id = window.setTimeout(() => {
-      router.replace('/');
+      if (isAdminBrowserHost() || href.startsWith('http')) {
+        window.location.replace(href);
+        return;
+      }
+      router.replace(href);
     }, 1000);
     return () => window.clearTimeout(id);
   }, [router]);
@@ -19,9 +27,15 @@ export default function NotFound() {
       <p className="text-6xl font-bold text-[#ea580c] mb-2 tabular-nums">404</p>
       <p className="text-gray-800 font-medium mb-1">Không tìm thấy trang</p>
       <p className="text-sm text-gray-500 mb-6">Đang chuyển về trang chủ sau 1 giây…</p>
-      <Link href="/" className="text-[#ea580c] font-semibold hover:underline">
-        Về trang chủ ngay
-      </Link>
+      {homeHref.startsWith('http') ? (
+        <a href={homeHref} className="text-[#ea580c] font-semibold hover:underline">
+          Về trang chủ ngay
+        </a>
+      ) : (
+        <Link href={homeHref} className="text-[#ea580c] font-semibold hover:underline">
+          Về trang chủ ngay
+        </Link>
+      )}
     </div>
   );
 }

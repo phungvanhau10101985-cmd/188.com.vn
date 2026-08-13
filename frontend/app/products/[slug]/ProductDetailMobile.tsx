@@ -225,6 +225,20 @@ export default function ProductDetailMobile({
   const videoThumb = parsedVideo?.thumbUrl ?? null;
   const firstPhotoUrl = visiblePhotoUrls[0] ?? null;
   const restPhotoUrls = visiblePhotoUrls.slice(1);
+  const [heroAspect, setHeroAspect] = useState<string | undefined>();
+
+  useEffect(() => {
+    setHeroAspect(undefined);
+  }, [firstPhotoUrl]);
+
+  const handleHeroNaturalSize = useCallback((width: number, height: number) => {
+    if (width < 2 || height < 2) return;
+    setHeroAspect((prev) => prev ?? `${width} / ${height}`);
+  }, []);
+
+  const photoFrameClass = 'relative w-full max-h-[85vh] overflow-hidden bg-gray-100';
+  const photoFrameStyle = { aspectRatio: heroAspect ?? '3 / 4' };
+  const videoFrameClass = 'relative w-full max-h-[85vh] overflow-hidden bg-black';
 
   const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
     imageUrl: mainImageRaw,
@@ -255,11 +269,11 @@ export default function ProductDetailMobile({
     <div className="md:hidden min-h-screen overflow-x-hidden bg-white pb-28">
       <NanoAiLauncherGatewaySync payload={nanoPayload} />
 
-      {/* Hero gallery: vuông gọn trong viewport, vuốt ngang */}
+      {/* Hero gallery: full-width theo tỉ lệ ảnh gốc, vuốt ngang */}
       <SectionErrorBoundary>
       <div className="image_list w-full overflow-x-hidden bg-gray-50">
         {mediaCount > 0 && (
-          <div className="relative mx-auto w-full max-w-[min(100vw,52dvh)]">
+          <div className="relative w-full">
             <MobileProductMediaCarousel
               ref={mediaCarouselRef}
               selectedIndex={selectedImage}
@@ -292,10 +306,13 @@ export default function ProductDetailMobile({
               {firstPhotoUrl ? (
                 <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(firstPhotoUrl, { width: 720, height: 720, hideProductPng: true })}
+                    src={getOptimizedImage(firstPhotoUrl, { width: 960, height: 960, hideProductPng: true })}
                     alt={product.name}
-                    frameClassName="aspect-square relative w-full"
+                    frameClassName={photoFrameClass}
+                    frameStyle={photoFrameStyle}
+                    fit="contain"
                     priority
+                    onNaturalSize={handleHeroNaturalSize}
                     onBroken={() => markBrokenPhoto(firstPhotoUrl)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
@@ -312,7 +329,7 @@ export default function ProductDetailMobile({
               ) : null}
               {hasVideo && parsedVideo ? (
                 <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
-                  <div className="aspect-square relative w-full">
+                  <div className={videoFrameClass} style={photoFrameStyle}>
                     {parsedVideo.kind === 'youtube' ? (
                       <>
                         <iframe
@@ -352,9 +369,11 @@ export default function ProductDetailMobile({
               {restPhotoUrls.map((img) => (
                 <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(img, { width: 720, height: 720, hideProductPng: true })}
+                    src={getOptimizedImage(img, { width: 960, height: 960, hideProductPng: true })}
                     alt={product.name}
-                    frameClassName="aspect-square relative w-full"
+                    frameClassName={photoFrameClass}
+                    frameStyle={photoFrameStyle}
+                    fit="contain"
                     onBroken={() => markBrokenPhoto(img)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">

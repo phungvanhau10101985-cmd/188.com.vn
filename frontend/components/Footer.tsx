@@ -12,6 +12,7 @@ import {
   BUSINESS_REGISTRATION,
 } from '@/lib/business-info';
 import { cdnUrl } from '@/lib/cdn-url';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 
 const FooterNewsletterSubscribe = dynamic(
   () => import('@/components/FooterNewsletterSubscribe'),
@@ -51,7 +52,7 @@ export default function Footer() {
           {/* Brand */}
           <div className="space-y-5">
             <Link
-              href="/"
+              href={getStorefrontHomeHref()}
               aria-label="188.com.vn — Trang chủ"
               className="flex items-center gap-3"
             >

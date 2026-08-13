@@ -26,6 +26,7 @@ import {
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { cdnUrl } from '@/lib/cdn-url';
+import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import {
   isNavCategoryTreeCacheStale,
@@ -578,7 +579,7 @@ export default function Navigation({
           <div className="grid grid-cols-[auto_1fr_224px] items-center gap-3 py-1.5">
             <div className="flex min-w-0 items-center gap-2">
               <Link
-                href="/"
+                href={getStorefrontHomeHref()}
                 className="flex shrink-0 items-center rounded-md py-0.5 hover:bg-white/10 transition-colors"
                 aria-label="Về trang chủ 188.com.vn"
               >
