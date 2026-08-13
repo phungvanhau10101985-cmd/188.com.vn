@@ -216,6 +216,7 @@ def load_api_routes():
         ("seo_clusters", "/seo-clusters", "seo-clusters"),
         ("cart", "/cart", "cart"),
         ("orders", "/orders", "orders"),
+        ("shipping_lookup", "/shipping", "shipping-lookup"),
         ("import_export", "/import-export", "import-export"),  # ĐẶC BIỆT DEBUG
         ("import_1688", "/import-1688", "import-1688"),
         ("image_localization", "/image-localization", "image-localization"),
