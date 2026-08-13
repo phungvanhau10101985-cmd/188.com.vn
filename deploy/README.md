@@ -1,15 +1,14 @@
 # Deploy VPS — chuẩn bị dữ liệu & môi trường
 
-## 0. Mỗi lần cập nhật production — bắt buộc theo `deploy-vps.cmd`
+## 0. Mỗi lần **upgit deploy** — bắt buộc theo `deploy-vps.cmd`
 
-File gốc: [`deploy-vps.cmd`](../deploy-vps.cmd) (thư mục gốc repo). **Mọi lần deploy** (kể cả agent) chạy đúng 2 lệnh này trên VPS — không `git pull` rồi `pm2 restart` tay, không bỏ `update-vps.sh`.
+File gốc: [`deploy-vps.cmd`](../deploy-vps.cmd) (thư mục gốc repo). Khi user nói **upgit / up git / deploy**, agent chạy **đúng một lệnh** này trên VPS — script tự `git pull`. Không `pm2 restart` tay, không bỏ `update-vps.sh`.
 
 ```bash
-cd /var/www/188.com.vn && git pull origin main
-DEPLOY_SKIP_GIT=1 DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+cd /var/www/188.com.vn && DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
 ```
 
-Script tự backup, pip/build, restart PM2, health-check. Biến `DEPLOY_*` khác chỉ dùng khi user yêu cầu rõ trường hợp đặc biệt (xem mục 2).
+Script tự backup, git pull, pip/build, restart PM2, health-check. Biến `DEPLOY_*` khác chỉ dùng khi user yêu cầu rõ trường hợp đặc biệt (xem mục 2).
 
 ## 1. Trên máy dev (trước khi đưa lên VPS)
 

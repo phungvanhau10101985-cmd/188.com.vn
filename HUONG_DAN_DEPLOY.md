@@ -126,7 +126,13 @@ Làm xong các bước trên là bạn có thể deploy; phần còn lại (serv
 
 Xem thư mục `**deploy/`** trong repo: `**deploy/README.md**`, script `**deploy/prepare-vps.sh**`, mẫu PostgreSQL `**deploy/postgres-init.sql.example**`. Tóm tắt cũng nằm trong `**DEPLOY_READINESS.md**` mục **6**.
 
-**Mỗi lần deploy production:** luôn chạy đúng 2 lệnh trong [`deploy-vps.cmd`](./deploy-vps.cmd) trên VPS (`git pull origin main` rồi `bash ./deploy/update-vps.sh main` với các biến trong file đó). Không dùng lối tắt `pm2 restart` / chỉ `git pull`.
+**Mỗi lần upgit deploy:** luôn chạy đúng một lệnh trong [`deploy-vps.cmd`](./deploy-vps.cmd) trên VPS:
+
+```bash
+cd /var/www/188.com.vn && DEPLOY_STOP_PM2_BEFORE_BUILD=1 DEPLOY_SKIP_LINT=1 NODE_BUILD_HEAP_MB=3072 bash ./deploy/update-vps.sh main
+```
+
+Script tự `git pull`. Không dùng lối tắt `pm2 restart` / chỉ `git pull`.
 
 ---
 
