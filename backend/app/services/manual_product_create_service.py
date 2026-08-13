@@ -71,7 +71,7 @@ def _job_step(job_id: str, step: str, message: str, *, progress: Optional[int] =
 
 
 def new_manual_product_id() -> str:
-    """Prefix M — tách khỏi import 1688/Hibox (A/T/hibox)."""
+    """Prefix M — tách khỏi import 1688/Vipomall (A/T/…)."""
     stamp = datetime.now(timezone.utc).strftime("%y%m%d%H%M%S")
     suffix = uuid.uuid4().hex[:6].upper()
     return f"M{stamp}{suffix}"

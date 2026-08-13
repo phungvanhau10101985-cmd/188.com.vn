@@ -15,28 +15,21 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.product import Product
-from app.services.admin_source_stock_batch import _cssbuy_row_shows_variant_matrix, _hibox_row_shows_color_size_catalog
 from app.services.import_batch_url_coercion import (
     FETCH_TARGET_CSSBUY,
-    FETCH_TARGET_HIBOX,
+    FETCH_TARGET_PANDAMALL,
     FETCH_TARGET_VIPOMALL,
     coerce_url_for_excel_batch_import,
 )
-from app.services.import_cssbuy_client import (
-    ImportCssbuyError,
-    cssbuy_html_disclaimer_agreement_without_add_to_cart,
-    cssbuy_html_shows_add_to_cart_button,
-    fetch_cssbuy_item_json_bundle,
-)
-from app.services.import_hibox_scraper import (
-    ImportHiboxError,
-    hibox_canonical_scrape_url,
-    hibox_scrape_signals_removed_or_not_found_offer,
+from app.services.import_cssbuy_client import evaluate_cssbuy_pdp_stock
+from app.services.import_source_ids import (
+    legacy_mirror_link_ilike_patterns,
+    legacy_mirror_link_markers,
     normalize_product_import_url,
-    scrape_hibox_for_import,
 )
-from app.services.hibox_cart_dom_probe import HIBOX_CART_CTA_PROBE_JS
-from app.services.vipomall_source_stock import evaluate_vipomall_1688_offer_stock, resolve_numeric_1688_offer_id_from_source_url
+from app.services.vipomall_source_stock import (
+    evaluate_vipomall_source_stock_from_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -451,78 +444,38 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
 class SourceStockCheckResult:
     status: str
     error: Optional[str] = None
-    checked_via: Optional[str] = None  # cssbuy | hibox — nền cho kết luận PDP worker lần này
+    checked_via: Optional[str] = None  # cssbuy | vipomall | pandamall
 
 
-_CSSBUY_BLOCK_MSG_FRAGMENTS = (
-    "captcha",
-    "验证码",
-    "verify",
-    "cloudflare",
-    "cf-ray",
-    "blocked",
-    "forbidden",
-    "access denied",
-    "rate limit",
-    "too many",
-    "csrf",
-)
+def _result_is_conclusive_stock(r: SourceStockCheckResult) -> bool:
+    return (r.status or "").strip().lower() in {"in_stock", "out_of_stock"}
 
 
-def _cssbuy_api_nonzero_suggests_block(payload: Dict[str, Any]) -> bool:
-    """``code≠0``: đôi khi là chặn/captcha chứ không phải «hết offer» — nhánh đó fallback Hibox."""
-    parts: List[str] = []
-    try:
-        for k in ("message", "msg", "detail", "data"):
-            v = payload.get(k)
-            if isinstance(v, str):
-                parts.append(v)
-            elif isinstance(v, dict):
-                for nested in ("message", "msg", "detail", "reason"):
-                    nv = v.get(nested)
-                    if isinstance(nv, str):
-                        parts.append(nv)
-            elif isinstance(v, list):
-                for el in v[:6]:
-                    if isinstance(el, str):
-                        parts.append(el)
-                    elif isinstance(el, dict):
-                        for nk in ("message", "msg"):
-                            ee = el.get(nk)
-                            if isinstance(ee, str):
-                                parts.append(ee)
-    except Exception:
-        pass
-    blob = " ".join(parts).strip().lower()
-    if not blob:
-        return False
-    return any(s in blob for s in _CSSBUY_BLOCK_MSG_FRAGMENTS)
-
-
-def _css_buy_result_signals_hibox_fallback(css: SourceStockCheckResult) -> bool:
-    """CSSBuy không đọc được (blocked/captcha/mạng) hoặc lỗi quy đổi — chỉ khi đó gọi Hibox."""
-    return (css.status or "").strip().lower() in {"blocked", "error"}
+def _result_should_fallback_next_platform(r: SourceStockCheckResult) -> bool:
+    """Cloudflare/CAPTCHA (blocked) hoặc lỗi kỹ thuật → thử nền tiếp theo."""
+    return (r.status or "").strip().lower() in {"blocked", "error", "skipped"}
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _link_eligible_for_hibox_stock_check(url: str) -> bool:
+def _link_eligible_for_source_stock_check(url: str) -> bool:
     u = (url or "").strip().lower()
     if len(u) < 12:
         return False
     return any(
         marker in u
         for marker in (
-            "hibox.mn",
-            "taobao1688.kz",
+            *legacy_mirror_link_markers(),
             "1688.com",
             "offer.1688",
             "detail.1688",
             "taobao.com",
             "tmall.com",
             "vipomall.vn",
+            "cssbuy.com",
+            "pandamall.vn",
         )
     )
 
@@ -537,13 +490,15 @@ def _eligible_due_products_query(sess: Session):
             .filter(Product.link_default.isnot(None))
             .filter(
                 or_(
-                    Product.link_default.ilike("%hibox.mn%"),
-                    Product.link_default.ilike("%taobao1688.kz%"),
+                    *[Product.link_default.ilike(p) for p in legacy_mirror_link_ilike_patterns()],
                     Product.link_default.ilike("%1688.com%"),
                     Product.link_default.ilike("%offer.1688%"),
                     Product.link_default.ilike("%detail.1688%"),
                     Product.link_default.ilike("%taobao.com%"),
                     Product.link_default.ilike("%tmall.com%"),
+                    Product.link_default.ilike("%cssbuy.com%"),
+                    Product.link_default.ilike("%vipomall.vn%"),
+                    Product.link_default.ilike("%pandamall.vn%"),
                 )
             )
             .filter(
@@ -563,7 +518,7 @@ def _preview_upcoming_db_product_ids(sess: Session, limit: int = 8) -> List[int]
     out: List[int] = []
     lim = max(1, limit)
     for p in q.limit(200).all():
-        if not _link_eligible_for_hibox_stock_check(p.link_default or ""):
+        if not _link_eligible_for_source_stock_check(p.link_default or ""):
             continue
         out.append(int(p.id))
         if len(out) >= lim:
@@ -572,7 +527,7 @@ def _preview_upcoming_db_product_ids(sess: Session, limit: int = 8) -> List[int]
 
 
 def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
-    """Đọc tình trạng qua CSSBuy (/web/item + PDP HTML); worker chỉ gọi Hibox khi kết quả CSS là blocked/error."""
+    """Playwright CSSBuy: bấm «I accept the risks», đọc Add to Cart / Buy now. blocked → fallback."""
     canonical_url = (normalize_product_import_url((raw_url or "").strip()) or (raw_url or "").strip()).strip()
     cssbuy_page, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_CSSBUY)
     if coercion_err:
@@ -583,80 +538,21 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
         )
     canonical_url = (cssbuy_page or "").strip() or canonical_url
     try:
-        payload, page_html = fetch_cssbuy_item_json_bundle(canonical_url)
-        code = payload.get("code")
-        if code != 0:
-            msg_tail = str(payload.get("message") or payload.get("msg") or f"code={code}")[:780]
-            compact = ("CSSBuy /web/item không trả OK — " + msg_tail)[:1000]
-            if _cssbuy_api_nonzero_suggests_block(payload):
-                return SourceStockCheckResult(
-                    status="blocked",
-                    error=(compact + " — có dấu hiệu chặn/CAPTCHA, fallback Hibox.")[:1000],
-                    checked_via="cssbuy",
-                )
-            return SourceStockCheckResult(
-                status="out_of_stock",
-                error=(
-                    "CSSBuy /web/item không trả OK (dead offer hoặc API nghiệp vụ từ chối) — " + msg_tail
-                )[:1000],
-                checked_via="cssbuy",
-            )
-        rows = payload.get("data")
-        row0 = rows[0] if isinstance(rows, list) and rows else None
-        if not isinstance(row0, dict):
-            return SourceStockCheckResult(
-                status="out_of_stock",
-                error="CSSBuy trả payload không có dòng data hợp lệ — thường gặp khi PDP không load / offer đã mất.",
-                checked_via="cssbuy",
-            )
-        ph = (page_html or "").strip()
-        if cssbuy_html_disclaimer_agreement_without_add_to_cart(ph):
-            return SourceStockCheckResult(
-                status="out_of_stock",
-                error=(
-                    "CSSBuy: HTML PDP có đoạn disclaimer đồng ý («I have read… terms of service…») nhưng "
-                    "không thấy nút «Add To Cart» — coi PDP hết hàng / không còn bán được."
-                )[:1000],
-                checked_via="cssbuy",
-            )
-        try:
-            price = float(row0.get("price") or 0)
-        except (TypeError, ValueError):
-            price = 0.0
-        title = (row0.get("title") or row0.get("title_cn") or "").strip()
-        variant_matrix = _cssbuy_row_shows_variant_matrix(row0)
-        has_signal = bool(title) and (price > 0 or variant_matrix)
-        if has_signal:
-            if not cssbuy_html_shows_add_to_cart_button(page_html):
-                return SourceStockCheckResult(
-                    status="out_of_stock",
-                    error=(
-                        "CSSBuy: API có dữ liệu nhưng HTML PDP không có nút «Add To Cart» "
-                        "(khoanh đỏ) — coi offer không còn bán được / hết hàng."
-                    )[:1000],
-                    checked_via="cssbuy",
-                )
-            return SourceStockCheckResult(status="in_stock", checked_via="cssbuy")
+        probe = evaluate_cssbuy_pdp_stock(canonical_url)
         return SourceStockCheckResult(
-            status="out_of_stock",
-            error=(
-                "CSSBuy: thiếu tiêu đề hoặc không có (giá > 0 / ma trận SKU thuộc tính) — không khẳng định được offer còn."
-            ),
-            checked_via="cssbuy",
-        )
-    except ImportCssbuyError as exc:
-        es = str(exc)
-        return SourceStockCheckResult(
-            status="blocked",
-            error=(
-                "CSSBuy không tải/lấy được (PDP skeleton, không CSRF/HTML, `/web/item` không JSON…) — có thể bị "
-                + "Cloudflare/WAF hoặc mạng — "
-                + es
-            )[:1000],
+            status=(probe.status or "error").strip() or "error",
+            error=probe.error,
             checked_via="cssbuy",
         )
     except Exception as exc:
         logger.warning("cssbuy source stock evaluate failed: %s", exc)
+        low = (str(exc) or "").lower()
+        if any(n in low for n in ("captcha", "cloudflare", "cf-ray", "challenge", "access denied")):
+            return SourceStockCheckResult(
+                status="blocked",
+                error=("CSSBuy bị chặn bảo mật / CAPTCHA / Cloudflare — fallback nền khác. " + str(exc))[:1000],
+                checked_via="cssbuy",
+            )
         return SourceStockCheckResult(
             status="error",
             error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
@@ -664,49 +560,85 @@ def _evaluate_stock_via_cssbuy(raw_url: str) -> SourceStockCheckResult:
         )
 
 
-def _evaluate_stock_primary_cssbuy_with_hibox_fallback(
+def _evaluate_stock_via_vipomall(
+    raw_url: str, *, fallback_product_id: Optional[str] = None
+) -> SourceStockCheckResult:
+    st, err, via = evaluate_vipomall_source_stock_from_url(
+        raw_url, fallback_product_id=fallback_product_id
+    )
+    return SourceStockCheckResult(status=st, error=err, checked_via=via)
+
+
+def _evaluate_stock_via_pandamall(raw_url: str) -> SourceStockCheckResult:
+    from app.services.pandamall_source_stock import evaluate_pandamall_source_stock
+
+    st, err, via = evaluate_pandamall_source_stock(raw_url)
+    return SourceStockCheckResult(status=st, error=err, checked_via=via)
+
+
+def _merge_all_platforms_blocked_or_error(
+    css: SourceStockCheckResult,
+    vm: SourceStockCheckResult,
+    panda: SourceStockCheckResult,
+) -> SourceStockCheckResult:
+    attempts = [css, vm, panda]
+    real = [a for a in attempts if (a.status or "").strip().lower() not in {"skipped", ""}]
+    if real and all((a.status or "").strip().lower() == "blocked" for a in real):
+        return SourceStockCheckResult(
+            status="blocked",
+            error=(
+                "CSSBuy, Vipomall và PandaMall đều bị Cloudflare/CAPTCHA — dừng."
+            )[:1000],
+            checked_via="cssbuy+vipomall+pandamall",
+        )
+    last = panda if (panda.status or "") not in {"skipped", ""} else (vm if (vm.status or "") not in {"skipped", ""} else css)
+    parts = []
+    for a in attempts:
+        st = (a.status or "").strip()
+        if st and st != "skipped":
+            parts.append(f"{a.checked_via or '?'}:{st}")
+    err = (last.error or "Không đọc được nút giỏ/mua trên mọi nền.")[:800]
+    if parts:
+        err = (err + " [" + ", ".join(parts) + "]")[:1000]
+    return SourceStockCheckResult(
+        status=(last.status or "error"),
+        error=err,
+        checked_via=last.checked_via or "cssbuy+vipomall+pandamall",
+    )
+
+
+def _evaluate_stock_primary_cssbuy_with_vipomall_fallback(
     raw_url: str, *, fallback_product_id: Optional[str] = None
 ) -> SourceStockCheckResult:
     """
-    PDP worker — **ưu tiên một trang cho kết luận nghiệp vụ**:
-    đọc **CSSBuy (/web/item + PDP HTML)** trước; nếu ``in_stock`` / ``out_of_stock`` rõ từ CSS thì không scrape Hibox.
-
-    Fallback **scrape Hibox** chỉ khi CSS trả ``blocked`` / ``error`` (không CSRF/HTML, không JSON, có dấu hiệu CAPTCHA/chặn
-    trên thông báo API, không quy đổi URL…).
-
-    Hai nguồn **không gộp lời giải** trong cùng lượt: Hibox thay hoàn toàn khi CSS trả blocked/error.
-
-    Fallback **Vipomall** (PDP ``vipomall.vn/san-pham/{offerId}?platform_type=10``): chỉ khi vẫn còn offerId 1688
-    (URL / ``A{offer}a188…``) và Hibox không cho ``in_stock`` / ``out_of_stock`` (lỗi/chặn Taobao/Tmall…): kiểm tra nút «Thêm giỏ hàng».
+    CSSBuy → Vipomall → PandaMall.
+    in_stock/out_of_stock (đã đọc được nút hoặc PDP không có nút) thì dừng.
+    Cloudflare/CAPTCHA/lỗi kỹ thuật → nền tiếp theo. Cả ba blocked → dừng.
     """
     css = _evaluate_stock_via_cssbuy(raw_url)
-    if css.status == "in_stock":
+    if _result_is_conclusive_stock(css):
         return css
-    if _css_buy_result_signals_hibox_fallback(css):
-        hb = _evaluate_stock_via_hibox(raw_url)
-        if hb.status in ("in_stock", "out_of_stock"):
-            return hb
-        oid = resolve_numeric_1688_offer_id_from_source_url(
-            raw_url, fallback_product_id=fallback_product_id
-        )
-        if oid:
-            st, err, via = evaluate_vipomall_1688_offer_stock(oid)
-            return SourceStockCheckResult(status=st, error=err, checked_via=via)
-        return hb
-    return css
+    vm = _evaluate_stock_via_vipomall(raw_url, fallback_product_id=fallback_product_id)
+    if _result_is_conclusive_stock(vm):
+        return vm
+    panda = _evaluate_stock_via_pandamall(raw_url)
+    if _result_is_conclusive_stock(panda):
+        return panda
+    return _merge_all_platforms_blocked_or_error(css, vm, panda)
+
 
 
 def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
     """
-    Admin thử PDP giống worker (**một PDP có kết luận nghiệp vụ**; CSS ``blocked``/``error`` → Hibox → Vipomall) **không ghi DB**.
-    Luôn chạy nhánh Vipomall riêng khi suy ra được offerId 1688.
+    Admin thử giống worker: CSSBuy → Vipomall → PandaMall. Không ghi DB.
+    Cloudflare/CAPTCHA trên một nền → thử nền tiếp. Cả ba blocked → dừng.
     """
     stripped = (raw_url or "").strip()
     canon = (normalize_product_import_url(stripped) or stripped).strip()
 
     cssbuy_page, coercion_css_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_CSSBUY)
-    hibox_page, coercion_hb_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_HIBOX)
     vipomall_page, coercion_vm_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_VIPOMALL)
+    pandamall_page, coercion_pd_err = coerce_url_for_excel_batch_import(canon, FETCH_TARGET_PANDAMALL)
 
     def _bubble(r: SourceStockCheckResult) -> Dict[str, Any]:
         return {"status": (r.status or "").strip(), "error": r.error, "checked_via": r.checked_via}
@@ -714,242 +646,82 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
     coercion = {
         "cssbuy_url": (cssbuy_page or "").strip(),
         "cssbuy_coercion_error": (coercion_css_err or "").strip(),
-        "hibox_url": (hibox_page or "").strip(),
-        "hibox_coercion_error": (coercion_hb_err or "").strip(),
         "vipomall_url": (vipomall_page or "").strip(),
         "vipomall_coercion_error": (coercion_vm_err or "").strip(),
+        "pandamall_url": (pandamall_page or "").strip(),
+        "pandamall_coercion_error": (coercion_pd_err or "").strip(),
     }
 
-    vm_cached: Optional[SourceStockCheckResult] = None
-
-    def _vipomall_branch() -> SourceStockCheckResult:
-        nonlocal vm_cached
-        if vm_cached is not None:
-            return vm_cached
-        oid = resolve_numeric_1688_offer_id_from_source_url(canon)
-        if not oid:
-            vm_cached = SourceStockCheckResult(
-                status="skipped",
-                error="Không suy ra offerId 1688 — không kiểm tra Vipomall (link Taobao/Tmall thuần).",
-            )
-            return vm_cached
-        st, err, via = evaluate_vipomall_1688_offer_stock(oid)
-        vm_cached = SourceStockCheckResult(status=st, error=err, checked_via=via)
-        return vm_cached
-
-    markers = ("hibox.mn", "1688.com", "detail.1688", "offer.1688", "taobao", "tmall", "vipomall.vn")
-    eligible = _link_eligible_for_hibox_stock_check(canon)
-    vm_branch = _vipomall_branch()
+    skipped = SourceStockCheckResult(status="skipped", error=None)
+    markers = (
+        *legacy_mirror_link_markers(),
+        "1688.com",
+        "detail.1688",
+        "offer.1688",
+        "taobao",
+        "tmall",
+        "vipomall.vn",
+        "cssbuy.com",
+        "pandamall.vn",
+    )
+    eligible = _link_eligible_for_source_stock_check(canon)
     if not eligible:
         note = (
             "Link không thuộc miền được worker PDP kiểm tra — cần chứa một trong: "
             + ", ".join(markers)
         )
         err_r = SourceStockCheckResult(status="error", error=note[:1000])
-        skipped = SourceStockCheckResult(status="skipped", error=None)
         return {
             "ok": True,
             "canonical_input": canon,
             "link_eligible": False,
             "coercion": coercion,
             "cssbuy": _bubble(skipped),
-            "hibox": _bubble(skipped),
-            "vipomall": _bubble(vm_branch if vm_branch.status != "skipped" else skipped),
+            "vipomall": _bubble(skipped),
+            "pandamall": _bubble(skipped),
             "merged": _bubble(err_r),
         }
 
     css = _evaluate_stock_via_cssbuy(canon)
-    if css.status == "in_stock":
-        skip_r = SourceStockCheckResult(status="skipped", error="Không scrape Hibox — CSSBuy đã in_stock.")
+    if _result_is_conclusive_stock(css):
         return {
             "ok": True,
             "canonical_input": canon,
             "link_eligible": True,
             "coercion": coercion,
             "cssbuy": _bubble(css),
-            "hibox": _bubble(skip_r),
-            "vipomall": _bubble(vm_branch),
+            "vipomall": _bubble(skipped),
+            "pandamall": _bubble(skipped),
             "merged": _bubble(css),
         }
 
-    if _css_buy_result_signals_hibox_fallback(css):
-        hb = _evaluate_stock_via_hibox(canon)
-        if hb.status in ("in_stock", "out_of_stock"):
-            return {
-                "ok": True,
-                "canonical_input": canon,
-                "link_eligible": True,
-                "coercion": coercion,
-                "cssbuy": _bubble(css),
-                "hibox": _bubble(hb),
-                "vipomall": _bubble(vm_branch),
-                "merged": _bubble(hb),
-            }
+    vm = _evaluate_stock_via_vipomall(canon)
+    if _result_is_conclusive_stock(vm):
         return {
             "ok": True,
             "canonical_input": canon,
             "link_eligible": True,
             "coercion": coercion,
             "cssbuy": _bubble(css),
-            "hibox": _bubble(hb),
-            "vipomall": _bubble(vm_branch),
-            "merged": _bubble(vm_branch if vm_branch.status not in ("skipped",) else hb),
+            "vipomall": _bubble(vm),
+            "pandamall": _bubble(skipped),
+            "merged": _bubble(vm),
         }
 
-    skip_hibox_r = SourceStockCheckResult(
-        status="skipped",
-        error=(
-            "Không scrape Hibox — CSS đã có kết quả nghiệp vụ (in_stock/out_of_stock). "
-            "Chỉ fallback Hibox khi nhánh CSS `blocked` hoặc `error`."
-        ),
-    )
+    panda = _evaluate_stock_via_pandamall(canon)
+    merged = panda if _result_is_conclusive_stock(panda) else _merge_all_platforms_blocked_or_error(css, vm, panda)
     return {
         "ok": True,
         "canonical_input": canon,
         "link_eligible": True,
         "coercion": coercion,
         "cssbuy": _bubble(css),
-        "hibox": _bubble(skip_hibox_r),
-        "vipomall": _bubble(vm_branch),
-        "merged": _bubble(css),
+        "vipomall": _bubble(vm),
+        "pandamall": _bubble(panda),
+        "merged": _bubble(merged),
     }
 
 
-def _hibox_quick_cart_cta_via_playwright(page_url: str) -> Optional[bool]:
-    """
-    PDP Hibox: có nút «САГСЛАХ» (thêm vào giỏ) không — fallback khi scrape đầy đủ lỗi.
-    Trả None nếu Playwright không chạy/navigate không xong (không kết luận cứng).
-    """
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return None
-
-    opened = (page_url or "").strip()
-    if len(opened) < 14:
-        return None
-
-    ua = getattr(settings, "IMPORT_1688_USER_AGENT", None) or (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    )
-    headless_raw = getattr(settings, "SOURCE_STOCK_CHECK_HEADLESS", True)
-    headless = str(headless_raw).strip().lower() not in {"0", "false", "no"}
-
-    needle_js = HIBOX_CART_CTA_PROBE_JS
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=headless,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            ctx = browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                locale="mn-MN",
-                timezone_id="Asia/Ulaanbaatar",
-                user_agent=ua,
-            )
-            page = ctx.new_page()
-            try:
-                from app.services.import_scraper_cookies import seed_playwright_context_cookies
-
-                seed_playwright_context_cookies(
-                    ctx,
-                    page,
-                    prefer_hosts={"hibox.mn", "taobao1688.kz"},
-                    target_url=opened,
-                )
-            except Exception:
-                pass
-            try:
-                page.goto(opened, wait_until="domcontentloaded", timeout=90_000)
-                try:
-                    page.wait_for_load_state("networkidle", timeout=40_000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(1800)
-                return bool(page.evaluate(needle_js))
-            finally:
-                try:
-                    ctx.close()
-                except Exception:
-                    pass
-                try:
-                    browser.close()
-                except Exception:
-                    pass
-    except Exception:
-        return None
-
-
-def _evaluate_stock_via_hibox(raw_url: str) -> SourceStockCheckResult:
-    """Đọc tình trạng qua scrape Hibox (quy đổi URL nguồn như luồng nhập Excel)."""
-    canonical_url = (normalize_product_import_url((raw_url or "").strip()) or (raw_url or "").strip()).strip()
-    hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
-    if coercion_err:
-        return SourceStockCheckResult(
-            status="error",
-            error=f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"[:1000],
-            checked_via="hibox",
-        )
-    coerced = (hibox_url or "").strip()
-    canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
-    try:
-        _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
-        rr = dict(_raw_row) if isinstance(_raw_row, dict) else {}
-        pd = dict(product_data) if isinstance(product_data, dict) else {}
-        if hibox_scrape_signals_removed_or_not_found_offer(rr):
-            return SourceStockCheckResult(
-                status="out_of_stock",
-                error=(
-                    "Hibox: trang báo không tìm thấy sản theo mã / đã xóa khỏi Taobao (hoặc tương đương) — coi hết hàng nguồn."
-                )[:1000],
-                checked_via="hibox",
-            )
-        title_like = rr.get("title")
-        sku_like = rr.get("sku")
-        pname = pd.get("name")
-        basics = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
-        has_signal = basics or _hibox_row_shows_color_size_catalog(rr, pd)
-        if has_signal:
-            cart_probe = rr.get("hibox_dom_cart_cta")
-            if cart_probe is False:
-                return SourceStockCheckResult(
-                    status="out_of_stock",
-                    error=(
-                        "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ — khoanh đỏ) trên PDP — coi hết hàng nguồn."
-                    ),
-                    checked_via="hibox",
-                )
-            warn_txt = "; ".join(list(warns or [])[:6]).strip()
-            return SourceStockCheckResult(status="in_stock", error=warn_txt or None, checked_via="hibox")
-        return SourceStockCheckResult(
-            status="out_of_stock",
-            error=(
-                "Hibox không trả đủ dữ liệu PDP (thiếu tiêu đề/SKU và không có màu–size có nội dung)."
-            ),
-            checked_via="hibox",
-        )
-    except ImportHiboxError as exc:
-        fb_cart = _hibox_quick_cart_cta_via_playwright(canonical_url)
-        if fb_cart is False:
-            return SourceStockCheckResult(
-                status="out_of_stock",
-                error=(
-                    "Hibox: không thấy nút «САГСЛАХ» (thêm giỏ) sau khi tải PDP — coi hết hàng. "
-                    f"(scrape báo lỗi tạm: {str(exc)[:420]})"
-                )[:1000],
-                checked_via="hibox",
-            )
-        return SourceStockCheckResult(status="error", error=str(exc)[:1000], checked_via="hibox")
-    except Exception as exc:
-        logger.warning("hibox source stock evaluate failed: %s", exc)
-        return SourceStockCheckResult(
-            status="error",
-            error=((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được.")[:1000],
-            checked_via="hibox",
-        )
 
 
 def _datetime_is_recent(value: Optional[datetime], seconds: int) -> bool:
@@ -983,7 +755,7 @@ def enqueue_source_stock_check(product_id: int, *, reason: str = "manual", force
     db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
+        if not product or not _link_eligible_for_source_stock_check(product.link_default or ""):
             with _queue_lock:
                 _queued_ids.discard(product_id)
                 try:
@@ -1008,7 +780,7 @@ def enqueue_source_stock_check(product_id: int, *, reason: str = "manual", force
 
 def enqueue_product_view_stock_check_if_needed(product: Product) -> bool:
     """Gọi khi khách mở PDP: chỉ enqueue nếu cache thiếu/cũ và không spam cùng một sản phẩm."""
-    if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
+    if not product or not _link_eligible_for_source_stock_check(product.link_default or ""):
         return False
     status = (product.source_stock_status or "").strip().lower()
     if status in {"queued", "checking"} and _datetime_is_recent(
@@ -1035,7 +807,7 @@ def _claim_due_product_id() -> Optional[int]:
     try:
         now = _utcnow()
         product = _eligible_due_products_query(db).first()
-        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
+        if not product or not _link_eligible_for_source_stock_check(product.link_default or ""):
             return None
         product.source_stock_status = "queued"
         product.source_stock_next_check_at = now
@@ -1063,7 +835,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
     db = SessionLocal()
     try:
         product = db.query(Product).filter(Product.id == product_id).first()
-        if not product or not _link_eligible_for_hibox_stock_check(product.link_default or ""):
+        if not product or not _link_eligible_for_source_stock_check(product.link_default or ""):
             return None
 
         previous_status = (product.source_stock_status or "").strip().lower()
@@ -1085,7 +857,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         db.close()
 
     try:
-        result = _evaluate_stock_primary_cssbuy_with_hibox_fallback(
+        result = _evaluate_stock_primary_cssbuy_with_vipomall_fallback(
             link_default,
             fallback_product_id=fallback_product_id,
         )
@@ -1182,7 +954,7 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
 def _worker_loop() -> None:
     logger.info(
         "source stock checker started: interval=%ss stale=%sm "
-        "(cssbuy first; hibox when css blocked/error; vipomall 1688 PDP when hibox inconclusive)",
+        "(cssbuy → vipomall → pandamall; CF/captcha fallback; all blocked=stop)",
         settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS,
         settings.SOURCE_STOCK_CHECK_STALE_MINUTES,
     )

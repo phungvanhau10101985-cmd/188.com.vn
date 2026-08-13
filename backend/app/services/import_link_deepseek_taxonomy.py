@@ -55,14 +55,14 @@ def _cat1_is_gendered_female(cat1: str) -> bool:
 
 def infer_supplier_gender_hint(text: str) -> Optional[str]:
     """
-    Suy luận giới tính từ mô tả/thông số NCC (Hibox tiếng Mông Cổ, v.v.).
+    Suy luận giới tính từ mô tả/thông số NCC (có thể gồm Cyrillic / CJK).
     Trả 'female' | 'male' | None.
     """
     raw = text or ""
     if not raw.strip():
         return None
 
-    # Trường chuẩn Hibox: «Холбогдох Хүйс» (Giới tính áp dụng)
+    # Trường chuẩn nguồn: «Холбогдох Хүйс» (Giới tính áp dụng)
     for pat in (
         r"Холбогдох\s+Хүйс\s*[:：]\s*([^\n\r]+)",
         r"Холбогдох\s+Хүйс\s+([^\n\r]+)",
@@ -198,7 +198,9 @@ def build_taxonomy_context_blob(product_data: Dict[str, Any]) -> str:
     if isinstance(pi, dict):
         spec = pi.get("specifications")
         if isinstance(spec, dict):
-            ex = (spec.get("supplier_specs_excerpt") or spec.get("hibox_specs_excerpt") or "").strip()
+            from app.services.import_source_ids import first_legacy_spec_excerpt
+
+            ex = first_legacy_spec_excerpt(spec if isinstance(spec, dict) else {})
             if ex and ex not in d:
                 parts.append(sanitize_listing_context_for_ai(ex))
         for key in ("product_info", "variants", "market_info"):
@@ -720,7 +722,7 @@ def classify_product_taxonomy_deepseek(
     Dict gồm cat1, cat2, cat3, full_slug; có thể thêm khach_hang, ten_tieng_viet, chat_lieu_vi, mo_ta_vi,
     thuong_hieu_vi, xuat_xu_vi, phong_cach_vi, dip_vi, trong_luong_vi, chieu_cao_got_vi, thong_so_kich_thuoc_vi (tiếng Việt, không CJK).
 
-    context_text: mô tả + thông số (vd Hibox) — để đọc giới tính «Холбогдох Хүйс» / Эмэгтэй, không chỉ title.
+    context_text: mô tả + thông số — để đọc giới tính «Холбогдох Хүйс» / Эмэгтэй, không chỉ title.
     supplier_gender_hint: nếu apply đã suy ra từ text/thông số, truyền vào để không đọc lại sai thứ tự.
         None = suy từ text trong classify như cũ.
     """
@@ -1450,16 +1452,9 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
     try:
         from app.services.variant_color_translate import (
             apply_variant_color_translation_to_product_data,
-            _product_import_source,
         )
-        from app.services.import_hibox_scraper import _hibox_sync_variant_display_labels
 
-        src = _product_import_source(product_data)
-        if src == "hibox":
-            apply_variant_color_translation_to_product_data(product_data, import_source="hibox")
-            _hibox_sync_variant_display_labels(product_data)
-        else:
-            apply_variant_color_translation_to_product_data(product_data)
+        apply_variant_color_translation_to_product_data(product_data)
     except Exception as exc:
         from sqlalchemy.exc import DBAPIError
 

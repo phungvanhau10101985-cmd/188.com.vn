@@ -60,18 +60,21 @@ from app.services.product_rating_question_groups import (
     apply_import_rating_question_groups_to_product_data,
 )
 from app.services.product_info_web_compact import compact_product_info_for_web
-from app.services.import_hibox_scraper import (
-    ImportHiboxError,
-    build_canonical_product_id_from_hibox_slug,
-    extract_hibox_1688_offer_digits,
-    extract_hibox_slug,
+from app.services.import_source_ids import (
+    abb_slug_is_1688_offer,
+    build_canonical_product_id_from_item_slug,
+    build_canonical_taobao_product_id,
+    extract_abb_offer_digits,
+    extract_legacy_mirror_slug,
     extract_taobao_tmall_item_id,
-    hibox_canonical_scrape_url,
-    hibox_slug_is_1688_offer,
-    is_hibox_import_url,
+    is_legacy_mirror_url,
+    is_legacy_placeholder_slug,
+    is_removed_import_source_token,
+    legacy_draft_source_name,
+    legacy_product_id_for_slug,
     normalize_product_import_url,
     parse_t_prefixed_item_id,
-    scrape_hibox_for_import,
+    removed_source_reject_message,
 )
 from app.services.import_pandamall_scraper import (
     ImportPandamallError,
@@ -98,6 +101,7 @@ from app.services.import_1688_scraper import (
 from app.services.import_batch_url_coercion import (
     FETCH_TARGET_AUTO,
     FETCH_TARGET_1688,
+    FETCH_TARGET_VIPOMALL,
     coerce_url_for_excel_batch_import,
     normalize_fetch_target_param,
 )
@@ -212,7 +216,7 @@ def _batch_status_out_for_draft_ids(db: Session, batch_token: str, draft_ids: Li
 
 
 def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] = None) -> Tuple[str, str]:
-    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Hibox/Vipomall/PandaMall/Taobao."""
+    """Trả (external_id, source). Raises ValueError nếu không phải 1688/Vipomall/PandaMall/Taobao."""
     req = (requested_source or "").strip().lower()
     if req in {"pandamall", "panda", "panda_mall"} or is_pandamall_import_url(norm_url):
         try:
@@ -238,28 +242,37 @@ def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] 
         if oid:
             return oid, "vipomall"
 
-    force_hibox = req in {"hibox", "hi-box", "hi_box"} or "hibox.mn" in norm_url.lower()
-    if not force_hibox and req not in {"hibox", "hi-box", "hi_box"}:
-        if (
-            parse_t_prefixed_item_id(norm_url)
-            or extract_taobao_tmall_item_id(norm_url)
-            or (
-                (slug := extract_hibox_slug(norm_url))
-                and slug != "hibox_import"
-                and not extract_hibox_1688_offer_digits(slug)
-                and re.fullmatch(r"\d+", slug or "")
-            )
-        ):
-            try:
-                canonical, _pt = resolve_vipomall_import_url(norm_url)
-                oid = extract_vipomall_offer_id(canonical)
-                if oid:
-                    return oid, "vipomall"
-            except ImportVipomallError:
-                pass
+    if is_removed_import_source_token(req):
+        raise ValueError("removed_import_source")
 
-    if force_hibox or is_hibox_import_url(norm_url):
-        return (extract_hibox_slug(norm_url) or "hibox_import"), "hibox"
+    # Legacy mirror URLs / Taobao ids → Vipomall when possible
+    if (
+        is_legacy_mirror_url(norm_url)
+        or parse_t_prefixed_item_id(norm_url)
+        or extract_taobao_tmall_item_id(norm_url)
+        or (
+            (slug := extract_legacy_mirror_slug(norm_url))
+            and not is_legacy_placeholder_slug(slug)
+            and not extract_abb_offer_digits(slug)
+            and re.fullmatch(r"\d+", slug or "")
+        )
+    ):
+        try:
+            canonical, _pt = resolve_vipomall_import_url(norm_url)
+            oid = extract_vipomall_offer_id(canonical)
+            if oid:
+                return oid, "vipomall"
+        except ImportVipomallError:
+            pass
+        # abb-* legacy slug → still publishable as Vipomall after coercion
+        slug2 = extract_legacy_mirror_slug(norm_url)
+        if slug2 and not is_legacy_placeholder_slug(slug2):
+            abb = extract_abb_offer_digits(slug2)
+            if abb:
+                return abb, "vipomall"
+            if re.fullmatch(r"\d+", slug2):
+                return slug2, "vipomall"
+
     offer_id = extract_offer_id(norm_url)
     if offer_id:
         return offer_id, "1688"
@@ -518,7 +531,7 @@ def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, A
 def _prefer_excel_chinese_name_for_import_ai(product_data: Dict[str, Any]) -> None:
     """
     Batch Excel có `chinese_name` từ NCC: dùng chuỗi gốc này làm input dịch/phân loại,
-    còn tên Vipomall/Hibox đọc được được giữ trong product_info để đối chiếu.
+    còn tên Vipomall đọc được được giữ trong product_info để đối chiếu.
     """
     cn = str(product_data.get("chinese_name") or "").strip()
     if not cn:
@@ -539,7 +552,7 @@ def _prefer_excel_chinese_name_for_import_ai(product_data: Dict[str, Any]) -> No
 
 @router.get("/debug/classify-url")
 def debug_classify_import_url(
-    url: str = Query(..., min_length=1, max_length=4096, description="URL dán thử (1688 hoặc Hibox)"),
+    url: str = Query(..., min_length=1, max_length=4096, description="URL dán thử (Vipomall / PandaMall / 1688 / legacy mirror)"),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
@@ -548,19 +561,26 @@ def debug_classify_import_url(
     """
     raw = url.strip()
     normalized = normalize_product_import_url(raw)
-    hibox = is_hibox_import_url(normalized)
-    slug = extract_hibox_slug(normalized) if hibox else None
-    hibox_scrape = hibox_canonical_scrape_url(normalized) if hibox else None
+    legacy = is_legacy_mirror_url(normalized)
+    slug = extract_legacy_mirror_slug(normalized) if legacy else None
+    vipomall_u, vipomall_err = coerce_url_for_excel_batch_import(normalized, FETCH_TARGET_VIPOMALL)
     oid = extract_offer_id(normalized)
     short = len(normalized) < 10
-    accepted = (not short) and (hibox or bool(oid))
+    accepted = (not short) and (
+        is_vipomall_import_url(normalized)
+        or is_pandamall_import_url(normalized)
+        or bool(oid)
+        or (legacy and not vipomall_err)
+        or bool(extract_taobao_tmall_item_id(normalized) or parse_t_prefixed_item_id(normalized))
+    )
     return {
         "received_length": len(raw),
         "normalized": normalized,
         "normalized_length": len(normalized),
-        "is_hibox": hibox,
-        "hibox_slug": slug,
-        "hibox_canonical_scrape_url": hibox_scrape,
+        "is_legacy_mirror": legacy,
+        "legacy_mirror_slug": slug,
+        "vipomall_coerced_url": (vipomall_u or "").strip() if not vipomall_err else "",
+        "vipomall_coercion_error": (vipomall_err or "").strip(),
         "offer_id_1688": oid,
         "would_accept_for_post_jobs": accepted,
         "reject_reason": (
@@ -652,7 +672,7 @@ def save_import_1688_cookie_settings(
     )
     settings.IMPORT_1688_ENABLED = True
     return _cookie_settings_out(
-        f"Đã lưu {count} cookie scrape chung (Hibox, Vipomall, kiểm tra tồn kho). Có thể dùng ngay hoặc restart API."
+        f"Đã lưu {count} cookie scrape chung (Vipomall, PandaMall, kiểm tra tồn kho). Có thể dùng ngay hoặc restart API."
     )
 
 
@@ -865,8 +885,14 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             source = "pandamall"
         elif saved_source == "vipomall" or is_vipomall_import_url(norm_url):
             source = "vipomall"
-        elif saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
-            source = "hibox"
+        elif saved_source == legacy_draft_source_name() or is_legacy_mirror_url(norm_url):
+            # Legacy drafts / URLs → scrape via Vipomall
+            source = "vipomall"
+            coerced, cerr = coerce_url_for_excel_batch_import(norm_url, FETCH_TARGET_VIPOMALL)
+            if not cerr and coerced:
+                draft.source_url = coerced
+                norm_url = coerced
+                db.commit()
         else:
             source = saved_source
 
@@ -886,25 +912,6 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
                 product_data=product_data,
                 warnings=warnings,
                 success_message="Đã tạo bản nháp từ link PandaMall.",
-            )
-            return
-
-        if source == "hibox":
-            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Hibox bằng Playwright...", 15)
-            raw_payload, product_data, warnings = scrape_hibox_for_import(draft.source_url)
-            _merge_excel_overlay_for_job(db, job_id, product_data)
-            _prefer_excel_chinese_name_for_import_ai(product_data)
-            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
-            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
-            _finalize_product_data_for_db(product_data)
-            draft_crud.mark_done(
-                db,
-                draft,
-                raw_payload=raw_payload,
-                product_data=product_data,
-                warnings=warnings,
-                success_message="Đã tạo bản nháp từ link Hibox.",
             )
             return
 
@@ -950,17 +957,13 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
             db,
             draft,
             message=(
-                "Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Hibox "
-                "(hibox.mn / taobao1688.kz), Vipomall hoặc PandaMall."
+                "Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Vipomall, "
+                "PandaMall hoặc CSSBuy."
             ),
             errors=["import_1688_disabled"],
         )
         return
     except ImportPandamallError as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if draft:
-            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
-    except ImportHiboxError as exc:
         draft = draft_crud.get_by_job_id(db, job_id)
         if draft:
             draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
@@ -1006,18 +1009,25 @@ def create_import_1688_job(
 
     try:
         ext_id, src = _infer_import_source_for_url(source_url, payload.source)
-    except ValueError:
+    except ValueError as exc:
+        if str(exc) == "removed_import_source":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "reason": "removed_import_source",
+                    "message": removed_source_reject_message(kind="source"),
+                },
+            ) from exc
         raise HTTPException(
             status_code=400,
             detail={
                 "reason": "unsupported_import_link",
                 "message": (
-                    "Không nhận dạng được link Hibox / taobao1688.kz / Vipomall / PandaMall / Taobao / Tmall / T{id}."
+                    "Không nhận dạng được link Vipomall / PandaMall / Taobao / Tmall / T{id} / offer 1688."
                 ),
                 "normalized_length": len(source_url),
                 "normalized_preview": source_url[:200],
                 "hints": (
-                    "Hibox: https://hibox.mn/v/{mã}. Mirror: https://taobao1688.kz/item?id={mã}. "
                     "Vipomall 1688: https://vipomall.vn/san-pham/{offerId}?platform_type=10. "
                     "Vipomall Taobao/Tmall: https://vipomall.vn/san-pham/{itemId}?platform_type=21 hoặc T{itemId}. "
                     "PandaMall 1688: https://pandamall.vn/1688/detail/{offerId}. "
@@ -1025,7 +1035,7 @@ def create_import_1688_job(
                     "Import trực tiếp từ 1688.com không còn hỗ trợ."
                 ),
             },
-        )
+        ) from exc
     if src == "pandamall":
         try:
             source_url, _platform = resolve_pandamall_import_url(source_url)
@@ -1045,7 +1055,7 @@ def create_import_1688_job(
             status_code=400,
             detail={
                 "reason": "import_1688_disabled",
-                "message": "Import trực tiếp từ 1688 đã tắt. Chỉ hỗ trợ link Hibox (hibox.mn, taobao1688.kz).",
+                "message": "Import trực tiếp từ 1688 đã tắt. Chỉ hỗ trợ Vipomall / PandaMall / CSSBuy.",
             },
         )
     job_id = str(uuid.uuid4())
@@ -1085,7 +1095,7 @@ def _create_import_drafts_from_parsed_excel(
     if ft == FETCH_TARGET_1688:
         raise HTTPException(
             status_code=400,
-            detail="fetch_target=1688 không còn hỗ trợ. Chọn auto hoặc hibox.",
+            detail="fetch_target=1688 không còn hỗ trợ. Chọn auto / vipomall / cssbuy / pandamall.",
         )
     draft_ids: List[int] = []
     job_ids: List[str] = []
@@ -1108,12 +1118,12 @@ def _create_import_drafts_from_parsed_excel(
             ext_id, src = _infer_import_source_for_url(url_norm, None)
         except ValueError:
             skips.append(
-                f"Dòng {it.get('excel_row')}: link không nhận dạng Hibox/taobao1688.kz/Vipomall/PandaMall."
+                f"Dòng {it.get('excel_row')}: link không nhận dạng Vipomall/PandaMall/Taobao/offer 1688."
             )
             continue
         if src == "1688":
             skips.append(
-                f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Hibox/taobao1688.kz/Vipomall/PandaMall."
+                f"Dòng {it.get('excel_row')}: import trực tiếp 1688 đã tắt — chỉ hỗ trợ Vipomall/PandaMall/CSSBuy."
             )
             continue
         overlays["_excel_row"] = int(it["excel_row"])
@@ -1271,9 +1281,9 @@ async def create_import_jobs_batch_from_excel(
     rồi làm tròn lên bội 10.000 ₫.
     Cột **Mã sp / SKU** không còn đọc trong luồng lấy thông tin; SKU mặc định để trống.
 
-    Form **`fetch_target`**: `auto` (mặc định) | `hibox` | `cssbuy` | `vipomall` | `pandamall` — chuẩn hoá URL từng dòng trước khi tạo job.
-    **`auto`** quy Taobao/Tmall và offer 1688 sang URL Hibox (`hibox.mn/v/…`) khi quy đổi được.
-    **`vipomall`** / **`pandamall`**: quy offer 1688 / Taobao sang URL gương tương ứng.
+    Form **`fetch_target`**: `auto` (mặc định) | `cssbuy` | `vipomall` | `pandamall` — chuẩn hoá URL từng dòng trước khi tạo job.
+    **`auto`** quy Taobao/Tmall và offer 1688 sang URL Vipomall khi quy đổi được.
+    **`vipomall`** / **`pandamall`**: quy offer 1688 / Taobao sang URL gương tương ứng. Token nguồn đã gỡ bị từ chối.
     Form **`append_batch_token`** (tuỳ chọn): gộp link mới vào meta đợt đang có thay vì tạo token mới.
     **`1688` không còn hỗ trợ.** Dòng không quy đổi được bị **bỏ qua** kèm lý do trong `skipped`.
     """
@@ -1833,9 +1843,7 @@ def publish_import_1688_draft(
             if existing is None:
                 existing = product_crud.get_product_by_product_id(db, f"T{oid}")
             try:
-                from app.services.import_hibox_scraper import build_canonical_hibox_product_id
-
-                canonical_pid = build_canonical_hibox_product_id(oid)
+                canonical_pid = build_canonical_taobao_product_id(oid)
             except ValueError as exc:
                 raise HTTPException(
                     status_code=400,
@@ -1843,7 +1851,9 @@ def publish_import_1688_draft(
                 ) from exc
         else:
             if existing is None:
-                existing = product_crud.get_product_by_product_id(db, f"hibox_abb-{oid}")
+                existing = product_crud.get_product_by_product_id(
+                    db, legacy_product_id_for_slug(f"abb-{oid}")
+                )
             if existing is None:
                 existing = product_crud.get_product_by_product_id(db, f"1688_{oid}")
             try:
@@ -1854,27 +1864,28 @@ def publish_import_1688_draft(
                     detail={"reason": "invalid_internal_product_id", "message": str(exc)},
                 ) from exc
 
-    elif src == "hibox":
-        hid = (extract_hibox_slug(norm_url) or "").strip()
+    elif src == legacy_draft_source_name() or is_legacy_mirror_url(norm_url):
+        # Legacy draft source / mirror URL — resolve id for matching only (no scrape).
+        hid = (extract_legacy_mirror_slug(norm_url) or "").strip()
         if not hid:
             hid = (draft.source_offer_id or "").strip()
-        if not hid or hid == "hibox_import":
+        if is_legacy_placeholder_slug(hid):
             raise HTTPException(
                 status_code=400,
                 detail={
-                    "reason": "import_publish_missing_hibox_item_id",
+                    "reason": "import_publish_missing_legacy_item_id",
                     "message": (
-                        "Không trích được mã sản phẩm Hibox (đoạn sau /v/ hoặc ?id= mirror). "
-                        "Slug «abb-<số>» = cửa hàng 1688; slug chỉ chữ số = Taobao."
+                        "Không trích được mã sản phẩm từ link legacy (đoạn sau /v/ hoặc ?id= mirror). "
+                        "Slug «abb-<số>» = 1688; slug chỉ chữ số = Taobao. Nên import lại qua Vipomall."
                     ),
                     "normalized_url_preview": norm_url[:240],
                     "source_offer_id": draft.source_offer_id,
                 },
             )
         if existing is None:
-            existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
+            existing = product_crud.get_product_by_product_id(db, legacy_product_id_for_slug(hid))
         try:
-            canonical_pid = build_canonical_product_id_from_hibox_slug(hid)
+            canonical_pid = build_canonical_product_id_from_item_slug(hid)
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
@@ -1884,13 +1895,13 @@ def publish_import_1688_draft(
         if existing is None:
             existing = product_crud.get_product_by_product_id(db, canonical_pid)
         if existing is None:
-            oid1688 = extract_hibox_1688_offer_digits(hid)
+            oid1688 = extract_abb_offer_digits(hid)
             if oid1688:
                 existing = product_crud.get_product_by_product_id(db, f"1688_{oid1688}")
         if existing is None:
-            existing = product_crud.get_product_by_product_id(db, f"hibox_{hid}")
-        if existing is None and hibox_slug_is_1688_offer(hid):
-            oid1688 = extract_hibox_1688_offer_digits(hid)
+            existing = product_crud.get_product_by_product_id(db, legacy_product_id_for_slug(hid))
+        if existing is None and abb_slug_is_1688_offer(hid):
+            oid1688 = extract_abb_offer_digits(hid)
             if oid1688:
                 existing = product_crud.get_product_by_product_id(db, f"A{oid1688}")
 
@@ -2015,7 +2026,7 @@ def listing_import_queue_enqueue(
     tasks = [
         {
             "url": it.url.strip(),
-            "source": it.source or "hibox",
+            "source": it.source or "vipomall",
             "label": it.label,
             "chinese_name": it.chinese_name,
             "shop_name_chinese": it.shop_name_chinese,

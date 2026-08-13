@@ -335,7 +335,7 @@ def _execute_one_import(
         _infer_import_source_for_url,
         _run_import_1688_job,
     )
-    from app.services.import_hibox_scraper import normalize_product_import_url
+    from app.services.import_source_ids import normalize_product_import_url
 
     source_url = normalize_product_import_url((url or "").strip())
     if len(source_url) < 10:
@@ -343,7 +343,7 @@ def _execute_one_import(
     try:
         ext_id, src = _infer_import_source_for_url(source_url, source)
     except ValueError:
-        return {"ok": False, "error": "Link không nhận dạng được Hibox/taobao1688.kz/Vipomall/PandaMall."}
+        return {"ok": False, "error": "Link không nhận dạng được Vipomall/PandaMall/Taobao/offer 1688."}
 
     job_id = str(uuid.uuid4())
     db = SessionLocal()
@@ -537,7 +537,7 @@ def enqueue(
     Mỗi ``queue_token`` có một worker ``threading.Thread`` riêng (``_ensure_worker_started``).
     Nhiều đợt có thể chạy song song, độc lập — không có khóa toàn cục giữa các đợt.
 
-    tasks: [{url, source: hibox|vipomall|pandamall, label?: str}]
+    tasks: [{url, source: vipomall|pandamall|cssbuy, label?: str}]
     """
     if not tasks:
         raise ValueError("Không có link nào để thêm.")
@@ -573,13 +573,16 @@ def enqueue(
             added = 0
             for raw in tasks:
                 url = (raw.get("url") or "").strip()
-                src = (raw.get("source") or "hibox").strip().lower()
+                src = (raw.get("source") or "vipomall").strip().lower()
                 if src in {"vipo", "vipomail", "vipo_mall", "vipo-mall"}:
                     src = "vipomall"
                 if src in {"panda", "panda_mall", "panda-mall"}:
                     src = "pandamall"
-                if src not in {"hibox", "vipomall", "pandamall"}:
-                    src = "hibox"
+                from app.services.import_source_ids import remap_legacy_import_source
+
+                src = remap_legacy_import_source(src)
+                if src not in {"vipomall", "pandamall", "cssbuy"}:
+                    src = "vipomall"
                 label = (raw.get("label") or "").strip() or None
                 if len(url) < 10:
                     continue

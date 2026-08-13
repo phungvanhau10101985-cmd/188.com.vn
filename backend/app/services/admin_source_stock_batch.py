@@ -1,5 +1,6 @@
 """
-Kiểm tra tồn kho nguồn (admin batch): scrape **Hibox** hoặc API **CSSBuy** (quy đổi URL nguồn như nhập Excel).
+Kiểm tra tồn kho nguồn (admin batch): Playwright **CSSBuy** (bấm «I accept the risks», đọc Add to Cart)
+rồi fallback **Vipomall** khi CSSBuy lỗi kỹ thuật (không phải Cloudflare/CAPTCHA).
 
 Chỉ khi không đọc được PDP (thiếu tín hiệu SP / ``no_data``, lỗi fetch…) mới xếp hết và có thể
 cập nhật ``available = 0``. Nếu vẫn thấy màu–size hay ma trận SKU → coi là đọc được offer,
@@ -21,31 +22,30 @@ from app.models.product import Product
 from app.models.user import UserProductView
 from app.services.import_batch_url_coercion import (
     FETCH_TARGET_CSSBUY,
-    FETCH_TARGET_HIBOX,
     FETCH_TARGET_VIPOMALL,
     coerce_url_for_excel_batch_import,
 )
 from app.services.import_cssbuy_client import (
-    ImportCssbuyError,
-    cssbuy_html_disclaimer_agreement_without_add_to_cart,
-    cssbuy_html_shows_add_to_cart_button,
-    cssbuy_item_page_to_hibox_slug,
-    fetch_cssbuy_item_json_bundle,
+    cssbuy_item_page_to_item_slug,
+    evaluate_cssbuy_pdp_stock,
 )
-from app.services.import_hibox_scraper import (
-    ImportHiboxError,
-    extract_hibox_1688_offer_digits,
-    extract_hibox_slug,
-    hibox_canonical_scrape_url,
-    hibox_scrape_signals_removed_or_not_found_offer,
+from app.services.import_source_ids import (
+    extract_abb_offer_digits,
+    is_legacy_placeholder_slug,
+    is_removed_import_source_token,
+    legacy_mirror_link_ilike_patterns,
+    legacy_mirror_v_path_ilike_pattern,
+    legacy_product_id_for_slug,
     normalize_product_import_url,
-    scrape_hibox_for_import,
+    removed_source_reject_message,
 )
 
 logger = logging.getLogger(__name__)
 
 # Lỗi tạm (chặn / captcha / lỗi đọc): không ghi admin_source_batch_scanned_at để SP được ưu tiên kiểm tra lại ngay.
-_TRANSIENT_ADMIN_BATCH_RAW_STATUSES = frozenset({"error", "unknown", "fetch_error", "dual_fetch_error"})
+_TRANSIENT_ADMIN_BATCH_RAW_STATUSES = frozenset(
+    {"error", "unknown", "fetch_error", "dual_fetch_error", "blocked"}
+)
 
 
 def should_commit_admin_batch_ttl_after_scan(raw_status: str | None) -> bool:
@@ -58,9 +58,9 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _find_products_for_hibox_slug(db: Session, slug: str) -> List[Product]:
+def _find_products_for_item_slug(db: Session, slug: str) -> List[Product]:
     """
-    Khớp ``products`` với slug sau khi quy đổi Hibox (vd ``abb-823190872324``).
+    Khớp ``products`` với slug item (vd ``abb-823190872324`` / id Taobao).
 
     Lưu ý: nhiều SP lưu ``link_default`` là URL 1688 ``…/offer/{id}.html`` — không chứa
     chuỗi ``/v/abb-…`` nên phải đối chiếu thêm offer id sau khi bóc từ slug.
@@ -68,17 +68,17 @@ def _find_products_for_hibox_slug(db: Session, slug: str) -> List[Product]:
     đúng dòng được lấy từ queue.
     """
     s = (slug or "").strip()
-    if not s or s == "hibox_import":
+    if is_legacy_placeholder_slug(s):
         return []
-    prefixed = f"hibox_{s}"
+    prefixed = legacy_product_id_for_slug(s)
     clauses: List[Any] = [
-        Product.link_default.ilike(f"%hibox.mn%/v/{s}%"),
+        Product.link_default.ilike(legacy_mirror_v_path_ilike_pattern(s)),
         Product.link_default.ilike(f"%/v/{s}%"),
         Product.link_default.ilike(f"%item?id={s}%"),
         Product.product_id.ilike(f"{prefixed}%"),
         Product.product_id == prefixed,
     ]
-    oid = extract_hibox_1688_offer_digits(s)
+    oid = extract_abb_offer_digits(s)
     if oid:
         clauses.append(Product.link_default.ilike(f"%offer/{oid}%"))
         clauses.append(Product.link_default.ilike(f"%item-1688-{oid}%"))
@@ -170,7 +170,7 @@ def admin_product_source_link_base_filters(
     *,
     active_only: bool,
 ) -> List[Any]:
-    """Bộ lọc link/active — chỉ SP có URL có thể đưa vào luồng quy đổi + scrape Hibox."""
+    """Bộ lọc link/active — SP có URL có thể quy đổi sang CSSBuy / Vipomall (gồm link legacy)."""
     _ = (domain or "cssbuy").strip().lower()
     filters = [
         ProductModel.link_default.isnot(None),
@@ -181,8 +181,7 @@ def admin_product_source_link_base_filters(
 
     filters.append(
         or_(
-            ProductModel.link_default.ilike("%hibox.mn%"),
-            ProductModel.link_default.ilike("%taobao1688.kz%"),
+            *[ProductModel.link_default.ilike(p) for p in legacy_mirror_link_ilike_patterns()],
             ProductModel.link_default.ilike("%1688.com%"),
             ProductModel.link_default.ilike("%offer.1688%"),
             ProductModel.link_default.ilike("%detail.1688%"),
@@ -255,26 +254,21 @@ def admin_source_stock_queue_stats(
 
 
 def _report_row_link_conversions(link_default: str | None) -> Dict[str, str]:
-    """URL quy đổi giống nhập Excel / worker — CSSBuy, Hibox và Vipomall trên báo cáo."""
+    """URL quy đổi giống nhập Excel / worker — CSSBuy và Vipomall trên báo cáo."""
     raw = (link_default or "").strip()
     if not raw:
         miss = "thiếu link trong DB."
         return {
             "link_convert_cssbuy": "",
             "link_convert_cssbuy_err": miss,
-            "link_convert_hibox": "",
-            "link_convert_hibox_err": miss,
             "link_convert_vipomall": "",
             "link_convert_vipomall_err": miss,
         }
     css_u, css_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_CSSBUY)
-    hb_u, hb_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_HIBOX)
     vm_u, vm_e = coerce_url_for_excel_batch_import(raw, FETCH_TARGET_VIPOMALL)
     return {
         "link_convert_cssbuy": (css_u or "").strip(),
         "link_convert_cssbuy_err": (css_e or "").strip(),
-        "link_convert_hibox": (hb_u or "").strip(),
-        "link_convert_hibox_err": (hb_e or "").strip(),
         "link_convert_vipomall": (vm_u or "").strip(),
         "link_convert_vipomall_err": (vm_e or "").strip(),
     }
@@ -318,7 +312,7 @@ def admin_source_stock_activity_report(
     - Phân rã ``source_stock_status`` chỉ trên các SP có ``source_stock_checked_at`` trong cửa sổ.
 
     - Mỗi dòng mẫu có thêm ``source_stock_check_platform`` khi PDP worker hoặc batch commit kết luận
-      (cssbuy / hibox / ``cssbuy+hibox`` khi batch ghi nhận cả hai nền không đọc được).
+      (cssbuy / vipomall / ``cssbuy+vipomall`` khi batch ghi nhận cả hai nền không đọc được).
 
     Mẫu trong ``samples``: sắp xếp **mới nhất trước** (``source_stock_checked_at`` hoặc ``admin_source_batch_scanned_at``
     giảm dần), phân trang độc lập mỗi nhóm qua ``samples_*_page`` và ``sample_page_size``.
@@ -729,15 +723,6 @@ def run_admin_source_stock_scan_next_from_db(
     return scan
 
 
-def _alternate_primary_platform(sequence_index: int) -> str:
-    return "cssbuy" if int(sequence_index) % 2 == 0 else "hibox"
-
-
-def _other_source_platform(platform: str) -> str:
-    pl = (platform or "").strip().lower()
-    return "cssbuy" if pl == "hibox" else "hibox"
-
-
 def _json_list_nonempty_for_catalog(raw_json: Any) -> bool:
     """Mảng JSON từ scraper: tên màu, size, hoặc cặp color×size."""
     if raw_json is None:
@@ -759,50 +744,6 @@ def _json_list_nonempty_for_catalog(raw_json: Any) -> bool:
             return True
     return False
 
-
-def _hibox_row_shows_color_size_catalog(raw_row: Dict[str, Any], product_data: Dict[str, Any]) -> bool:
-    """
-    PDP vẫn có thông tin SKU (màu/size/variant) → coi là đọc được offer, không gán hết
-    chỉ vì thiếu tiêu đề/SKU dạng chữ.
-    """
-    if str(raw_row.get("h1") or "").strip():
-        return True
-    if _json_list_nonempty_for_catalog(raw_row.get("variant_color_size_json")):
-        return True
-    if _json_list_nonempty_for_catalog(raw_row.get("colors_json")):
-        return True
-    if _json_list_nonempty_for_catalog(raw_row.get("sizes_json")):
-        return True
-    try:
-        if int(raw_row.get("color_variant_image_count") or 0) > 0:
-            return True
-    except (TypeError, ValueError):
-        pass
-
-    sizes = product_data.get("sizes")
-    if isinstance(sizes, list) and any(str(s).strip() for s in sizes if s is not None):
-        return True
-
-    colors = product_data.get("colors")
-    if isinstance(colors, list):
-        for c in colors[:120]:
-            if isinstance(c, dict) and str(c.get("name") or "").strip():
-                return True
-            if not isinstance(c, dict) and str(c).strip():
-                return True
-
-    pi = product_data.get("product_info")
-    variants_blob = pi.get("variants") if isinstance(pi, dict) else None
-    if isinstance(variants_blob, dict):
-        pairs = variants_blob.get("pairs")
-        if isinstance(pairs, list):
-            for it in pairs[:160]:
-                if isinstance(it, dict) and (
-                    str(it.get("color") or "").strip() or str(it.get("size") or "").strip()
-                ):
-                    return True
-
-    return False
 
 
 def _cssbuy_row_shows_variant_matrix(row0: Dict[str, Any]) -> bool:
@@ -858,10 +799,17 @@ def _attempt_has_usable_catalog_read(scan: Dict[str, Any]) -> bool:
     rs = (scan.get("raw_status") or "").strip().lower()
     return rs == "ok"
 
-
 def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) -> Dict[str, Any]:
     plat = (platform or "").strip().lower()
-    if plat not in ("hibox", "cssbuy"):
+    if plat == "vipomall":
+        from app.services.vipomall_source_stock import vipomall_gather_admin_batch_scan
+
+        return vipomall_gather_admin_batch_scan(db, seed_url=seed_url)
+    if plat == "pandamall":
+        from app.services.pandamall_source_stock import pandamall_gather_admin_batch_scan
+
+        return pandamall_gather_admin_batch_scan(db, seed_url=seed_url)
+    if plat != "cssbuy":
         plat = "cssbuy"
 
     classified_oos = False
@@ -873,141 +821,44 @@ def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) 
     normalized_in = normalize_product_import_url((seed_url or "").strip())
     canonical_url = (normalized_in or (seed_url or "").strip()).strip()
 
-    if plat == "hibox":
-        hibox_url, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_HIBOX)
-        warnings = []
-
-        if coercion_err:
-            classified_oos = False
-            raw_status = "bad_url"
-            detail = f"Không quy đổi được sang link Hibox hợp lệ: {coercion_err}"
-            matched = []
-            canonical_url = (hibox_url or canonical_url).strip()
-        else:
-            coerced = (hibox_url or "").strip()
-            canonical_url = hibox_canonical_scrape_url(coerced) if coerced else canonical_url
-            slug = extract_hibox_slug(canonical_url)
-            matched = _find_products_for_hibox_slug(db, slug or "")
-            try:
-                _raw_row, product_data, warns = scrape_hibox_for_import(canonical_url)
-                warnings = list(warns or [])
-                rr = dict(_raw_row) if isinstance(_raw_row, dict) else {}
-                pd = dict(product_data) if isinstance(product_data, dict) else {}
-                if hibox_scrape_signals_removed_or_not_found_offer(rr):
-                    raw_status = "no_data"
-                    classified_oos = True
-                    detail = (
-                        "Hibox: trang báo không tìm thấy/đã xóa offer (Taobao…) — coi như không còn hàng nguồn."
-                    )
-                else:
-                    title_like = rr.get("title")
-                    sku_like = rr.get("sku")
-                    pname = pd.get("name")
-                    basics = bool((title_like or "").strip() or (sku_like or "").strip() or (pname or "").strip())
-                    has_signal = basics or _hibox_row_shows_color_size_catalog(rr, pd)
-                    cart_ok = rr.get("hibox_dom_cart_cta")
-                    if cart_ok is False:
-                        raw_status = "no_data"
-                        classified_oos = True
-                        detail = (
-                            "Hibox: PDP không có nút «САГСЛАХ» (thêm giỏ — khoanh đỏ) — coi hết hàng nguồn."
-                        )
-                    elif has_signal:
-                        raw_status = "ok"
-                        classified_oos = False
-                        if warnings:
-                            detail = "; ".join(warnings[:6])
-                    else:
-                        raw_status = "no_data"
-                        classified_oos = True
-                        detail = (
-                            "Hibox không trả đủ dữ liệu đọc SP (thiếu tiêu đề/SKU và không thấy màu–size hay variant có nội dung) — có thể hết hoặc lỗi trang."
-                        )
-            except ImportHiboxError as exc:
-                classified_oos = False
-                raw_status = "fetch_error"
-                detail = str(exc)
-            except Exception as exc:
-                logger.exception("admin source batch hibox scrape failed url=%s", canonical_url[:200])
-                classified_oos = False
-                raw_status = "fetch_error"
-                detail = (
-                    ((str(exc) or "unexpected_error")[:920] + " — chưa kiểm tra được, không đổi tồn.")[:1000]
-                )
+    cssbuy_page, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_CSSBUY)
+    if coercion_err:
+        classified_oos = False
+        raw_status = "bad_url"
+        detail = f"Không quy đổi được sang URL CSSBuy hợp lệ: {coercion_err}"
+        matched = []
+        canonical_url = (cssbuy_page or canonical_url).strip()
     else:
-        cssbuy_page, coercion_err = coerce_url_for_excel_batch_import(canonical_url, FETCH_TARGET_CSSBUY)
-        warnings = []
-
-        if coercion_err:
-            classified_oos = False
-            raw_status = "bad_url"
-            detail = f"Không quy đổi được sang URL CSSBuy hợp lệ: {coercion_err}"
-            matched = []
-            canonical_url = (cssbuy_page or canonical_url).strip()
-        else:
-            canonical_url = (cssbuy_page or "").strip() or canonical_url
-            slug = cssbuy_item_page_to_hibox_slug(canonical_url)
-            matched = _find_products_for_hibox_slug(db, slug or "")
-            try:
-                payload, css_page_html = fetch_cssbuy_item_json_bundle(canonical_url)
-                code = payload.get("code")
-                if code != 0:
-                    classified_oos = True
-                    raw_status = "no_data"
-                    detail = (
-                        "CSSBuy /web/item code≠0 hoặc từ chối — coi không còn offer/hết dữ liệu item: "
-                        + str(payload.get("message") or payload.get("msg") or f"code={code}")[:820]
-                    )[:1000]
-                else:
-                    rows = payload.get("data")
-                    row0 = rows[0] if isinstance(rows, list) and rows else None
-                    if not isinstance(row0, dict):
-                        classified_oos = True
-                        raw_status = "no_data"
-                        detail = (
-                            "CSSBuy trả payload không có data hàng đầu hợp lệ như PDP không load — coi không còn offer."
-                        )
-                    else:
-                        try:
-                            price = float(row0.get("price") or 0)
-                        except (TypeError, ValueError):
-                            price = 0.0
-                        title = (row0.get("title") or row0.get("title_cn") or "").strip()
-                        variant_matrix = _cssbuy_row_shows_variant_matrix(row0)
-                        has_signal = bool(title) and (price > 0 or variant_matrix)
-                        css_html = (css_page_html or "").strip()
-                        disclaimer_no_cart = cssbuy_html_disclaimer_agreement_without_add_to_cart(css_html)
-                        show_cart = cssbuy_html_shows_add_to_cart_button(css_html)
-                        if disclaimer_no_cart:
-                            classified_oos = True
-                            raw_status = "no_data"
-                            detail = (
-                                "CSSBuy: có checkbox disclaimer («I have read… terms of service…») nhưng không thấy "
-                                "«Add To Cart» — PDP hết hàng / không còn bán được."
-                            )
-                        elif has_signal and not show_cart:
-                            classified_oos = True
-                            raw_status = "no_data"
-                            detail = (
-                                "CSSBuy: API có dữ liệu nhưng PDP không có nút «Add To Cart» "
-                                "(khoanh đỏ kiểm tra còn bán)."
-                            )
-                        elif not has_signal:
-                            raw_status = "no_data"
-                            classified_oos = True
-                            detail = (
-                                "CSSBuy: thiếu tiêu đề hoặc không có (giá > 0 / ma trận SKU thuộc tính) — không khẳng định được offer còn."
-                            )
-                        else:
-                            raw_status = "ok"
-                            classified_oos = False
-                            detail = None
-            except ImportCssbuyError as exc:
+        canonical_url = (cssbuy_page or "").strip() or canonical_url
+        slug = cssbuy_item_page_to_item_slug(canonical_url)
+        matched = _find_products_for_item_slug(db, slug or "")
+        try:
+            probe = evaluate_cssbuy_pdp_stock(canonical_url)
+            st = (probe.status or "").strip().lower()
+            if st == "in_stock":
+                classified_oos = False
+                raw_status = "ok"
+                detail = None
+            elif st == "out_of_stock":
                 classified_oos = True
                 raw_status = "no_data"
-                detail = f"CSSBuy không lấy được item (dead/skeleton không tải): {exc}"[:1000]
-            except Exception as exc:
-                logger.exception("admin source batch cssbuy failed url=%s", canonical_url[:200])
+                detail = (probe.error or "CSSBuy: hết hàng (không mở được PDP hoặc Add to Cart disabled/thiếu).")[:1000]
+            elif st == "blocked":
+                classified_oos = False
+                raw_status = "blocked"
+                detail = (probe.error or "CSSBuy bị Cloudflare/CAPTCHA — dừng, không đánh hết hàng.")[:1000]
+            else:
+                classified_oos = False
+                raw_status = "fetch_error"
+                detail = (probe.error or "CSSBuy lỗi kỹ thuật — chưa kiểm tra được.")[:1000]
+        except Exception as exc:
+            logger.exception("admin source batch cssbuy failed url=%s", canonical_url[:200])
+            low = (str(exc) or "").lower()
+            if any(n in low for n in ("captcha", "cloudflare", "cf-ray", "challenge", "access denied")):
+                classified_oos = False
+                raw_status = "blocked"
+                detail = ("CSSBuy bị chặn bảo mật / CAPTCHA / Cloudflare — dừng. " + str(exc))[:1000]
+            else:
                 classified_oos = False
                 raw_status = "fetch_error"
                 detail = (
@@ -1139,7 +990,7 @@ def run_admin_source_url_scan(
             "domain": domain_lower,
             "raw_status": "bad_domain",
             "classified_out_of_stock": False,
-            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=hibox, cssbuy hoặc vipomall.",
+            "detail": "Đã ngừng kiểm tra trực tiếp 1688 — dùng domain=cssbuy hoặc vipomall.",
             "matched_products": [],
             "updated_product_ids": [],
             "matched_count": 0,
@@ -1148,8 +999,18 @@ def run_admin_source_url_scan(
     if not dual_alternate_fallback:
         if domain_lower in ("", "cssbuy"):
             domain_lower = "cssbuy"
-        elif domain_lower == "hibox":
-            pass
+        elif is_removed_import_source_token(domain_lower):
+            return {
+                "ok": False,
+                "canonical_url": (url or "").strip(),
+                "domain": domain_lower,
+                "raw_status": "bad_domain",
+                "classified_out_of_stock": False,
+                "detail": removed_source_reject_message(kind="domain"),
+                "matched_products": [],
+                "updated_product_ids": [],
+                "matched_count": 0,
+            }
         elif domain_lower == "vipomall":
             fb_pid = None
             anch = max(0, int(anchor_product_db_id or 0))
@@ -1175,7 +1036,7 @@ def run_admin_source_url_scan(
                 "domain": domain_lower,
                 "raw_status": "bad_domain",
                 "classified_out_of_stock": False,
-                "detail": "domain phải là «hibox», «cssbuy» hoặc «vipomall».",
+                "detail": "domain phải là «cssbuy» hoặc «vipomall».",
                 "matched_products": [],
                 "updated_product_ids": [],
                 "matched_count": 0,
@@ -1188,8 +1049,9 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    primary = _alternate_primary_platform(alternate_sequence_index)
-    secondary = _other_source_platform(primary)
+    # Cascade: CSSBuy → Vipomall → PandaMall. CF/captcha trên một nền → thử nền tiếp.
+    _ = alternate_sequence_index
+    primary = "cssbuy"
     first = _gather_platform_scan_attempt(db, seed_url=url, platform=primary)
 
     extras_common: Dict[str, Any] = {
@@ -1205,12 +1067,13 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    second = _gather_platform_scan_attempt(db, seed_url=url, platform=secondary)
+    second = _gather_platform_scan_attempt(db, seed_url=url, platform="vipomall")
     if _attempt_has_usable_catalog_read(second):
         merged_extras = dict(extras_common)
         merged_extras.update(
             {
                 "alternate_fallback_used": True,
+                "vipomall_fallback_used": True,
                 "alternate_failed_domain": primary,
             }
         )
@@ -1221,23 +1084,14 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    from app.services.vipomall_source_stock import vipomall_gather_admin_batch_scan
-
-    fb_pid = None
-    anch = max(0, int(anchor_product_db_id or 0))
-    if anch > 0:
-        anchor_row = db.query(Product).filter(Product.id == anch).first()
-        if anchor_row is not None:
-            fb_pid = anchor_row.product_id
-    third = vipomall_gather_admin_batch_scan(db, seed_url=url, fallback_product_id=fb_pid)
+    third = _gather_platform_scan_attempt(db, seed_url=url, platform="pandamall")
     if _attempt_has_usable_catalog_read(third):
         merged_extras = dict(extras_common)
         merged_extras.update(
             {
-                "vipomall_fallback_used": True,
                 "alternate_fallback_used": True,
-                "alternate_failed_domain": primary,
-                "cssbuy_and_hibox_inconclusive": True,
+                "pandamall_fallback_used": True,
+                "alternate_failed_domain": "cssbuy+vipomall",
             }
         )
         return _finalize_scan_commit_and_serialise(
@@ -1247,46 +1101,42 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    det_a_raw = first.get("detail")
-    det_b_raw = second.get("detail")
-    det_a = (det_a_raw if isinstance(det_a_raw, str) else "") or ""
-    det_b = (det_b_raw if isinstance(det_b_raw, str) else "") or ""
-    det_a = det_a.strip()
-    det_b = det_b.strip()
-    rs_a = str(first.get("raw_status") or "—").strip()
-    rs_b = str(second.get("raw_status") or "—").strip()
-    if not det_a:
-        det_a = "(không có chi tiết)"
-    if not det_b:
-        det_b = "(không có chi tiết)"
-    canon = (str(second.get("canonical_url") or first.get("canonical_url") or "") or "").strip()
-    det_c_raw = third.get("detail")
-    det_c = (det_c_raw if isinstance(det_c_raw, str) else "") or ""
-    det_c = det_c.strip() or "(không có chi tiết)"
-    rs_c = str(third.get("raw_status") or "—").strip()
-    mega_detail = (
-        "CSSBuy, Hibox và Vipomall (1688) đều không đưa ra kết luận in_stock/out_of_stock rõ — "
-        "đã ghi trạng thái lỗi kiểm tra; nên xử lý chặn/captcha hoặc thiếu offerId 1688.\n\n"
-        f"[{primary.upper()}] raw_status={rs_a}\n{det_a}\n\n"
-        f"[{secondary.upper()}] raw_status={rs_b}\n{det_b}\n\n"
-        f"[VIPOMALL] raw_status={rs_c}\n{det_c}"
-    )
+    scans = [first, second, third]
+    labels = ["CSSBUY", "VIPOMALL", "PANDAMALL"]
+    all_blocked = all(str(s.get("raw_status") or "").strip().lower() == "blocked" for s in scans)
+    chunks = []
+    for lab, s in zip(labels, scans):
+        det = (s.get("detail") if isinstance(s.get("detail"), str) else "") or "(không có chi tiết)"
+        rs = str(s.get("raw_status") or "—").strip()
+        chunks.append(f"[{lab}] raw_status={rs}\n{det.strip()}")
+    canon = (
+        str(third.get("canonical_url") or second.get("canonical_url") or first.get("canonical_url") or "") or ""
+    ).strip()
+    if all_blocked:
+        mega_detail = (
+            "CSSBuy, Vipomall và PandaMall đều bị Cloudflare/CAPTCHA — dừng.\n\n" + "\n\n".join(chunks)
+        )
+        raw_st = "blocked"
+    else:
+        mega_detail = (
+            "CSSBuy, Vipomall và PandaMall đều không đưa ra kết luận in_stock/out_of_stock rõ.\n\n"
+            + "\n\n".join(chunks)
+        )
+        raw_st = "dual_fetch_error"
     attempts = [
-        {"domain": primary, "raw_status": first.get("raw_status"), "detail": first.get("detail")},
-        {"domain": secondary, "raw_status": second.get("raw_status"), "detail": second.get("detail")},
-        {"domain": "vipomall", "raw_status": third.get("raw_status"), "detail": third.get("detail")},
+        {"domain": "cssbuy", "raw_status": first.get("raw_status"), "detail": first.get("detail")},
+        {"domain": "vipomall", "raw_status": second.get("raw_status"), "detail": second.get("detail")},
+        {"domain": "pandamall", "raw_status": third.get("raw_status"), "detail": third.get("detail")},
     ]
     merged_warns = list(
-        (first.get("warnings") or [])
-        + (second.get("warnings") or [])
-        + (third.get("warnings") or [])
+        (first.get("warnings") or []) + (second.get("warnings") or []) + (third.get("warnings") or [])
     )[:40]
     return _finalize_scan_commit_and_serialise(
         db,
         computed={
             "canonical_url": canon,
-            "domain": f"{primary}+{secondary}",
-            "raw_status": "dual_fetch_error",
+            "domain": "cssbuy+vipomall+pandamall",
+            "raw_status": raw_st,
             "classified_out_of_stock": False,
             "detail": mega_detail,
             "warnings": merged_warns,
@@ -1297,6 +1147,7 @@ def run_admin_source_url_scan(
             "dual_attempts": attempts,
             "alternate_sequence_index": int(alternate_sequence_index),
             "alternate_primary_domain": primary,
+            "cssbuy_and_vipomall_inconclusive": True,
         },
         anchor_product_db_id=anchor_product_db_id or None,
     )

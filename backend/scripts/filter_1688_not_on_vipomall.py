@@ -1,8 +1,9 @@
 """
-Lọc offer 1688 **chưa có PDP thật** trên vipomall.vn, xuất Excel import Hibox.
+Lọc offer 1688 **chưa có PDP thật** trên vipomall.vn, xuất Excel import Vipomall.
 
 Đầu vào: .xlsx giống batch admin (cột Link / Link SP + Giá Tệ / China price).
-Đầu ra: chỉ các dòng chưa có trên Vipomall; cột Link đổi sang https://hibox.mn/v/abb-{offerId}.
+Đầu ra: chỉ các dòng chưa có trên Vipomall; cột Link đổi sang
+https://vipomall.vn/san-pham/{offerId}?platform_type=10.
 
 Chạy từ thư mục backend (cần Playwright):
 
@@ -15,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import pandas as pd
 
@@ -24,13 +25,9 @@ if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
 
 from app.services.import_1688_scraper import extract_offer_id
-from app.services.import_hibox_scraper import normalize_product_import_url
+from app.services.import_source_ids import normalize_product_import_url
 from app.services.import_link_excel_batch import parse_link_import_excel
-from app.services.vipomall_source_stock import probe_vipomall_1688_offer_listed
-
-
-def _hibox_url_for_offer(offer_id: str) -> str:
-    return f"https://hibox.mn/v/abb-{offer_id}"
+from app.services.vipomall_source_stock import build_vipomall_1688_pdp_url, probe_vipomall_1688_offer_listed
 
 
 def filter_rows(parsed: List[Dict[str, Any]], *, skip_probe: bool) -> tuple[List[Dict[str, Any]], List[str]]:
@@ -54,9 +51,10 @@ def filter_rows(parsed: List[Dict[str, Any]], *, skip_probe: bool) -> tuple[List
         if detail:
             notes.append(f"Dòng {row_no}: offer {oid} — Vipomall probe: {detail}")
         out = dict(it)
-        out["url"] = _hibox_url_for_offer(oid)
+        vip_url = build_vipomall_1688_pdp_url(oid) or f"https://vipomall.vn/san-pham/{oid}?platform_type=10"
+        out["url"] = vip_url
         out["offer_id_1688"] = oid
-        out["vipomall_url"] = f"https://vipomall.vn/san-pham/{oid}?platform_type=10"
+        out["vipomall_url"] = vip_url
         kept.append(out)
     return kept, notes
 
@@ -88,13 +86,13 @@ def _write_listing_excel(rows: List[Dict[str, Any]], out_path: Path) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Lọc offer 1688 chưa có trên vipomall.vn → Excel Hibox.")
+    ap = argparse.ArgumentParser(description="Lọc offer 1688 chưa có trên vipomall.vn → Excel Vipomall.")
     ap.add_argument("input_xlsx", type=Path, help="File .xlsx có cột Link + Giá Tệ")
     ap.add_argument("-o", "--output", type=Path, required=True, help="File .xlsx đầu ra (import admin)")
     ap.add_argument(
         "--skip-vipomall-probe",
         action="store_true",
-        help="Không mở Vipomall (giữ mọi dòng có offerId, chỉ đổi link sang Hibox).",
+        help="Không mở Vipomall (giữ mọi dòng có offerId, chỉ đổi link sang Vipomall PDP).",
     )
     args = ap.parse_args()
     inp = args.input_xlsx.resolve()
@@ -107,10 +105,7 @@ def main() -> None:
 
     out = args.output.resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
-    if kept:
-        _write_listing_excel(kept, out)
-    else:
-        _write_listing_excel([], out)
+    _write_listing_excel(kept, out)
 
     print(f"Đã đọc {len(parsed)} dòng link hợp lệ.")
     print(f"Giữ {len(kept)} dòng chưa có (hoặc không xác nhận được) trên Vipomall.")

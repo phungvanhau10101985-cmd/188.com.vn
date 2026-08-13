@@ -137,7 +137,7 @@ async function proxy(req: NextRequest, segments: string[]): Promise<NextResponse
       (pathSuffix.includes('/admin/users/import-file') && req.method === 'POST') ||
       (pathSuffix.includes('/newsletter/admin/import-file') && req.method === 'POST') ||
       (pathSuffix.includes('/newsletter/admin/import-text') && req.method === 'POST');
-      /** Admin kiểm tra nguồn: scrape Hibox có thể > 2 phút — phải > timeout fetchAdmin (240s). */
+      /** Admin kiểm tra nguồn: scrape CSSBuy / Vipomall có thể > 2 phút — phải > timeout fetchAdmin (240s). */
     const adminSourceHeavy =
       pathSuffix.includes('/admin/source-stock-batch/run-next-from-db') ||
       pathSuffix.includes('/admin/source-stock-batch/run') ||

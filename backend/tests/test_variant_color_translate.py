@@ -1,11 +1,11 @@
-"""Kiểm tra nhận diện nhãn màu cần dịch (Hibox / 1688 Latin + SKU)."""
+"""Kiểm tra nhận diện nhãn màu cần dịch (Latin + SKU / CJK)."""
 from app.services.variant_color_translate import (
     _needs_translate,
     variant_color_translate_enabled,
 )
 
 
-def test_needs_translate_hibox_size_color_sku():
+def test_needs_translate_size_color_sku():
     assert _needs_translate("15 Black Suede (91536)") is True
     assert _needs_translate("15 Champagne Gold (91536)") is True
     assert _needs_translate("12 Black Suede (18836)") is True
@@ -26,16 +26,16 @@ def test_needs_translate_pure_size_skipped():
     assert _needs_translate("XL") is False
 
 
-def test_hibox_source_always_enables_translate_when_api_key():
+def test_source_alone_does_not_force_translate_without_flags():
     from unittest.mock import patch
     from app.core import config as config_mod
 
     with patch.object(config_mod.settings, "DEEPSEEK_API_KEY", "test-key"), patch.object(
         config_mod.settings, "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", False
     ), patch.object(config_mod.settings, "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", False):
-        pd = {"product_info": {"variants": {"source": "hibox"}}}
-        assert variant_color_translate_enabled(product_data=pd) is True
-        assert variant_color_translate_enabled(import_source="hibox") is True
+        pd = {"product_info": {"variants": {"source": "vipomall"}}}
+        assert variant_color_translate_enabled(product_data=pd) is False
+        assert variant_color_translate_enabled(import_source="vipomall") is False
 
 
 def test_excel_import_skips_deepseek_when_only_import_link_taxonomy():

@@ -307,3 +307,27 @@ def test_pandamall_detail_images_strip_cache_bust_query():
     assert len(detail) == 3
     assert all("?__r__=" not in u for u in detail)
     assert detail[1].endswith("O1CN01bDLH1h1fRQWkELLbt_!!2210284314003-0-cib.jpg")
+
+
+class _FakePandaLoginSkipPage:
+    url = "https://pandamall.vn/1688/detail/1"
+
+    def locator(self, *_a, **_k):
+        class _C:
+            def count(self):
+                return 0
+
+        return _C()
+
+    def get_by_placeholder(self, *_a, **_k):
+        class _C:
+            def count(self):
+                return 0
+
+        return _C()
+
+
+def test_try_pandamall_auto_login_skips_when_no_form():
+    from app.services.import_pandamall_scraper import try_pandamall_playwright_auto_login
+
+    assert try_pandamall_playwright_auto_login(_FakePandaLoginSkipPage(), _FakePandaLoginSkipPage.url) is False

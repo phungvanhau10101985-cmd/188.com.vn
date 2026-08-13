@@ -3,9 +3,7 @@
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import {
-  DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING,
   DEFAULT_VND_PER_CNY_FOR_LISTING_ESTIMATE,
-  applyHiboxMntRateToRow,
   estimateListingVndRounded,
   buildListingImportPriceOverlay,
   extractOfferId1688FromHref,
@@ -30,8 +28,6 @@ import {
   isListingDraftPublishReady,
 } from '@/lib/listing-draft-publish-validation';
 
-/** Lưu ô «₮ / 1 CN¥» (quy Hibox → tệ). */
-const TAOBAO_CARDS_PARSE_MNT_PER_CNY_LS_KEY = 'admin.products.taobao_cards_parse.mnt_per_cny';
 /** Lưu ô «Tỷ giá» (chuỗi gõ tay) để lần sau không phải nhập lại. */
 const TAOBAO_CARDS_PARSE_VND_PER_CNY_LS_KEY = 'admin.products.taobao_cards_parse.vnd_per_cny';
 /** Lưu queue_token hàng đợi import trên server (theo dõi / tạm dừng / CSV). */
@@ -146,19 +142,18 @@ function formatApproxCnyCell(n: number): string {
   return new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 }
 
-/** Đủ dữ liệu các cột chính trong bảng (loại dòng chỉ có giá/ảnh nhưng thiếu ID, link, shop…). Lưới Hibox không có shop/tag trong DOM. */
+/** Đủ dữ liệu các cột chính trong bảng (loại dòng chỉ có giá/ảnh nhưng thiếu ID, link, shop…). Bảng text 1688 không có shop/tag/ảnh trong paste. */
 function isListingRowComplete(r: ParsedTaobaoCardRow, vndPerCny: number): boolean {
   const nonEmpty = (x: string) => (x || '').trim().length > 0;
-  const fromHiboxGrid =
-    r.parsed_source === 'hibox_grid' || r.parsed_source === '1688_text_table';
+  const from1688Text = r.parsed_source === '1688_text_table';
   if (!nonEmpty(r.item_id)) return false;
   if (!nonEmpty(r.item_url)) return false;
-  if (!fromHiboxGrid) {
+  if (!from1688Text) {
     if (!nonEmpty(r.shop_name)) return false;
     if (!nonEmpty(r.tags)) return false;
   }
   if (!nonEmpty(r.title)) return false;
-  if (r.parsed_source !== '1688_text_table' && !nonEmpty(r.main_image_url)) return false;
+  if (!from1688Text && !nonEmpty(r.main_image_url)) return false;
   if (!nonEmpty(r.price_raw)) return false;
   if (estimateListingVndRounded(r, vndPerCny) == null) return false;
   return true;
@@ -306,32 +301,6 @@ function stableListingRowKey(r: ParsedTaobaoCardRow): string {
   return r.item_id ? `row-${r.row}-id-${r.item_id}` : `${r.row}-${r.main_image_url.slice(0, 64)}`;
 }
 
-/**
- * URL Hibox để backend import (Playwright): 1688 → `abb-{offerId}`, Taobao/Tmall → slug số.
- * Khớp mẫu `export_hibox_item_excel.py` / ví dụ nguồn dự án.
- */
-function listingRowToHiboxImportUrl(r: ParsedTaobaoCardRow): string | null {
-  const id = (r.item_id || '').trim();
-  const u = (r.item_url || '').trim().toLowerCase();
-
-  const onlyDigits = (s: string) => s.replace(/\D/g, '');
-
-  if (/^a\d+$/i.test(id)) return `https://hibox.mn/v/abb-${id.slice(1)}`;
-  if (/^t\d+$/i.test(id)) return `https://hibox.mn/v/${id.slice(1)}`;
-
-  if (/^\d+$/.test(id)) {
-    if (u.includes('1688.com')) return `https://hibox.mn/v/abb-${id}`;
-    if (u.includes('taobao') || u.includes('tmall')) return `https://hibox.mn/v/${id}`;
-    return null;
-  }
-
-  const digs = onlyDigits(id);
-  if (!digs) return null;
-  if (u.includes('1688.com')) return `https://hibox.mn/v/abb-${digs}`;
-  if (u.includes('taobao') || u.includes('tmall')) return `https://hibox.mn/v/${digs}`;
-  return null;
-}
-
 /** Offer id: từ href 1688 hoặc ID SP dạng A+digits. */
 function pick1688OfferIdFromListingRow(r: ParsedTaobaoCardRow): string | null {
   const fromHref = extractOfferId1688FromHref(r.item_url || '');
@@ -399,21 +368,19 @@ function listingRowToPandamallImportUrl(r: ParsedTaobaoCardRow): string | null {
   return null;
 }
 
-type ListingImportSource = 'hibox' | 'vipomall' | 'pandamall';
-type ListingImportFetchTarget = 'auto' | 'hibox' | 'vipomall' | 'pandamall';
+type ListingImportSource = 'vipomall' | 'pandamall';
+type ListingImportFetchTarget = 'auto' | 'vipomall' | 'pandamall';
 
 function listingFetchTargetShortLabel(target: ListingImportFetchTarget): string {
-  if (target === 'hibox') return 'Hibox';
   if (target === 'vipomall') return 'Vipomall (1688 + Taobao/Tmall)';
   if (target === 'pandamall') return 'PandaMall (1688 + Taobao/Tmall)';
-  return 'tự động Hibox / Vipomall / PandaMall';
+  return 'tự động Vipomall / PandaMall';
 }
 
 function listingFetchTargetQueueLabel(target: ListingImportFetchTarget): string {
-  if (target === 'hibox') return 'qua Hibox';
   if (target === 'vipomall') return 'qua Vipomall (1688/Taobao/Tmall)';
   if (target === 'pandamall') return 'qua PandaMall (1688/Taobao/Tmall)';
-  return 'tự chọn Hibox, Vipomall hoặc PandaMall (1688/Taobao/Tmall)';
+  return 'tự chọn Vipomall hoặc PandaMall (1688/Taobao/Tmall)';
 }
 
 function listingRowSkipReasonForFetchTarget(
@@ -427,10 +394,7 @@ function listingRowSkipReasonForFetchTarget(
   if (target === 'pandamall') {
     return `${id}: không ghép được link PandaMall (cần offer 1688 / Taobao·Tmall / ID A+ hoặc T+số).`;
   }
-  if (target === 'hibox') {
-    return `${id}: không ghép được link Hibox (cần link 1688/Taobao/Tmall và mã sản phẩm).`;
-  }
-  return `${id}: không ghép được URL import — thử đổi «Trang lấy dữ liệu» (Hibox / Vipomall / PandaMall).`;
+  return `${id}: không ghép được URL import — thử đổi «Trang lấy dữ liệu» (Vipomall / PandaMall).`;
 }
 
 /** Ghép URL + source API theo dropdown (khớp luồng Excel batch / backend). */
@@ -438,14 +402,9 @@ function resolveListingImportTask(
   r: ParsedTaobaoCardRow,
   target: ListingImportFetchTarget,
 ): { url: string; source: ListingImportSource } | null {
-  const hiboxUrl = listingRowToHiboxImportUrl(r);
   const vipomallUrl = listingRowToVipomallImportUrl(r);
   const pandamallUrl = listingRowToPandamallImportUrl(r);
 
-  if (target === 'hibox') {
-    if (!hiboxUrl) return null;
-    return { url: hiboxUrl, source: 'hibox' };
-  }
   if (target === 'vipomall') {
     if (!vipomallUrl) return null;
     return { url: vipomallUrl, source: 'vipomall' };
@@ -454,7 +413,6 @@ function resolveListingImportTask(
     if (!pandamallUrl) return null;
     return { url: pandamallUrl, source: 'pandamall' };
   }
-  if (hiboxUrl) return { url: hiboxUrl, source: 'hibox' };
   if (vipomallUrl) return { url: vipomallUrl, source: 'vipomall' };
   if (pandamallUrl) return { url: pandamallUrl, source: 'pandamall' };
   return null;
@@ -538,35 +496,13 @@ export default function TaobaoCardsParsePage() {
     }
   }, []);
 
-  const [mntPerCnyInput, setMntPerCnyInput] = useState(() =>
-    String(DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING),
-  );
-
-  useEffect(() => {
-    try {
-      const s = localStorage.getItem(TAOBAO_CARDS_PARSE_MNT_PER_CNY_LS_KEY);
-      if (s !== null && s.trim() !== '') setMntPerCnyInput(s);
-    } catch {
-      /* noop */
-    }
-  }, []);
-
-  const persistMntPerCnyInput = useCallback((next: string) => {
-    setMntPerCnyInput(next);
-    try {
-      localStorage.setItem(TAOBAO_CARDS_PARSE_MNT_PER_CNY_LS_KEY, next);
-    } catch {
-      /* noop */
-    }
-  }, []);
-
   const [importFetchTarget, setImportFetchTarget] = useState<ListingImportFetchTarget>('auto');
 
   useEffect(() => {
     try {
       const s = localStorage.getItem(TAOBAO_CARDS_PARSE_IMPORT_TARGET_LS_KEY);
-      if (s === '1688') setImportFetchTarget('vipomall');
-      else if (s === 'auto' || s === 'hibox' || s === 'vipomall' || s === 'pandamall') setImportFetchTarget(s);
+      if (s === 'auto' || s === 'vipomall' || s === 'pandamall') setImportFetchTarget(s);
+      else if (s) setImportFetchTarget('vipomall'); // legacy target → Vipomall
     } catch {
       /* noop */
     }
@@ -829,22 +765,15 @@ export default function TaobaoCardsParsePage() {
     return n;
   }, [rateInput]);
 
-  /** Số đơn vị ₮ (tugrik Mông Cổ) cho 1 CN¥ — chỉ ảnh hưởng dòng parse từ lưới Hibox. */
-  const effectiveMntPerCny = useMemo(() => {
-    const n = Number(String(mntPerCnyInput ?? '').trim().replace(/\s+/g, '').replace(',', '.'));
-    if (!Number.isFinite(n) || n <= 0) return DEFAULT_MNT_PER_CNY_FOR_HIBOX_LISTING;
-    return n;
-  }, [mntPerCnyInput]);
-
   const listingRows = useMemo(() => {
     const fb = fallbackShopTrimmed;
     return rows.map((r) => {
-      let x = applyHiboxMntRateToRow(r, effectiveMntPerCny);
+      let x = r;
       if (fb && !(x.shop_name || '').trim())
         x = { ...x, shop_name: fb, shop_name_chinese: (x.shop_name_chinese || '').trim() || fb };
       return x;
     });
-  }, [rows, effectiveMntPerCny, fallbackShopTrimmed]);
+  }, [rows, fallbackShopTrimmed]);
 
   /** Sau lọc đủ cột + shop + tiêu đề + giá (trước lọc DB). */
   const preDbFilteredRows = useMemo(() => {
@@ -969,7 +898,7 @@ export default function TaobaoCardsParsePage() {
         <>
           yêu cầu đủ các cột:{' '}
           <span className="font-medium">
-            ID SP, link SP, tiêu đề, giá Tệ và ~VNĐ (ảnh bắt buộc trừ bảng text 1688; shop/tag không bắt buộc với Hibox / bảng text 1688)
+            ID SP, link SP, tiêu đề, giá Tệ và ~VNĐ (ảnh bắt buộc trừ bảng text 1688; shop/tag không bắt buộc với bảng text 1688)
           </span>
         </>,
       );
@@ -2512,10 +2441,7 @@ export default function TaobaoCardsParsePage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">HTML listing → một dòng một sản phẩm</h1>
         <p className="text-sm text-slate-600 mt-1 max-w-3xl">
-          Dán HTML (hoặc outerHTML của vùng danh sách) từ trang Taobao/Tmall / 1688 /{' '}
-          <strong>lưới sản phẩm Hibox</strong> (link{' '}
-          <code className="text-xs bg-slate-100 px-1 rounded">/v/abb-…</code>{' '}
-          hoặc <code className="text-xs bg-slate-100 px-1 rounded">/v/631214062812</code>), hoặc{' '}
+          Dán HTML (hoặc outerHTML của vùng danh sách) từ trang Taobao/Tmall / 1688, hoặc{' '}
           <strong>bảng text xuất từ seller 1688</strong> (cột{' '}
           <span lang="zh-Hans">商品信息</span>, dòng <code className="text-xs bg-slate-100 px-1 rounded">ID: …</code>, hàng tab giá){' '}
           — công cụ khớp{' '}
@@ -2525,17 +2451,14 @@ export default function TaobaoCardsParsePage() {
           một khối có giá/tiêu đề.{' '}
           Mỗi card → một hàng: ID sản phẩm, link SP, ảnh chính, tiêu đề, tên shop, tag, giá nhân dân tệ, cột quy đổi{' '}
           ~VNĐ ≈ làm tròn(CN¥ × hệ số lưới × tỷ giá ô «Tỷ giá»; VNĐ / 1 CN¥). Ô <strong>Shop mặc định</strong> chỉ cho lô hiện tại — làm trống mỗi lần «Parse → bảng» (mỗi lô shop có thể khác).
-          Ký hiệu <strong>₮</strong> là <strong>tugrik Mông Cổ (MNT)</strong>. Giá lưới Hibox là MNT (vd.{' '}
-          <code className="text-xs bg-slate-100 px-1 rounded">89.000 ₮</code> → nối chữ số thành 89000); quy sang CN¥ bằng ô{' '}
-          <strong>₮ / 1 CN¥</strong> trên toolbar, rồi mới nhân hệ số lưới và tỷ giá VNĐ.
           CSV thêm các cột price_cny_approx, cny_exchange_multiplier, vnd_per_cny_used, approx_vnd.
           {' '}
           <span className="text-slate-700">
-            Mặc định chỉ hiện các dòng đủ cột trong bảng (với Hibox / bảng text 1688 không bắt buộc shop/tag/ảnh); bỏ chọn để xem cả dòng thiếu dữ liệu.
+            Mặc định chỉ hiện các dòng đủ cột trong bảng (với bảng text 1688 không bắt buộc shop/tag/ảnh); bỏ chọn để xem cả dòng thiếu dữ liệu.
             Sau đó có thể chỉ giữ các ID chưa có trên shop và chưa có nháp crawl xong (bỏ chọn để xem cả lô).
           </span>{' '}
           <span className="text-slate-700">
-            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Hibox / Vipomall / PandaMall / tự động) và bấm «Lấy thông tin»
+            Chọn một hoặc nhiều dòng rồi chọn <strong>Trang lấy dữ liệu</strong> (Vipomall / PandaMall / tự động) và bấm «Lấy thông tin»
             — cửa sổ sẽ hỏi <strong>thêm vào đợt đang mở</strong> hay <strong>tạo đợt / job mới</strong>. Vipomall: offer 1688 →{' '}
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=10</code>; Taobao/Tmall / ID T+số →{' '}
             <code className="text-xs bg-slate-100 px-1 rounded">?platform_type=21</code>. Server xử lý link{' '}
@@ -2547,7 +2470,7 @@ export default function TaobaoCardsParsePage() {
 
       <textarea
         className="w-full min-h-[200px] rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
-        placeholder="Dán HTML hoặc bảng text 1688 (商品信息 / ID: … / hàng tab giá) — Taobao / 1688 / lưới Hibox…"
+        placeholder="Dán HTML hoặc bảng text 1688 (商品信息 / ID: … / hàng tab giá) — Taobao / 1688…"
         value={raw}
         onChange={(e) => setRaw(e.target.value)}
         aria-label="HTML listing Taobao để parse"
@@ -2584,11 +2507,10 @@ export default function TaobaoCardsParsePage() {
             onChange={(e) => persistImportFetchTarget(e.target.value as ListingImportFetchTarget)}
             disabled={enqueueSubmitting}
             className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 shadow-sm disabled:opacity-60 max-w-[min(100%,15rem)]"
-            aria-label="Chọn trang để lấy thông tin: Hibox, Vipomall hoặc PandaMall (1688 + Taobao/Tmall)"
-            title="Tự động: ưu tiên Hibox → Vipomall → PandaMall. PandaMall: pandamall.vn/1688|taobao/detail/{id}."
+            aria-label="Chọn trang để lấy thông tin: Vipomall hoặc PandaMall (1688 + Taobao/Tmall)"
+            title="Tự động: ưu tiên Vipomall → PandaMall. PandaMall: pandamall.vn/1688|taobao/detail/{id}."
           >
-            <option value="auto">Tự động (Hibox → Vipomall → PandaMall)</option>
-            <option value="hibox">Hibox (hibox.mn)</option>
+            <option value="auto">Tự động (Vipomall → PandaMall)</option>
             <option value="vipomall">Vipomall (vipomall.vn) — 1688 + Taobao/Tmall</option>
             <option value="pandamall">PandaMall (pandamall.vn) — 1688 + Taobao/Tmall</option>
           </select>
@@ -2654,7 +2576,7 @@ export default function TaobaoCardsParsePage() {
             onChange={(e) => setOnlyCompleteListingRows(e.target.checked)}
             disabled={rows.length === 0}
             className="rounded border-slate-300"
-            title="Ẩn các dòng thiếu ID, link, tiêu đề, giá Tệ hoặc không tính được ~VNĐ. Với Hibox không yêu cầu shop/tag; với bảng text 1688 không yêu cầu shop/tag/ảnh."
+            title="Ẩn các dòng thiếu ID, link, tiêu đề, giá Tệ hoặc không tính được ~VNĐ. Với bảng text 1688 không yêu cầu shop/tag/ảnh."
             aria-label="Chỉ hiện dòng có đủ dữ liệu các cột trong bảng"
           />
           <span className="text-sm text-slate-700 whitespace-nowrap">Chỉ dòng đủ dữ liệu</span>
@@ -2672,22 +2594,9 @@ export default function TaobaoCardsParsePage() {
             className="w-[6.75rem] tabular-nums rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-100 disabled:text-slate-400"
           />
         </label>
-        <label className="flex items-center gap-2 text-sm shrink-0" title="Chỉ dùng cho dòng parse từ lưới Hibox (giá hiển thị là ₮ MNT). CN¥ ≈ số MNT (nối chữ số) ÷ ô này.">
-          <span className="text-slate-600 whitespace-nowrap hidden sm:inline">₮ / 1 CN¥</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={mntPerCnyInput}
-            onChange={(e) => persistMntPerCnyInput(e.target.value)}
-            placeholder="MNT / 1¥"
-            autoComplete="off"
-            aria-label="Tỷ giá tugrik Mông Cổ trên một nhân dân tệ — quy đổi giá Hibox sang CN¥ trước khi tính ~VNĐ"
-            className="w-[5.5rem] tabular-nums rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-          />
-        </label>
         <label
           className="flex items-center gap-2 text-sm shrink-0 min-w-[12rem] sm:min-w-[18rem] max-w-[22rem]"
-          title="Khi parse không có tên shop (vd. Hibox, bảng text 1688), điền tên shop Trung Quốc để hiển thị và CSV dùng giá trị này; dòng đã có shop trong HTML giữ nguyên. Mỗi lần «Parse → bảng» ô được làm trống (shop khác mỗi lô)."
+          title="Khi parse không có tên shop (vd. bảng text 1688), điền tên shop Trung Quốc để hiển thị và CSV dùng giá trị này; dòng đã có shop trong HTML giữ nguyên. Mỗi lần «Parse → bảng» ô được làm trống (shop khác mỗi lô)."
         >
           <span className="text-slate-600 whitespace-nowrap hidden sm:inline">Shop mặc định</span>
           <input
@@ -3174,7 +3083,7 @@ export default function TaobaoCardsParsePage() {
                 <th className="p-2 min-w-[120px]" title="shop_name_chinese">
                   Shop Trung Quốc
                 </th>
-                <th className="p-2 min-w-[120px]" title="Taobao/1688 HTML & bảng text 1688: CN¥ từ cột giá. Hibox: CN¥ sau khi quy từ ₮ (MNT) bằng ô ₮/CN¥.">
+                <th className="p-2 min-w-[120px]" title="Taobao/1688 HTML & bảng text 1688: CN¥ từ cột giá.">
                   Giá Tệ
                 </th>
                 <th className="p-2 min-w-[200px]" title="chinese_name">
@@ -3236,21 +3145,12 @@ export default function TaobaoCardsParsePage() {
                     <td
                       className="p-2 font-mono text-xs text-slate-700 break-all max-w-[200px]"
                       title={
-                        r.parsed_source === 'hibox_grid'
-                          ? `₮ MNT ${r.price_hibox_mnt_integer ?? '—'} (${r.price_raw || '—'}) ÷ ${effectiveMntPerCny} → CN¥`
-                          : r.parsed_source === '1688_text_table'
-                            ? `Giá cột từ bảng text 1688: ${r.price_raw || '—'} → CN¥`
-                            : undefined
+                        r.parsed_source === '1688_text_table'
+                          ? `Giá cột từ bảng text 1688: ${r.price_raw || '—'} → CN¥`
+                          : undefined
                       }
                     >
-                      {r.parsed_source === 'hibox_grid' && r.price_cny_approx != null ? (
-                        <span className="inline-flex flex-col gap-0.5">
-                          <span className="tabular-nums text-slate-900">{formatApproxCnyCell(r.price_cny_approx)} ¥</span>
-                          <span className="text-[10px] text-slate-500 font-normal whitespace-nowrap">
-                            hiển thị {r.price_raw || '—'}
-                          </span>
-                        </span>
-                      ) : r.parsed_source === '1688_text_table' && r.price_cny_approx != null ? (
+                      {r.parsed_source === '1688_text_table' && r.price_cny_approx != null ? (
                         <span className="tabular-nums text-slate-900">{formatApproxCnyCell(r.price_cny_approx)} ¥</span>
                       ) : (
                         r.price_raw || '—'
@@ -3275,11 +3175,9 @@ export default function TaobaoCardsParsePage() {
                       className="p-2 text-xs text-slate-800 whitespace-nowrap"
                       title={
                         r.price_cny_approx != null && r.cny_exchange_multiplier != null
-                          ? r.parsed_source === 'hibox_grid'
-                            ? `${r.price_hibox_mnt_integer ?? '—'} ₮ ÷ ${effectiveMntPerCny} → CN¥ ${r.price_cny_approx} × ${r.cny_exchange_multiplier} × ${effectiveRate} VNĐ/CN¥`
-                            : r.parsed_source === '1688_text_table'
-                              ? `CN¥ ${r.price_cny_approx} (cột giá bảng text) × ${r.cny_exchange_multiplier} × ${effectiveRate} VNĐ/CN¥`
-                              : `CN¥ ${r.price_cny_approx} × ${r.cny_exchange_multiplier} × ${effectiveRate} VNĐ/CN¥`
+                          ? r.parsed_source === '1688_text_table'
+                            ? `CN¥ ${r.price_cny_approx} (cột giá bảng text) × ${r.cny_exchange_multiplier} × ${effectiveRate} VNĐ/CN¥`
+                            : `CN¥ ${r.price_cny_approx} × ${r.cny_exchange_multiplier} × ${effectiveRate} VNĐ/CN¥`
                           : undefined
                       }
                     >

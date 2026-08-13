@@ -1,7 +1,7 @@
 """
 Fallback kiểm tra tồn nguồn qua PDP Vipomall (gương 1688).
 
-Chỉ áp dụng khi đã suy ra được offerId 1688 (link offer/Hibox abb-*/CSSBuy item-1688 hoặc mã A{offer}; vẫn hỗ trợ mã legacy A{offer}a188…).
+Chỉ áp dụng khi đã suy ra được offerId 1688 (link offer/abb-*/CSSBuy item-1688 hoặc mã A{offer}; vẫn hỗ trợ mã legacy A{offer}a188…).
 Tiêu chí: có nút / chữ «Thêm giỏ hàng» trong HTML tải về → còn hàng; không thấy → hết hàng nguồn.
 """
 
@@ -16,10 +16,10 @@ from urllib.request import HTTPCookieProcessor, build_opener
 
 from app.core.config import settings
 from app.services.import_1688_scraper import extract_offer_id
-from app.services.import_cssbuy_client import cssbuy_item_page_to_hibox_slug, is_cssbuy_item_url
-from app.services.import_hibox_scraper import (
-    extract_hibox_1688_offer_digits,
-    extract_hibox_slug,
+from app.services.import_cssbuy_client import cssbuy_item_page_to_item_slug
+from app.services.import_source_ids import (
+    extract_abb_offer_digits,
+    extract_legacy_mirror_slug,
     normalize_product_import_url,
 )
 
@@ -28,17 +28,38 @@ logger = logging.getLogger(__name__)
 _VIPOMALL_HOST_OK = re.compile(r"^(?:www\.)?vipomall\.vn$", re.I)
 _PRODUCT_ID_A_OFFER_RE = re.compile(r"^A(\d+)(?:a188.*)?$", re.I)
 
-_BLOCK_MARKERS = (
-    "captcha",
-    "验证码",
-    "cf-ray",
-    "cloudflare",
-    "attention required",
-    "access denied",
-    "blocked",
-    "forbidden",
-    "rate limit",
+_PDP_OK_MARKERS = (
+    "thêm giỏ hàng",
+    "them gio hang",
+    "cart_detail.svg",
+    "spn-color",
 )
+
+_VIPOMALL_PDP_PROBE_JS = """() => {
+  const html = document.documentElement ? document.documentElement.outerHTML : "";
+  const low = (html || "").toLowerCase();
+  const title = document.title || "";
+  const bodyText = (document.body && document.body.innerText) || "";
+  const pdpOk = ["thêm giỏ hàng", "cart_detail.svg", "spn-color", "mua ngay"].some(
+    (m) => low.includes(m) || bodyText.toLowerCase().includes(m)
+  );
+  const challenge = ["just a moment", "attention required", "cf-browser-verification", "verify you are human"].some(
+    (n) => title.toLowerCase().includes(n) || low.includes(n)
+  );
+  const cart = document.querySelector('button.button img[src*="cart_detail.svg"]')
+    || Array.from(document.querySelectorAll("button.button, span.spn-color, button")).find((el) =>
+      /thêm\\s*giỏ\\s*hàng/i.test(((el.innerText || "") + "").trim())
+    );
+  const buy = Array.from(document.querySelectorAll("button, a, span")).find((el) =>
+    /^mua ngay$/i.test(((el.innerText || "") + "").trim())
+  );
+  return {
+    blocked: !pdpOk && challenge,
+    cartFound: !!cart,
+    buyFound: !!buy,
+    ctaFound: !!(cart || buy),
+  };
+}"""
 
 
 VIPOMALL_PLATFORM_1688 = 10
@@ -110,7 +131,7 @@ def resolve_numeric_1688_offer_id_from_source_url(
     fallback_product_id: Optional[str] = None,
 ) -> Optional[str]:
     """
-    offerId thuần số từ URL nguồn (1688 / Hibox abb-* / cssbuy item-1688) hoặc từ product_id dạng A{offer}.
+    offerId thuần số từ URL nguồn (1688 / abb-* / cssbuy item-1688) hoặc từ product_id dạng A{offer}.
     Taobao/Tmall thuần (slug số, link item.taobao…) → None (không có PDP 1688 trên Vipomall theo offer).
     """
     norm = (normalize_product_import_url((url or "").strip()) or (url or "").strip()).strip()
@@ -122,17 +143,16 @@ def resolve_numeric_1688_offer_id_from_source_url(
     oid_url = extract_offer_id(norm)
     if oid_url and oid_url.isdigit():
         return oid_url
-    slug = extract_hibox_slug(norm)
+    slug = extract_legacy_mirror_slug(norm)
     if slug:
-        abb = extract_hibox_1688_offer_digits(slug)
+        abb = extract_abb_offer_digits(slug)
         if abb:
             return abb
-    if is_cssbuy_item_url(norm):
-        cs_slug = cssbuy_item_page_to_hibox_slug(norm)
-        if cs_slug:
-            abb = extract_hibox_1688_offer_digits(cs_slug)
-            if abb:
-                return abb
+    cs_slug = cssbuy_item_page_to_item_slug(norm)
+    if cs_slug:
+        abb = extract_abb_offer_digits(cs_slug)
+        if abb:
+            return abb
     raw_pid = (fallback_product_id or "").strip()
     m = _PRODUCT_ID_A_OFFER_RE.match(raw_pid)
     if m:
@@ -142,9 +162,21 @@ def resolve_numeric_1688_offer_id_from_source_url(
 
 def vipomall_html_suggests_blocked(html: str) -> bool:
     blob = re.sub(r"\s+", " ", (html or "").strip()[:120_000].lower())
+    if any(m in blob for m in _PDP_OK_MARKERS):
+        return False
     if len(blob) < 80:
         return True
-    return any(marker in blob for marker in _BLOCK_MARKERS)
+    return any(
+        marker in blob
+        for marker in (
+            "just a moment",
+            "attention required",
+            "cf-browser-verification",
+            "verify you are human",
+            "captcha",
+            "验证码",
+        )
+    )
 
 
 def vipomall_html_shows_add_to_cart_cta(html: str) -> bool:
@@ -159,7 +191,7 @@ def vipomall_html_shows_add_to_cart_cta(html: str) -> bool:
         return True
     if "th&ecirc;m giỏ h&agrave;ng" in low:
         return True
-    if "add-cart" in low and ("cart_detail.svg" in low or "giỏ hàng" in low):
+    if "cart_detail.svg" in low and ("button" in low or "giỏ hàng" in low or "spn-color" in low):
         return True
     if 'class="add-cart"' in low or "class='add-cart'" in low:
         return True
@@ -193,28 +225,126 @@ def fetch_vipomall_pdp_html(page_url: str, *, timeout: float = 60.0) -> Tuple[st
         return "", str(exc)[:900]
 
 
+def _evaluate_vipomall_pdp_stock_sync(page_url: str) -> Tuple[str, Optional[str], str]:
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        return "error", f"Thiếu Playwright để mở Vipomall: {exc}", "vipomall"
+
+    ua = getattr(settings, "IMPORT_1688_USER_AGENT", None) or (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    headless_raw = getattr(settings, "SOURCE_STOCK_CHECK_HEADLESS", True)
+    headless = str(headless_raw).strip().lower() not in {"0", "false", "no", "off"}
+    timeout_ms = max(8_000, int(getattr(settings, "SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS", 90_000) or 90_000))
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            context = browser.new_context(
+                viewport={"width": 1366, "height": 1000},
+                locale="vi-VN",
+                timezone_id="Asia/Ho_Chi_Minh",
+                user_agent=ua,
+            )
+            page = context.new_page()
+            try:
+                try:
+                    from app.services.import_scraper_cookies import seed_playwright_context_cookies
+
+                    seed_playwright_context_cookies(
+                        context, page, prefer_hosts={"vipomall.vn"}, target_url=page_url
+                    )
+                except Exception:
+                    pass
+                page.goto(page_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=min(20_000, timeout_ms))
+                except Exception:
+                    pass
+                page.wait_for_timeout(1_800)
+                html0 = page.content() or ""
+                if vipomall_html_suggests_blocked(html0) and not vipomall_html_shows_add_to_cart_cta(html0):
+                    title0 = ""
+                    try:
+                        title0 = page.title() or ""
+                    except Exception:
+                        pass
+                    if "just a moment" in title0.lower():
+                        return (
+                            "blocked",
+                            "Vipomall bị Cloudflare / CAPTCHA — fallback PandaMall.",
+                            "vipomall",
+                        )
+                try:
+                    page.locator("button.button, span.spn-color, img[src*='cart_detail.svg']").first.wait_for(
+                        state="visible", timeout=min(18_000, timeout_ms)
+                    )
+                except Exception:
+                    pass
+                snap = page.evaluate(_VIPOMALL_PDP_PROBE_JS)
+                html1 = page.content() or html0
+                if isinstance(snap, dict) and snap.get("blocked"):
+                    return (
+                        "blocked",
+                        "Vipomall bị Cloudflare / CAPTCHA — fallback PandaMall.",
+                        "vipomall",
+                    )
+                if (isinstance(snap, dict) and snap.get("ctaFound")) or vipomall_html_shows_add_to_cart_cta(html1):
+                    return "in_stock", None, "vipomall"
+                return (
+                    "out_of_stock",
+                    "Vipomall: không thấy nút «Thêm giỏ hàng» / «Mua ngay» — coi hết hàng.",
+                    "vipomall",
+                )
+            finally:
+                for cleanup in (page.close, context.close, browser.close):
+                    try:
+                        cleanup()
+                    except Exception:
+                        pass
+    except Exception as exc:
+        detail = str(exc).strip() or repr(exc)
+        low = detail.lower()
+        if any(n in low for n in ("captcha", "cloudflare", "cf-ray", "challenge", "access denied")):
+            return (
+                "blocked",
+                ("Vipomall bị chặn bảo mật / CAPTCHA / Cloudflare — fallback PandaMall. " + detail)[:1000],
+                "vipomall",
+            )
+        return "error", f"Lỗi Playwright/Vipomall: {detail}"[:1000], "vipomall"
+
+
 def evaluate_vipomall_1688_offer_stock(offer_id: str) -> Tuple[str, Optional[str], str]:
-    """
-    Trả (status, error, checked_via) với status in {in_stock, out_of_stock, blocked, error}.
-    """
+    """Playwright: nút «Thêm giỏ hàng» (cart_detail.svg) tải được → còn hàng, kể cả disabled."""
     url = build_vipomall_1688_pdp_url(offer_id)
     if not url:
         return "error", "Không có offerId 1688 hợp lệ để kiểm tra Vipomall.", "vipomall"
-    html, err = fetch_vipomall_pdp_html(url)
-    if err:
-        return "error", f"Vipomall: không tải được PDP ({err}).", "vipomall"
-    if vipomall_html_suggests_blocked(html):
-        return (
-            "blocked",
-            "Vipomall: phản hồi giống trang chặn/CAPTCHA hoặc HTML quá ngắn — chưa đọc được PDP.",
-            "vipomall",
+    from app.services.import_playwright_dispatch import run_import_playwright_sync
+
+    timeout_sec = max(30.0, (int(getattr(settings, "SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS", 90_000) or 90_000) / 1000.0) + 45.0)
+    return run_import_playwright_sync(lambda: _evaluate_vipomall_pdp_stock_sync(url), timeout_sec=timeout_sec)
+
+
+def evaluate_vipomall_source_stock_from_url(
+    raw_url: str, *, fallback_product_id: Optional[str] = None
+) -> Tuple[str, Optional[str], str]:
+    from app.services.import_batch_url_coercion import FETCH_TARGET_VIPOMALL, coerce_url_for_excel_batch_import
+
+    page, err = coerce_url_for_excel_batch_import((raw_url or "").strip(), FETCH_TARGET_VIPOMALL)
+    if err or not (page or "").strip():
+        oid = resolve_numeric_1688_offer_id_from_source_url(
+            raw_url, fallback_product_id=fallback_product_id
         )
-    if vipomall_html_shows_add_to_cart_cta(html):
-        return "in_stock", None, "vipomall"
-    return (
-        "out_of_stock",
-        "Vipomall: không thấy nút/chữ «Thêm giỏ hàng» trên PDP — coi hết hàng nguồn (1688).",
-        "vipomall",
+        if not oid:
+            return "error", f"Không quy đổi được sang Vipomall: {err or 'thiếu offerId'}."[:1000], "vipomall"
+        page = build_vipomall_1688_pdp_url(oid)
+    from app.services.import_playwright_dispatch import run_import_playwright_sync
+
+    timeout_sec = max(30.0, (int(getattr(settings, "SOURCE_STOCK_CHECK_PLAYWRIGHT_TIMEOUT_MS", 90_000) or 90_000) / 1000.0) + 45.0)
+    return run_import_playwright_sync(
+        lambda: _evaluate_vipomall_pdp_stock_sync((page or "").strip()),
+        timeout_sec=timeout_sec,
     )
 
 
@@ -227,7 +357,7 @@ def vipomall_gather_admin_batch_scan(
     """
     Cùng dạng trả về với _gather_platform_scan_attempt để ghép dual-fallback admin batch.
     """
-    from app.services.admin_source_stock_batch import _find_products_for_hibox_slug
+    from app.services.admin_source_stock_batch import _find_products_for_item_slug
     normalized_in = normalize_product_import_url((seed_url or "").strip())
     canonical_url = (normalized_in or (seed_url or "").strip()).strip()
     oid = resolve_numeric_1688_offer_id_from_source_url(
@@ -239,13 +369,13 @@ def vipomall_gather_admin_batch_scan(
             "domain": "vipomall",
             "raw_status": "bad_url",
             "classified_out_of_stock": False,
-            "detail": "Không suy ra được offerId 1688 — không thể kiểm tra qua Vipomall (chỉ hỗ trợ link 1688 / Hibox abb-* / CSSBuy item-1688 hoặc mã A{offer}).",
+            "detail": "Không suy ra được offerId 1688 — không thể kiểm tra qua Vipomall (chỉ hỗ trợ link 1688 / abb-* / CSSBuy item-1688 hoặc mã A{offer}).",
             "warnings": [],
             "matched_orm": [],
         }
 
     vm_url = build_vipomall_1688_pdp_url(oid)
-    matched: List[Any] = list(_find_products_for_hibox_slug(db, f"abb-{oid}"))
+    matched: List[Any] = list(_find_products_for_item_slug(db, f"abb-{oid}"))
     st, err, _via = evaluate_vipomall_1688_offer_stock(oid)
     if st == "in_stock":
         return {

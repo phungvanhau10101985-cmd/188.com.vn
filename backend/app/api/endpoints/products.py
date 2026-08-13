@@ -128,16 +128,16 @@ def _resolve_storefront_product(db: Session, key: str):
 
 class AdminSourceStockBatchBody(BaseModel):
     url: str = Field(..., min_length=3)
-    domain: Literal["hibox", "cssbuy", "vipomall"] = "cssbuy"
+    domain: Literal["cssbuy", "vipomall"] = "cssbuy"
     dual_alternate_fallback: bool = Field(
         False,
-        description="Sen kẽ thứ tự Hibox/CSSBuy theo alternate_sequence_index, fallback khi một nền không đọc được.",
+        description="Cascade CSSBuy → Vipomall khi dual_alternate_fallback (sequence_index chỉ ghi báo cáo).",
     )
     alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
 
 class AdminSourceStockScanNextDbBody(BaseModel):
-    domain: Literal["hibox", "cssbuy", "vipomall"] = "cssbuy"
+    domain: Literal["cssbuy", "vipomall"] = "cssbuy"
     active_only: bool = True
     cursor_after_product_id: int = Field(0, ge=0)
     sticky_seed_product_id: int = Field(
@@ -151,7 +151,7 @@ class AdminSourceStockScanNextDbBody(BaseModel):
     )
     dual_alternate_fallback: bool = Field(
         False,
-        description="Sen kẽ + fallback hai nền (Hibox scrape / CSSBuy API) trong một lần kiểm tra.",
+        description="Cascade CSSBuy → Vipomall trong một lần kiểm tra.",
     )
     alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
@@ -175,7 +175,7 @@ class AdminSourceStockWorkerPauseBody(BaseModel):
 
 
 class AdminSourceStockPreviewUrlBody(BaseModel):
-    """Admin thử PDP theo một URL — không ghi DB (ưu tiên CSSBuy; Hibox chỉ khi CSS blocked/error)."""
+    """Admin thử PDP theo một URL — không ghi DB (CSSBuy; Vipomall khi CSS blocked/error)."""
 
     url: str = Field(..., min_length=8, max_length=8192)
 
@@ -183,7 +183,7 @@ class AdminSourceStockPreviewUrlBody(BaseModel):
 class AdminSourceStockResetPdpBody(BaseModel):
     """Reset kết quả kiểm tra PDP (source_stock_*) và xóa queue RAM của một process."""
 
-    domain: Literal["hibox", "cssbuy", "vipomall"] = Field(
+    domain: Literal["cssbuy", "vipomall"] = Field(
         "cssbuy",
         description="Giống queue-stats — lọc phạm vi sản có link có thể quy đổi như nhập Excel.",
     )
@@ -1752,7 +1752,7 @@ def admin_source_stock_batch_run(
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Admin: kiểm tra một URL nguồn qua scrape Hibox hoặc API CSSBuy (quy đổi như nhập Excel)."""
+    """Admin: kiểm tra một URL nguồn qua CSSBuy hoặc Vipomall (quy đổi như nhập Excel)."""
     url = body.url.strip()
     if not url:
         raise HTTPException(status_code=400, detail="Thiếu URL.")
@@ -1884,7 +1884,7 @@ def admin_source_stock_force_worker_recheck_route(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Xếp lại PDP worker: CSSBuy (/web/item) trước; chỉ scrape Hibox khi CSS blocked/error (chặn/CAPTCHA…);
+    Xếp lại PDP worker: CSSBuy (/web/item) trước; Vipomall khi CSS blocked/error (chặn/CAPTCHA…);
     kết quả in_stock / out_of_stock cập nhật sau khi worker chạy.
     """
     out = admin_force_worker_source_stock_recheck(db, db_id=int(body.db_id))
@@ -1902,7 +1902,7 @@ def admin_source_stock_preview_url_route(
     body: AdminSourceStockPreviewUrlBody,
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Thử PDP theo một link giống worker (CSSBuy một lần; Hibox chỉ fallback chặn); không sửa bảng products — có thể chậm (~1–3 phút)."""
+    """Thử PDP theo một link giống worker (CSSBuy; Vipomall fallback khi chặn); không sửa bảng products — có thể chậm (~1–3 phút)."""
     try:
         return admin_preview_source_stock_by_url(str(body.url or "").strip())
     except Exception as exc:
@@ -1939,9 +1939,9 @@ def admin_source_stock_reset_pdp_cycle_route(
 
 @router.get("/admin/source-stock-batch/queue-stats", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_queue_stats(
-    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
+    domain: Literal["cssbuy", "vipomall"] = Query(
         "cssbuy",
-        description="hibox = scrape hibox.mn; cssbuy = POST /web/item (không cần bấm modal).",
+        description="cssbuy = POST /web/item; vipomall = PDP vipomall.vn.",
     ),
     active_only: bool = Query(True),
     db: Session = Depends(get_db),
@@ -1956,7 +1956,7 @@ def admin_source_stock_worker_state(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Snapshot trạng thái worker PDP (CSSBuy trước, Hibox chỉ khi CSS blocked/error): env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
+    Snapshot trạng thái worker PDP (CSSBuy trước, Vipomall khi CSS blocked/error): env, cờ pause DB (chung mọi process), luồng daemon trong process hiện tại,
     và độ sâu hàng chờ in-memory của process đó (không phải tổng cluster).
     """
     return {"ok": True, **get_source_stock_worker_admin_snapshot(force_refresh_pause=True)}
@@ -1977,9 +1977,9 @@ def admin_source_stock_worker_pause_route(
 
 @router.get("/admin/source-stock-batch/report", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_report(
-    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
+    domain: Literal["cssbuy", "vipomall"] = Query(
         "cssbuy",
-        description="hibox = scrape hibox.mn; cssbuy = POST /web/item.",
+        description="cssbuy = POST /web/item; vipomall = PDP vipomall.vn.",
     ),
     active_only: bool = Query(True),
     window_days: int = Query(30, ge=1, le=366, description="Cửa sổ rolling «30 ngày» cho các đếm thời điểm"),
@@ -2010,7 +2010,7 @@ def admin_source_stock_batch_report(
 
 @router.get("/admin/source-stock-batch/oos-db-ids", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_oos_db_ids(
-    domain: Literal["hibox", "cssbuy", "vipomall"] = Query("cssbuy"),
+    domain: Literal["cssbuy", "vipomall"] = Query("cssbuy"),
     active_only: bool = Query(True),
     window_days: int = Query(30, ge=1, le=366),
     limit: int = Query(20_000, ge=1, le=50_000),
@@ -2032,9 +2032,9 @@ def admin_source_stock_batch_oos_db_ids(
 
 @router.get("/admin/source-stock-batch/product-urls", response_model=dict, include_in_schema=False)
 def admin_source_stock_batch_product_urls(
-    domain: Literal["hibox", "cssbuy", "vipomall"] = Query(
+    domain: Literal["cssbuy", "vipomall"] = Query(
         "cssbuy",
-        description="Lọc link phù hợp luồng kiểm tra (quy đổi sang Hibox hoặc CSSBuy)",
+        description="Lọc link phù hợp luồng kiểm tra (quy đổi sang CSSBuy hoặc Vipomall)",
     ),
     limit: int = Query(6000, ge=1, le=15000),
     active_only: bool = Query(True, description="Chỉ sản phẩm is_active"),

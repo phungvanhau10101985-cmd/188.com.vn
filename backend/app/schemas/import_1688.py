@@ -128,7 +128,7 @@ class Import1688DraftIdsBody(BaseModel):
 
 class ListingImportQueueTaskIn(BaseModel):
     url: str = Field(..., min_length=10)
-    source: Optional[str] = "hibox"
+    source: Optional[str] = "vipomall"
     label: Optional[str] = None
     chinese_name: Optional[str] = None
     shop_name_chinese: Optional[str] = None

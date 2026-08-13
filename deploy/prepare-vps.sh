@@ -23,7 +23,7 @@ source "${VENV}/bin/activate"
 pip install --upgrade pip wheel
 pip install -r "${BACKEND}/requirements.txt"
 
-echo "==> Playwright browsers (import Vipomall / Hibox / 1688)"
+echo "==> Playwright browsers (import Vipomall / PandaMall / 1688)"
 PW_SCRIPT="${PROJECT_ROOT}/deploy/install-playwright-browsers.sh"
 if [[ -f "${PW_SCRIPT}" ]]; then
   bash "${PW_SCRIPT}"

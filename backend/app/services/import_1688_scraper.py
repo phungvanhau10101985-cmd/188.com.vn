@@ -31,7 +31,7 @@ def _offer_id_from_query(query: str) -> Optional[str]:
 
 
 def canonical_1688_offer_pc_url(offer_id: str) -> str:
-    """URL chi tiết PC chuẩn để scrape / cột link (khớp luồng Hibox abb-* → detail.1688)."""
+    """URL chi tiết PC chuẩn để scrape / cột link (khớp abb-* → detail.1688)."""
     oid = str(offer_id or "").strip()
     if oid.isdigit():
         return f"https://detail.1688.com/offer/{oid}.html"
@@ -39,7 +39,7 @@ def canonical_1688_offer_pc_url(offer_id: str) -> str:
 
 
 def extract_offer_id(url: str) -> Optional[str]:
-    from app.services.import_hibox_scraper import normalize_product_import_url
+    from app.services.import_source_ids import normalize_product_import_url
 
     norm = normalize_product_import_url((url or "").strip())
     parsed = urlparse(norm)
@@ -932,12 +932,12 @@ def _click_1688_detail_images_for_preview(page: Any, max_clicks: int = 14) -> Li
 def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
     if not settings.IMPORT_1688_ENABLED:
         raise Import1688Error("Import 1688 đang tắt. Bật IMPORT_1688_ENABLED=true trong backend .env.")
-    from app.services.import_hibox_scraper import is_hibox_import_url
+    from app.services.import_source_ids import is_legacy_mirror_url
 
-    if is_hibox_import_url(url or ""):
+    if is_legacy_mirror_url(url or ""):
         raise Import1688Error(
-            "Đây là link Hibox (hibox.mn), không phải link 1688 — không có offerId. "
-            "Hãy dùng chức năng import link trên admin: URL Hibox được xử lý riêng. "
+            "Đây là link legacy mirror (không phải link 1688) — không có offerId. "
+            "Hãy dùng chức năng import link trên admin (Vipomall / PandaMall). "
             "Nếu cần 1688, dán đúng URL detail.1688.com hoặc detail.m.1688.com có /offer/....html hoặc ?offerId=...."
         )
     offer_id = extract_offer_id(url)
@@ -945,8 +945,8 @@ def scrape_1688_product(url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[
         raise Import1688Error(
             "Link 1688 không hợp lệ hoặc thiếu offerId. "
             "Cần URL dạng detail.1688.com/offer/xxxxxxxx.html hoặc ?offerId= (kể cả detail.m.1688.com/page/... ). "
-            "Link Hibox (https://hibox.mn/v/...) không dùng offerId. "
-            "Nếu bạn đang dán link Hibox: admin thường gọi nhầm instance API cổng cũ (lệch NEXT_PUBLIC_API_BASE_URL / SERVER_PORT) "
+            "Link mirror legacy không dùng offerId — import qua Vipomall/PandaMall. "
+            "Nếu admin gọi nhầm instance API cổng cũ (lệch NEXT_PUBLIC_API_BASE_URL / SERVER_PORT) "
             "trong khi FastAPI của bạn chạy cổng khác — xem frontend/.env.local (API_INTERNAL_ORIGIN, NEXT_PUBLIC_API_BASE_URL) và restart Next + backend."
         )
 

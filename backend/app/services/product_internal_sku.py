@@ -303,7 +303,7 @@ def allocate_first_unused_exported_internal_sku(
     batch_reserved: Optional[Set[str]] = None,
 ) -> str:
     """
-    Luồng import link 1688 / Hibox: purge export quá hạn trong cùng session (flush) rồi lấy mã trong
+    Luồng import link Vipomall / 1688: purge export quá hạn trong cùng session (flush) rồi lấy mã trong
     `internal_sku_exports` còn hiệu lực và chưa gán SP / chưa chiếm trong nháp / sheet SKU.
     """
     _purge_internal_sku_exports_expired(db)
@@ -348,7 +348,7 @@ def ensure_import_link_internal_product_code(
     batch_reserved: Optional[Set[str]] = None,
 ) -> str:
     """
-    SKU cho nháp / đăng từ import link (1688, Hibox, Excel batch link):
+    SKU cho nháp / đăng từ import link (1688, Vipomall, Excel batch link):
 
     - Nếu admin nhập ô «Mã sp» đúng [A-Z][0-9]{4} (trừ mã kết thúc «0000» — coi như placeholder, hệ thống bỏ qua và cấp mã khác)
       và không trùng SP khác / nháp khác / ô sheet SKU: chấp nhận nếu có trong pool

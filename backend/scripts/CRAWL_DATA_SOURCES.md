@@ -7,7 +7,7 @@ Tất cả lệnh mẫu chạy từ thư mục **`backend`** (Windows): `cd back
 - **`pip install playwright pandas openpyxl`** (Tuỳ script thêm deps.)
 - **`playwright install chromium`** cho script dùng Playwright.
 - **Cookie Taobao**: file JSON kiểu export Playwright; **không commit**; có thể dùng `runtime/taobao_cookies_session.json`.
-- Tuân thủ ToS/Bản quyền từng nền (Taobao, 1688, Hi-box).
+- Tuân thủ ToS/Bản quyền từng nền (Taobao, 1688, Vipomall).
 
 ---
 
@@ -33,31 +33,20 @@ Tất cả lệnh mẫu chạy từ thư mục **`backend`** (Windows): `cd back
 
 ---
 
-## 2. Hi-box (`hibox.mn`, Nuxt SPA)
-
-| Mục | File | Ghi chú |
-|-----|------|--------|
-| Trang shop (danh sách `/v/…`) | `hibox_shop_list_to_excel.py` | Playwright, cuộn lazy; URL dạng `https://hibox.mn/shop/…`. |
-| Một trang SP (`/v/slug`) | `export_hibox_item_excel.py` | Một dòng Excel: gallery, specs, variant màu/cỡ, video Taobao nếu có; hỗ trợ link nguồn 1688/Taobao qua Hi-box. |
-
----
-
-## 3. 1688
+## 2. 1688 / Vipomall
 
 | Mục | File / vị trí | Ghi chú |
 |-----|----------------|--------|
 | Một offer → Excel mẫu (giống export draft) | `export_1688_excel_preview.py` | Gọi `app.services.import_1688_scraper.scrape_1688_product`; ghi `app/static/uploads/sample_1688_export_*.xlsx`. |
-| Lọc offer **chưa có PDP** trên [vipomall.vn](https://vipomall.vn/) → Excel Hibox | `filter_1688_not_on_vipomall.py` | Playwright probe PDP Vipomall; giữ dòng chưa list, đổi Link → `hibox.mn/v/abb-{offerId}` để import admin. |
-| Import có auth / batch | API **`/import-1688`** | `app/api/endpoints/import_1688.py` + `import_1688_scraper.py`, `import_hibox_scraper.py` — crawl 1688 / Hi-box phục vụ draft sản phẩm (không phải một file script độc lập “chạy tay” đầy đủ như bảng trên; dùng admin/API). |
+| Lọc offer **chưa có PDP** trên [vipomall.vn](https://vipomall.vn/) → Excel Vipomall | `filter_1688_not_on_vipomall.py` | Playwright probe PDP Vipomall; giữ dòng chưa list, đổi Link → `vipomall.vn/san-pham/{offerId}?platform_type=10` để import admin. |
+| Import có auth / batch | API **`/import-1688`** | `app/api/endpoints/import_1688.py` + `import_1688_scraper.py` / `import_vipomall_scraper.py` / `import_pandamall_scraper.py` — draft sản phẩm qua admin/API. |
 
 ---
 
-## 4. “Chọn loại crawl” nhanh
+## 3. “Chọn loại crawl” nhanh
 
 - **Nhiều SP từ từ khoá Taobao (SERP):** `taobao_search_pages_to_excel.py` + doc **`TAOBAO_SEARCH_GOOGLE_REDIRECT.md`**.
 - **Nhiều SP một shop TB:** `taobao_shop_category_to_excel.py`.
 - **Chi tiết 1 TB:** `taobao_item_detail_to_excel.py`.
-- **Nhiều SP shop Hi-box:** `hibox_shop_list_to_excel.py`.
-- **Chi tiết 1 SP Hi-box (kèm 1688/TB overlay):** `export_hibox_item_excel.py`.
 - **Xem trước cấu trúc Excel 1688 một offer:** `export_1688_excel_preview.py`.
-- **Đưa vào hệ thống sản phẩm:** luồng admin **import 1688 / Hi-box** (API trong repo).
+- **Đưa vào hệ thống sản phẩm:** luồng admin **import Vipomall / PandaMall** (API trong repo).

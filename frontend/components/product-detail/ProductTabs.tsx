@@ -15,7 +15,8 @@ interface ProductTabsProps {
   product: Product;
 }
 
-/** Khóa đoạn thông số gốc từ NCC — ưu tiên thấp khi đã có bản VI; giữ khóa legacy trong DB cũ. */
+/** Khóa đoạn thông số gốc từ NCC — ưu tiên thấp khi đã có bản VI; đọc cả khóa legacy trong DB cũ (không hiện branding). */
+/** Legacy product_info may still store specs under the old supplier key. */
 const SUPPLIER_RAW_SPEC_KEYS = ['supplier_specs_excerpt', 'hibox_specs_excerpt'] as const;
 
 /** Map key (snake_case) sang nhãn tiếng Việt cho định dạng cột AK */
@@ -50,7 +51,6 @@ const FIELD_LABELS: Record<string, string> = {
   heel_height: 'Chiều cao gót / đế',
   thong_so_kich_thuoc_vi: 'Kích thước & form',
   supplier_specs_excerpt: 'Thông số gốc (NCC)',
-  hibox_specs_excerpt: 'Thông số gốc (NCC)',
   material_vi: 'Chất liệu (đầy đủ)',
   colors: 'Màu sắc',
   sizes: 'Kích cỡ',
@@ -153,6 +153,8 @@ function isPlaceholderScalar(val: unknown): boolean {
 
 function formatLabel(key: string, useMap: 'section' | 'field' | 'auto' = 'auto'): string {
   const k = key.trim();
+  // Khóa specs legacy trong DB cũ → nhãn trung tính (không branding nguồn).
+  if ((SUPPLIER_RAW_SPEC_KEYS as readonly string[]).includes(k)) return 'Thông số gốc (NCC)';
   if (useMap === 'section' || (useMap === 'auto' && SECTION_LABELS[k])) return SECTION_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   if (useMap === 'field' || (useMap === 'auto' && FIELD_LABELS[k])) return FIELD_LABELS[k] ?? k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
   return k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -260,7 +262,8 @@ function ProductInfoTab({ product }: { product: Product }) {
             if (sectionKey === 'market_info') {
               entries = entries.filter(([k, v]) => {
                 if (k !== 'note' || typeof v !== 'string') return true;
-                return !v.includes('HIBOX_MNT_PER_CNY_FOR_LISTING');
+                // Ẩn ghi chú kỹ thuật tỷ giá MNT legacy trong market_info.
+                return !/MNT_PER_CNY/i.test(v);
               });
             }
             if (entries.length === 0) return null;

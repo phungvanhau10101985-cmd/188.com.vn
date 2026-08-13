@@ -17,7 +17,7 @@ from app.services.import_vipomall_scraper import (
     resolve_vipomall_import_url,
     scrape_vipomall_for_import,
 )
-from app.services.import_hibox_scraper import parse_t_prefixed_item_id, extract_taobao_tmall_item_id
+from app.services.import_source_ids import parse_t_prefixed_item_id, extract_taobao_tmall_item_id
 
 DEFAULT_URL = "https://detail.1688.com/offer/920080333655.html?offerId=920080333655"
 

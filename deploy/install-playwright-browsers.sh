@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tải browser Chromium cho Playwright (import Vipomall, Hibox, 1688, Gemini Web, …).
+# Tải browser Chromium cho Playwright (import Vipomall, PandaMall, 1688, Gemini Web, …).
 # Usage (từ root repo):
 #   bash deploy/install-playwright-browsers.sh
 # Tuỳ chọn: PLAYWRIGHT_WITH_DEPS=1 để cài thêm thư viện hệ thống (cần sudo trên Linux).

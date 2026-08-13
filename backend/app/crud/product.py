@@ -25,7 +25,10 @@ from app.services.bunny_storage import (
     collect_product_image_urls_for_bunny,
     delete_bunny_assets_for_product,
 )
-from app.services.import_hibox_scraper import canonicalize_hibox_placeholder_product_id
+from app.services.import_source_ids import (
+    canonicalize_legacy_placeholder_product_id,
+    legacy_draft_source_name,
+)
 from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
     internal_sku_exists_on_other_product,
@@ -1629,7 +1632,7 @@ def listing_parser_ids_existing_in_products(
     """
     Đánh dấu id listing (vd A945… sau chuẩn hoa) là đã có trong bảng ``products`` nếu:
     - `products.product_id` trùng chính xác, hoặc
-    - `product_id` bắt đầu bằng `{id}a188…` (mã nội bộ nhập Hibox/1688 kèm SKU).
+    - `product_id` bắt đầu bằng `{id}a188…` (mã nội bộ nhập 1688 kèm SKU).
 
     ``active_only=True``: chỉ các SP đang ``is_active`` (đang lên web catalog).
     """
@@ -1758,7 +1761,7 @@ def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: Lis
     """
     Id listing (A|T + chữ số sau chuẩn hóa) đã có bản nháp import crawl xong:
     ``status == done``, ``product_data`` có dữ liệu — dù chưa đăng lên ``products``.
-    Khớp ``source_offer_id`` (1688 = chỉ số offer; Hibox = ``abb-<số>`` hoặc slug số Taobao).
+    Khớp ``source_offer_id`` (1688 = chỉ số offer; legacy = ``abb-<số>`` hoặc slug số Taobao).
     """
     from app.models.product_import_draft import ProductImportDraft
 
@@ -1784,19 +1787,19 @@ def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: Lis
     if not a_digits and not t_digits:
         return set()
 
-    hibox_offer_ids: Set[str] = set(t_digits)
-    hibox_offer_ids.update(f"abb-{d}" for d in a_digits)
+    legacy_mirror_offer_ids: Set[str] = set(t_digits)
+    legacy_mirror_offer_ids.update(f"abb-{d}" for d in a_digits)
 
     clauses = []
     if a_digits:
         clauses.append(
             and_(ProductImportDraft.source == "1688", ProductImportDraft.source_offer_id.in_(sorted(a_digits)))
         )
-    if hibox_offer_ids:
+    if legacy_mirror_offer_ids:
         clauses.append(
             and_(
-                ProductImportDraft.source == "hibox",
-                ProductImportDraft.source_offer_id.in_(sorted(hibox_offer_ids)),
+                ProductImportDraft.source == legacy_draft_source_name(),
+                ProductImportDraft.source_offer_id.in_(sorted(legacy_mirror_offer_ids)),
             )
         )
     if not clauses:
@@ -1822,7 +1825,7 @@ def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: Lis
         src_l = (src or "").strip().lower()
         if src_l == "1688" and oid_s.isdigit() and oid_s in a_digits:
             matched_norm.add(f"A{oid_s}")
-        elif src_l == "hibox":
+        elif src_l == legacy_draft_source_name():
             mabb = re.match(r"(?i)^abb-(\d+)$", oid_s)
             if mabb:
                 d = mabb.group(1)
@@ -5540,7 +5543,7 @@ def create_product(db: Session, product: ProductCreate):
         batch_reserved=batch_reserved,
     )
     data["product_info"] = sync_internal_code_into_product_info(data.get("product_info"), data["code"])
-    canonicalize_hibox_placeholder_product_id(data)
+    canonicalize_legacy_placeholder_product_id(data)
     if not data.get("slug"):
         data["slug"] = generate_consistent_slug(data["name"], data["product_id"])
 
@@ -5627,7 +5630,7 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
                 "code": update_data["code"],
             }
             before_pid = probe["product_id"]
-            canonicalize_hibox_placeholder_product_id(probe)
+            canonicalize_legacy_placeholder_product_id(probe)
             if probe["product_id"] != before_pid:
                 update_data["product_id"] = probe["product_id"]
 

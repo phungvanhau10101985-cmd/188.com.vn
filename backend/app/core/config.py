@@ -404,7 +404,7 @@ class Settings:
             "IMAGE_LOCALIZATION_DEEPSEEK_OFF_PEAK_ONLY", "false"
         ).strip().lower() in ("1", "true", "yes", "on")
 
-        # Scrape Playwright (Hibox, Vipomall, 1688, kiểm tra tồn kho) — một bộ cookie JSON trên server.
+        # Scrape Playwright (Vipomall, PandaMall, 1688, kiểm tra tồn kho) — một bộ cookie JSON trên server.
         self.PANDAMALL_USERNAME: str = os.getenv("PANDAMALL_USERNAME", "").strip()
         self.PANDAMALL_PASSWORD: str = os.getenv("PANDAMALL_PASSWORD", "").strip()
         self.IMPORT_SCRAPER_COOKIE_JSON: str = (
@@ -560,15 +560,6 @@ class Settings:
         except ValueError:
             self.LISTING_IMPORT_VND_PER_CNY = 3580.0
 
-        # Hibox UI hiển thị ₮ — quy sang ~CN¥ trước khi × hệ số IF × LISTING_IMPORT_VND_PER_CNY (khớp frontend 475).
-        _hibox_mnt_per = os.getenv("HIBOX_MNT_PER_CNY_FOR_LISTING", "475").strip().replace(",", ".")
-        try:
-            self.HIBOX_MNT_PER_CNY_FOR_LISTING: float = float(_hibox_mnt_per)
-            if not (math.isfinite(self.HIBOX_MNT_PER_CNY_FOR_LISTING) and self.HIBOX_MNT_PER_CNY_FOR_LISTING > 0):
-                raise ValueError
-        except ValueError:
-            self.HIBOX_MNT_PER_CNY_FOR_LISTING = 475.0
-
         # Feed TSV Google Merchant Center — GET /api/v1/import-export/export/merchant-center-feed.tsv (công khai)
         self.MERCHANT_FEED_CURRENCY: str = os.getenv("MERCHANT_FEED_CURRENCY", "VND").strip() or "VND"
         _merch_feed_img_base = os.getenv("MERCHANT_FEED_IMAGE_BASE_URL", "").strip().rstrip("/")
@@ -715,7 +706,7 @@ class Settings:
         self.GROUP_LISTING_SKIP_SLOW_SLUG_POOL: bool = os.getenv(
             "GROUP_LISTING_SKIP_SLOW_SLUG_POOL", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
-        # Import từ link 1688/Hibox: gán danh mục 3 cấp bằng DeepSeek theo tên SP + taxonomy trong DB
+        # Import từ link Vipomall/PandaMall/1688: gán danh mục 3 cấp bằng DeepSeek theo tên SP + taxonomy trong DB
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
@@ -1130,6 +1121,8 @@ class Settings:
         self.EMS_API_TIMEOUT_SECONDS: int = int(os.getenv("EMS_API_TIMEOUT_SECONDS", "15") or "15")
         # api.myems.vn thường thiếu intermediate CA — mặc định tắt verify để tra cứu không bị SSL lỗi.
         self.EMS_API_VERIFY_SSL: bool = os.getenv("EMS_API_VERIFY_SSL", "False").lower() == "true"
+        # Cổng API tra cứu vận chuyển (partner). Nhiều key cách nhau bằng dấu phẩy.
+        self.SHIPPING_LOOKUP_API_KEY: str = os.getenv("SHIPPING_LOOKUP_API_KEY", "").strip()
 
         # ========================
         # RATE LIMITING

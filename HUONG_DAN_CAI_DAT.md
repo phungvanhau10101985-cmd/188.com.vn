@@ -58,7 +58,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8001
 
 Kiểm tra: mở **http://127.0.0.1:8001/docs** hoặc `curl http://127.0.0.1:8001/health`.
 
-### Import sản phẩm từ link 1688 / Hibox (Playwright)
+### Import sản phẩm từ link Vipomall / PandaMall / 1688 (Playwright)
 
 Sau `pip install -r requirements.txt`:
 
@@ -139,5 +139,5 @@ Nếu bạn đổi `SERVER_PORT` / lệnh `uvicorn`, cập nhật đồng thời
 | [backend/.env.example](./backend/.env.example) | Mẫu biến backend |
 | [frontend/.env.example](./frontend/.env.example) | Mẫu biến frontend |
 | [frontend/.env.local.example](./frontend/.env.local.example) | Dev + ngrok |
-| [IMPORT_LINK_SOURCES_GUIDE.md](./IMPORT_LINK_SOURCES_GUIDE.md) | Luồng import 1688/Hibox, debug API |
+| [IMPORT_LINK_SOURCES_GUIDE.md](./IMPORT_LINK_SOURCES_GUIDE.md) | Luồng import link (Vipomall/PandaMall), debug API |
 | [DANH_SACH_ENV_CAN_DIEN.md](./DANH_SACH_ENV_CAN_DIEN.md) | Danh sách env theo tính năng |

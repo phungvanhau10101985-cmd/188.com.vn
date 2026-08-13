@@ -5,8 +5,9 @@ from sqlalchemy import or_
 
 from app.db.session import SessionLocal
 from app.models.product import Product
+from app.services.import_source_ids import legacy_mirror_link_ilike_patterns
 from app.services.source_stock_checker import (
-    _link_eligible_for_hibox_stock_check,
+    _link_eligible_for_source_stock_check,
     check_product_source_stock,
 )
 
@@ -20,8 +21,11 @@ def pick_one_id() -> tuple[int, str, str] | None:
             .filter(Product.link_default.isnot(None))
             .filter(
                 or_(
-                    Product.link_default.ilike("%hibox.mn%"),
+                    *[Product.link_default.ilike(p) for p in legacy_mirror_link_ilike_patterns()],
                     Product.link_default.ilike("%1688.com%"),
+                    Product.link_default.ilike("%vipomall.vn%"),
+                    Product.link_default.ilike("%taobao.com%"),
+                    Product.link_default.ilike("%tmall.com%"),
                 )
             )
             .order_by(Product.id.asc())
@@ -30,7 +34,7 @@ def pick_one_id() -> tuple[int, str, str] | None:
         if not row:
             return None
         full = db.query(Product).filter(Product.id == row.id).first()
-        if not full or not _link_eligible_for_hibox_stock_check(full.link_default or ""):
+        if not full or not _link_eligible_for_source_stock_check(full.link_default or ""):
             return None
         return int(full.id), (full.product_id or "").strip(), (full.link_default or "").strip()[:100]
     finally:
@@ -58,7 +62,7 @@ def snapshot(pid: int) -> dict:
 def main() -> None:
     picked = pick_one_id()
     if not picked:
-        print("NO_PRODUCT: không có SP active + link hợp lệ (hibox/1688).")
+        print("NO_PRODUCT: không có SP active + link hợp lệ (1688/vipomall/taobao…).")
         raise SystemExit(1)
     pid, code, link = picked
     print("PICKED", {"db_id": pid, "product_code": code, "link_prefix": link})
@@ -66,7 +70,7 @@ def main() -> None:
     before = snapshot(pid)
     print("BEFORE_DB", before)
 
-    print("RUNNING check_product_source_stock (scrape Hibox — có thể ~15–90s)…")
+    print("RUNNING check_product_source_stock (CSSBuy → Vipomall — có thể ~15–90s)…")
     result = check_product_source_stock(pid)
     st = getattr(result, "status", None) if result is not None else None
     err = (getattr(result, "error", None) or "").strip()

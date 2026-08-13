@@ -54,7 +54,7 @@ const IMPORT_JOB_STORAGE_KEY = 'admin:products:import_excel:job';
 /** Theo dõi batch Excel import link (server xử lý tuần tự) sau khi đóng / mở lại tab. */
 const ADMIN_1688_EXCEL_BATCH_TOKEN_KEY = 'admin:products:import_1688_excel_batch_token';
 
-/** Theo dõi một job import từng link Hibox sau khi reload. */
+/** Theo dõi một job import từng link (Vipomall / PandaMall) sau khi reload. */
 const ADMIN_1688_LINK_JOB_KEY = 'admin:products:import_1688_link_job';
 
 /** Legacy: một job_id — migrate sang IMAGE_LOCALIZATION_JOBS_KEY. */
@@ -258,10 +258,10 @@ type Stored1688LinkJob = {
   job_id: string;
   draft_id?: number;
   started_at: number;
-  source: '1688' | 'hibox' | 'vipomall' | 'pandamall';
+  source: '1688' | 'vipomall' | 'pandamall';
 };
 
-type ImportExcelFetchTarget = 'auto' | 'hibox' | 'vipomall' | 'pandamall';
+type ImportExcelFetchTarget = 'auto' | 'vipomall' | 'pandamall';
 
 /** Nội dung panel + toast sau khi poll job import xong */
 function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
@@ -363,19 +363,11 @@ function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   };
 }
 
-/** Chuẩn hoá khớp backend: câu có URL, markdown, hoặc hibox.mn/v/… không có https */
+/** Chuẩn hoá khớp backend: câu có URL, markdown, hoặc vipomall.vn/… không có https */
 function resolveImportLinkUrl(raw: string): string {
   const trimmed = raw.trim().replace(/^[\uFEFF\u200b-\u200d\u2060]+/, '');
   const httpMatch = trimmed.match(/\bhttps?:\/\/[^\s\]\)<>'"]+/i);
   if (httpMatch) return httpMatch[0].replace(/[,.;:"'”’)\]]+$/u, '').trim();
-
-  const bareMatch = trimmed.match(
-    /\b(?:www\.)?(?:[\w.-]+\.)*hibox\.mn(?::\d+)?(?:\/[a-z]{2,5})?\/v\/[^\s\]\)<>'",]+/i,
-  );
-  if (bareMatch) {
-    const frag = bareMatch[0];
-    return /^https?:\/\//i.test(frag) ? frag : `https://${frag.replace(/^\/+/, '')}`;
-  }
 
   const vipomallMatch = trimmed.match(
     /\b(?:www\.)?vipomall\.vn(?::\d+)?\/san-pham\/[^\s\]\)<>'",?&]+/i,
@@ -399,8 +391,8 @@ function resolveImportLinkUrl(raw: string): string {
   return trimmed;
 }
 
-/** Hibox không dùng CDN 1688 — backend sẽ bỏ bước tải ảnh Bunny khi client gửi download_images: false. */
-function isHiboxProductUrl(raw: string): boolean {
+/** Link taobao1688.kz có id — import qua Vipomall (không tải ảnh Bunny trên client). */
+function isTaobao1688KzProductUrl(raw: string): boolean {
   try {
     const resolved = resolveImportLinkUrl(raw);
     const absolute = /^[a-z][a-z0-9+.-]*:/i.test(resolved)
@@ -409,15 +401,12 @@ function isHiboxProductUrl(raw: string): boolean {
     const u = new URL(absolute);
     let host = u.hostname.replace(/^www\./i, '').toLowerCase();
     host = host.endsWith('.') ? host.slice(0, -1) : host;
-    if (host === 'hibox.mn' || host.endsWith('.hibox.mn')) return true;
-    if (host === 'taobao1688.kz') {
-      const id =
-        u.searchParams.get('id')?.trim() ||
-        u.searchParams.get('item_id')?.trim() ||
-        u.searchParams.get('itemId')?.trim();
-      return Boolean(id && /^[a-zA-Z0-9][\w.-]{1,220}$/.test(id));
-    }
-    return false;
+    if (host !== 'taobao1688.kz') return false;
+    const id =
+      u.searchParams.get('id')?.trim() ||
+      u.searchParams.get('item_id')?.trim() ||
+      u.searchParams.get('itemId')?.trim();
+    return Boolean(id && /^[a-zA-Z0-9][\w.-]{1,220}$/.test(id));
   } catch {
     return false;
   }
@@ -780,7 +769,7 @@ export default function AdminProductsPage() {
   const [listingLinkSampleDownloading, setListingLinkSampleDownloading] = useState(false);
   /** File đã chọn; upload chỉ khi bấm «Chạy lấy dữ liệu». */
   const [excelBatchFile, setExcelBatchFile] = useState<File | null>(null);
-  /** Batch Excel: `fetch_target` gửi backend — auto | hibox | vipomall | pandamall (không còn 1688 trực tiếp). */
+  /** Batch Excel: `fetch_target` gửi backend — auto | vipomall | pandamall (không còn 1688 trực tiếp). */
   const [excelBatchFetchTarget, setExcelBatchFetchTarget] = useState<ImportExcelFetchTarget>('auto');
   const [excelBatchTrackToken, setExcelBatchTrackToken] = useState<string | null>(null);
   const [excelBatchHint, setExcelBatchHint] = useState<string | null>(null);
@@ -789,7 +778,7 @@ export default function AdminProductsPage() {
   const [excelBatchAppendTarget, setExcelBatchAppendTarget] = useState<string | null>(null);
   const [bulkExport1688Busy, setBulkExport1688Busy] = useState(false);
   const [resumeBatchBusy, setResumeBatchBusy] = useState(false);
-  /** Tab trong khối Import Hibox — tách luồng để giao diện không chồng chéo. */
+  /** Tab trong khối Import catalog — tách luồng để giao diện không chồng chéo. */
   const [import1688SectionTab, setImport1688SectionTab] = useState<'link' | 'excel' | 'history'>('link');
   const [importDraftsLoading, setImportDraftsLoading] = useState(false);
   const [importDraftsError, setImportDraftsError] = useState<string | null>(null);
@@ -1137,7 +1126,7 @@ export default function AdminProductsPage() {
         const job = await adminProductAPI.getImport1688Job(jobId);
         lastJob = job;
         setImport1688Progress({
-          message: job.message || 'Đang xử lý link Hibox…',
+          message: job.message || 'Đang xử lý link import…',
           percent: job.percent ?? null,
           phase: job.phase || null,
           warn: job.warnings?.[0] || null,
@@ -1405,7 +1394,7 @@ export default function AdminProductsPage() {
   const handleSaveImportScraperCookie = async () => {
     const cookie = importScraperCookieText.trim();
     if (!cookie) {
-      showToast('err', 'Vui lòng dán JSON cookie (hibox.mn / vipomall.vn / taobao…)');
+      showToast('err', 'Vui lòng dán JSON cookie (vipomall.vn / pandamall.vn / taobao…)');
       return;
     }
     setImportScraperCookieSaving(true);
@@ -1447,8 +1436,8 @@ export default function AdminProductsPage() {
     try {
       const st = await adminProductAPI.getPandamallAccount();
       setPandamallUsername(st.username || '');
-      setPandamallPassword('');
-      setPandamallAccountSaved(!!st.username);
+      setPandamallPassword(st.password || '');
+      setPandamallAccountSaved(!!(st.username || st.password));
     } catch {
       setPandamallUsername('');
       setPandamallPassword('');
@@ -1711,25 +1700,22 @@ export default function AdminProductsPage() {
     e.preventDefault();
     const url = resolveImportLinkUrl(import1688Url);
     if (!url) {
-      showToast('err', 'Vui lòng dán link Hibox, PandaMall, Taobao/Tmall, taobao1688.kz hoặc Vipomall');
+      showToast('err', 'Vui lòng dán link Vipomall, PandaMall, Taobao/Tmall hoặc taobao1688.kz');
       return;
     }
     const fromPandamall = isPandamallProductUrl(url);
     const fromVipomall = isVipomallProductUrl(url);
     const fromTaobaoTmall = isTaobaoTmallImportInput(url);
-    if (!isHiboxProductUrl(url) && !fromPandamall && !fromVipomall && !fromTaobaoTmall) {
+    const fromTaobao1688Kz = isTaobao1688KzProductUrl(url);
+    if (!fromPandamall && !fromVipomall && !fromTaobaoTmall && !fromTaobao1688Kz) {
       showToast(
         'err',
-        'Chỉ hỗ trợ link Hibox / taobao1688.kz / PandaMall / Vipomall / Taobao / Tmall / T{id}. Import trực tiếp từ 1688.com đã tắt.',
+        'Chỉ hỗ trợ link Vipomall / taobao1688.kz / PandaMall / Taobao / Tmall / T{id}. Import trực tiếp từ 1688.com đã tắt.',
         8000,
       );
       return;
     }
-    const importLabel = fromPandamall
-      ? 'PandaMall'
-      : fromVipomall || fromTaobaoTmall
-        ? 'Vipomall'
-        : 'Hibox';
+    const importLabel = fromPandamall ? 'PandaMall' : 'Vipomall';
     try {
       localStorage.removeItem(ADMIN_1688_LINK_JOB_KEY);
     } catch {
@@ -1737,17 +1723,11 @@ export default function AdminProductsPage() {
     }
     setImporting1688(true);
     setImport1688Draft(null);
-    const importSource = fromPandamall
-      ? 'pandamall'
-      : fromVipomall || fromTaobaoTmall
-        ? 'vipomall'
-        : 'hibox';
+    const importSource = fromPandamall ? 'pandamall' : 'vipomall';
     setImport1688Progress({
       message: fromPandamall
         ? 'Đang gửi link PandaMall lên server…'
-        : fromVipomall
-          ? 'Đang gửi link Vipomall lên server…'
-          : 'Đang gửi link Hibox lên server…',
+        : 'Đang gửi link Vipomall lên server…',
       percent: null,
     });
     try {
@@ -1766,9 +1746,7 @@ export default function AdminProductsPage() {
       setImport1688Progress({
         message: fromPandamall
           ? 'Đã nhận link, đang mở trang PandaMall…'
-          : fromVipomall
-            ? 'Đã nhận link, đang mở trang Vipomall…'
-            : 'Đã nhận link, đang mở trang Hibox…',
+          : 'Đã nhận link, đang mở trang Vipomall…',
         percent: null,
       });
       const job = await pollImport1688Job(started.job_id);
@@ -2035,7 +2013,7 @@ export default function AdminProductsPage() {
       window.setTimeout(() => {
         const goDraft = Boolean(d.product_data);
         document
-          .getElementById(goDraft ? 'import-hibox-draft' : 'import-hibox')
+          .getElementById(goDraft ? 'import-catalog-draft' : 'import-catalog')
           ?.scrollIntoView({ behavior: 'smooth', block: goDraft ? 'nearest' : 'start' });
       }, 120);
     } catch (err) {
@@ -2178,7 +2156,7 @@ export default function AdminProductsPage() {
     if (!file) return;
     setExcelBatchFile(file);
     setExcelBatchHint(
-      `Đã chọn «${file.name}». «Tự động» đổi link Taobao/1688 sang Hibox khi có thể; hoặc chọn Ép về Hibox / Vipomall / PandaMall. Bấm «Chạy lấy dữ liệu».`,
+      `Đã chọn «${file.name}». «Tự động» đổi link Taobao/1688 sang Vipomall khi có thể; hoặc chọn Ép về Vipomall / PandaMall. Bấm «Chạy lấy dữ liệu».`,
     );
   };
 
@@ -2529,7 +2507,7 @@ export default function AdminProductsPage() {
       }
       setImporting1688(true);
       setImport1688Progress({
-        message: 'Khôi phục theo dõi import Hibox (job đã gửi trước đó)…',
+        message: 'Khôi phục theo dõi import (job đã gửi trước đó)…',
         percent: null,
       });
       try {
@@ -2544,10 +2522,10 @@ export default function AdminProductsPage() {
           const body = [...(job.errors || []), ...(job.warnings || [])].filter(Boolean).join('\n');
           setImportDetailPanel({
             variant: 'err',
-            title: 'Import Hibox thất bại',
+            title: 'Import thất bại',
             body: body || job.message || 'Không đọc được dữ liệu từ link.',
           });
-          showToast('err', job.message || 'Import Hibox thất bại', 8000);
+          showToast('err', job.message || 'Import thất bại', 8000);
           return;
         }
         const draftId = job.draft_id ?? saved.draft_id;
@@ -2559,13 +2537,13 @@ export default function AdminProductsPage() {
         if (cancelled) return;
         setImport1688Draft(draft);
         const warnText = draft.warnings?.length ? ` Có ${draft.warnings.length} cảnh báo cần kiểm tra.` : '';
-        showToast('ok', `Đã tạo draft từ Hibox.${warnText}`, 6000);
+        showToast('ok', `Đã tạo draft từ import.${warnText}`, 6000);
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'Import Hibox thất bại';
+        const msg = err instanceof Error ? err.message : 'Import thất bại';
         setImportDetailPanel({
           variant: 'err',
-          title: 'Không khôi phục được import Hibox',
+          title: 'Không khôi phục được import',
           body: msg,
         });
         showToast('err', msg, 9000);
@@ -2881,26 +2859,26 @@ export default function AdminProductsPage() {
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-6">Quản lý sản phẩm</h1>
 
-        {/* Import Hibox & catalogue feeds */}
+        {/* Import Vipomall / PandaMall & catalogue feeds */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
           <section
-            id="import-hibox"
-            aria-labelledby="import-hibox-heading"
+            id="import-catalog"
+            aria-labelledby="import-catalog-heading"
             className="mt-6 scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-sm ring-1 ring-slate-900/5"
           >
             <div className="border-b border-slate-100 bg-slate-50/60 px-4 py-4 sm:px-5">
               <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h2 id="import-hibox-heading" className="text-lg font-semibold tracking-tight text-slate-900">
-                    Import Hibox
+                  <h2 id="import-catalog-heading" className="text-lg font-semibold tracking-tight text-slate-900">
+                    Import Vipomall / PandaMall
                   </h2>
                   <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                    Một URL hoặc Excel nhiều dòng → bản nháp (Hibox, PandaMall, taobao1688.kz hoặc Vipomall). Luôn kiểm tra nháp trước khi
+                    Một URL hoặc Excel nhiều dòng → bản nháp (Vipomall, PandaMall hoặc taobao1688.kz). Luôn kiểm tra nháp trước khi
                     đăng hoặc xuất Excel.
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                      Hibox · PandaMall · Vipomall · kiểm tra tồn kho — một bộ cookie
+                      Vipomall · PandaMall · kiểm tra tồn kho — một bộ cookie
                     </span>
                     <span className="inline-flex items-center rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-950">
                       PandaMall · /1688/detail/{'{id}'} · /taobao/detail/{'{id}'}
@@ -2939,10 +2917,9 @@ export default function AdminProductsPage() {
                       )}
                     </div>
                     <p className="mt-1 text-xs leading-snug text-amber-900/95">
-                      Một bộ cookie cho lấy thông tin SP (Hibox, PandaMall, Vipomall), import link và kiểm tra hết hàng. Link
+                      Một bộ cookie cho lấy thông tin SP (PandaMall, Vipomall), import link và kiểm tra hết hàng. Link
                       không cần đăng nhập vẫn scrape được; cookie giúp trang khó hoặc đã login. Dán JSON export từ
-                      Chrome khi đã đăng nhập <strong className="font-semibold">hibox.mn</strong> /{' '}
-                      <strong className="font-semibold">pandamall.vn</strong> /{' '}
+                      Chrome khi đã đăng nhập <strong className="font-semibold">pandamall.vn</strong> /{' '}
                       <strong className="font-semibold">vipomall.vn</strong> / taobao — không dùng cookie{' '}
                       <strong className="font-semibold">188.com.vn</strong>.
                     </p>
@@ -3003,9 +2980,9 @@ export default function AdminProductsPage() {
                           setImportScraperCookieDeleteConfirm(false);
                         }}
                         rows={4}
-                        placeholder='[{"domain":"hibox.mn","name":"...","value":"..."}, …] hoặc export Cookie-Editor'
+                        placeholder='[{"domain":"vipomall.vn","name":"...","value":"..."}, …] hoặc export Cookie-Editor'
                         className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-mono text-gray-800 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
-                        aria-label="JSON cookie scrape Hibox Vipomall"
+                        aria-label="JSON cookie scrape Vipomall PandaMall"
                       />
                     </label>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -3101,7 +3078,7 @@ export default function AdminProductsPage() {
                           type="text"
                           value={pandamallPassword}
                           onChange={(e) => setPandamallPassword(e.target.value)}
-                          placeholder={pandamallAccountSaved ? 'Nhập lại khi đổi mật khẩu' : 'Mật khẩu của bạn'}
+                          placeholder="Mật khẩu của bạn"
                           className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                         />
                       </label>
@@ -3124,7 +3101,7 @@ export default function AdminProductsPage() {
                 </div>
               </header>
 
-              <div className="mt-4" role="tablist" aria-label="Chế độ import Hibox">
+              <div className="mt-4" role="tablist" aria-label="Chế độ import catalog">
                 <div className="flex flex-wrap gap-1 rounded-xl bg-slate-100/95 p-1">
                   <button
                     type="button"
@@ -3194,22 +3171,22 @@ export default function AdminProductsPage() {
                 >
                 <h3 className="text-sm font-semibold text-slate-900">Import một link</h3>
                 <p className="mt-0.5 text-xs text-gray-500">
-                  Dán link Hibox, <span className="whitespace-nowrap">taobao1688.kz</span>, PandaMall{' '}
+                  Dán link Vipomall, <span className="whitespace-nowrap">taobao1688.kz</span>, PandaMall{' '}
                   <span className="whitespace-nowrap">(pandamall.vn/1688|taobao/detail/{'{id}'})</span>, Taobao/Tmall,{' '}
-                  <span className="whitespace-nowrap">T{'{id}'}</span> hoặc Vipomall{' '}
+                  <span className="whitespace-nowrap">T{'{id}'}</span> hoặc{' '}
                   <span className="whitespace-nowrap">(vipomall.vn/san-pham/…?platform_type=10|21)</span>.
                 </p>
                 <form onSubmit={handleImport1688} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1">
-                    <label htmlFor="admin-import-hibox-url" className="sr-only">
-                      URL nguồn Hibox
+                    <label htmlFor="admin-import-catalog-url" className="sr-only">
+                      URL nguồn import
                     </label>
                     <input
-                      id="admin-import-hibox-url"
+                      id="admin-import-catalog-url"
                       type="url"
                       value={import1688Url}
                       onChange={(e) => setImport1688Url(e.target.value)}
-                      placeholder="https://hibox.mn/v/… · pandamall.vn/1688/detail/… · taobao/Tmall · T801… · vipomall.vn/san-pham/…"
+                      placeholder="https://vipomall.vn/san-pham/… · pandamall.vn/1688/detail/… · taobao/Tmall · T801…"
                       className="w-full rounded-lg border border-gray-200 bg-gray-50/50 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-orange-300/80"
                       autoComplete="off"
                       spellCheck={false}
@@ -3224,7 +3201,7 @@ export default function AdminProductsPage() {
                         </span>
                       </summary>
                       <div className="border-t border-gray-100 px-3 py-2 leading-relaxed text-gray-600">
-                        Luồng import Hibox không dùng cookie 1688; ảnh giữ URL gốc trên nháp. Luôn có bước nháp trước khi đăng
+                        Luồng import không dùng cookie 1688; ảnh giữ URL gốc trên nháp. Luôn có bước nháp trước khi đăng
                         hoặc export Excel khớp cột import.
                         <span className="mt-2 block">
                           File Excel link: ô <strong>Kiểu dáng / Style</strong> (hoặc cột AI đủ rộng) đồng bộ vào{' '}
@@ -3269,9 +3246,7 @@ export default function AdminProductsPage() {
                   <code className="rounded bg-white/80 px-1">DEEPSEEK_API_KEY</code> + taxonomy đã import).
                   Cột **Mã sp / SKU** mặc định để trống; backend không tự sinh SKU khi lấy dữ liệu. Chọn file → chọn{' '}
                   <strong>Lấy dữ liệu từ trang</strong> → bấm chạy.
-                  <strong>Tự động / Hibox:</strong> offer 1688 → <span className="whitespace-nowrap">hibox.mn/v/abb-…</span>; Taobao/Tmall →{' '}
-                  <span className="whitespace-nowrap">hibox.mn/v/{'{id}'}</span>.{' '}
-                  <strong>Vipomall:</strong> 1688 → <span className="whitespace-nowrap">…?platform_type=10</span>; Taobao/Tmall / T{'{id}'} →{' '}
+                  <strong>Tự động / Vipomall:</strong> 1688 → <span className="whitespace-nowrap">…?platform_type=10</span>; Taobao/Tmall / T{'{id}'} →{' '}
                   <span className="whitespace-nowrap">…?platform_type=21</span> (cần SP đã có trên Vipomall).{' '}
                   <strong>PandaMall:</strong> 1688 → <span className="whitespace-nowrap">pandamall.vn/1688/detail/{'{id}'}</span>; Taobao/Tmall / T{'{id}'} →{' '}
                   <span className="whitespace-nowrap">pandamall.vn/taobao/detail/{'{id}'}</span> (cần tài khoản PandaMall ở trên).
@@ -3309,8 +3284,7 @@ export default function AdminProductsPage() {
                         disabled={excelBatchBusy}
                         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-300/80 disabled:opacity-60"
                       >
-                        <option value="auto">Tự động — Taobao / 1688 → Hibox khi đổi được</option>
-                        <option value="hibox">Ép về Hibox (hibox.mn)</option>
+                        <option value="auto">Tự động — Taobao / 1688 → Vipomall khi đổi được</option>
                         <option value="vipomall">Ép về Vipomall (vipomall.vn) — 1688 + Taobao/Tmall</option>
                         <option value="pandamall">Ép về PandaMall (pandamall.vn) — 1688 + Taobao/Tmall</option>
                       </select>
@@ -3676,7 +3650,7 @@ export default function AdminProductsPage() {
 
             {import1688Draft?.product_data ? (
               <div
-                id="import-hibox-draft"
+                id="import-catalog-draft"
                 className="scroll-mt-28 rounded-xl border border-slate-200/90 bg-white p-4 shadow-sm ring-1 ring-slate-900/5 sm:p-5"
               >
                 <div className="mb-4 flex flex-col gap-1 border-b border-gray-100 pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">

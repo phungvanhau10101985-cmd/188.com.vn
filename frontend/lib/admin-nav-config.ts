@@ -24,7 +24,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/test', label: 'Test & thử nghiệm', moduleKey: 'admin_test', privilegedOnly: true },
       { href: '/admin/products/source-stock-check', label: 'Kiểm tra nguồn hàng', moduleKey: 'source_stock_check' },
       { href: '/admin/products/taobao-cards-parse', label: 'Parse HTML listing Taobao', moduleKey: 'taobao_cards_parse' },
-      { href: '/admin/products#import-hibox', label: 'Import Hibox', moduleKey: 'import_1688' },
+      { href: '/admin/products#import-catalog', label: 'Import Vipomall / PandaMall', moduleKey: 'import_1688' },
       { href: '/admin/product-questions', label: 'Hỏi đáp sản phẩm', moduleKey: 'product_questions' },
       { href: '/admin/product-reviews', label: 'Đánh giá sản phẩm', moduleKey: 'product_reviews' },
       { href: '/admin/ladipage', label: 'Ladipage AI', moduleKey: 'ladipage' },

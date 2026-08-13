@@ -1,5 +1,5 @@
 """
-Scrape trang PandaMall (gương Taobao / 1688) → product_data thống nhất với import Hibox/Vipomall.
+Scrape trang PandaMall (gương Taobao / 1688) → product_data thống nhất với import Vipomall.
 
 URL:
   • https://pandamall.vn/taobao/detail/{itemId}
@@ -15,14 +15,15 @@ from urllib.parse import urlparse
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_image_url
 from app.services.import_1688_scraper import canonical_1688_offer_pc_url, extract_offer_id
-from app.services.import_hibox_scraper import (
-    build_canonical_hibox_product_id,
-    extract_hibox_1688_offer_digits,
-    extract_hibox_slug,
+from app.services.import_source_ids import (
+    build_canonical_taobao_product_id,
+    extract_abb_offer_digits,
+    extract_legacy_mirror_slug,
     extract_taobao_tmall_item_id,
+    is_legacy_placeholder_slug,
     normalize_product_import_url,
     parse_t_prefixed_item_id,
-    supply_product_link_default_for_hibox_slug,
+    supply_product_link_default_for_item_slug,
 )
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
@@ -98,9 +99,25 @@ def resolve_pandamall_import_url(raw: str) -> Tuple[str, str]:
     if tid:
         return build_pandamall_taobao_pdp_url(tid), PANDAMALL_PLATFORM_TAOBAO
 
-    slug = extract_hibox_slug(norm)
-    if slug and slug != "hibox_import":
-        abb = extract_hibox_1688_offer_digits(slug)
+    from app.services.import_cssbuy_client import cssbuy_item_page_to_item_slug, parse_cssbuy_goods_detail
+
+    gd = parse_cssbuy_goods_detail(norm)
+    if gd:
+        typ, iid = gd
+        if typ == "1688":
+            return build_pandamall_1688_pdp_url(iid), PANDAMALL_PLATFORM_1688
+        return build_pandamall_taobao_pdp_url(iid), PANDAMALL_PLATFORM_TAOBAO
+    cs_slug = cssbuy_item_page_to_item_slug(norm)
+    if cs_slug:
+        abb = extract_abb_offer_digits(cs_slug)
+        if abb:
+            return build_pandamall_1688_pdp_url(abb), PANDAMALL_PLATFORM_1688
+        if cs_slug.isdigit():
+            return build_pandamall_taobao_pdp_url(cs_slug), PANDAMALL_PLATFORM_TAOBAO
+
+    slug = extract_legacy_mirror_slug(norm)
+    if slug and not is_legacy_placeholder_slug(slug):
+        abb = extract_abb_offer_digits(slug)
         if abb:
             return build_pandamall_1688_pdp_url(abb), PANDAMALL_PLATFORM_1688
         if re.fullmatch(r"\d+", slug):
@@ -112,7 +129,7 @@ def resolve_pandamall_import_url(raw: str) -> Tuple[str, str]:
 
     raise ImportPandamallError(
         "Không quy đổi được sang PandaMall. Cần link pandamall.vn/taobao|1688/detail/{id}, "
-        "Taobao/Tmall, T{id}, Hibox, hoặc offer 1688."
+        "Taobao/Tmall, T{id}, Vipomall, hoặc offer 1688."
     )
 
 
@@ -556,6 +573,50 @@ def _click_expand_button(page: Any) -> bool:
         return False
 
 
+def try_pandamall_playwright_auto_login(page: Any, page_url: str) -> bool:
+    """Nếu PandaMall hiện form đăng nhập, điền tài khoản đã lưu. True nếu đã submit login."""
+    try:
+        on_login = "login" in ((page.url or "")).lower()
+        has_form = (
+            page.locator("text=Đăng nhập").count() > 0
+            or page.get_by_placeholder("Số điện thoại/Email").count() > 0
+        )
+    except Exception:
+        on_login, has_form = False, False
+    if not on_login and not has_form:
+        return False
+    try:
+        from app.services.import_scraper_cookies import get_pandamall_account
+
+        acc = get_pandamall_account()
+    except Exception:
+        return False
+    username = str(acc.get("username") or "").strip()
+    password = str(acc.get("password") or "").strip()
+    if not username or not password:
+        return False
+    try:
+        if page.get_by_placeholder("Số điện thoại/Email").count() == 0:
+            return False
+        page.get_by_placeholder("Số điện thoại/Email").fill(username)
+        page.get_by_placeholder("Mật khẩu").fill(password)
+        page.get_by_role("button", name="Đăng nhập").first.click()
+        page.wait_for_timeout(3000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=15_000)
+        except Exception:
+            pass
+        if "detail" not in ((page.url or "")).lower() and page_url:
+            page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=15_000)
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
 def scrape_pandamall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
     from app.services.import_playwright_dispatch import run_import_playwright_sync
 
@@ -610,34 +671,7 @@ def _scrape_pandamall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], 
                 except Exception:
                     pass
 
-                # Tự động đăng nhập nếu bị đẩy ra trang login hoặc thấy form
-                if "login" in page.url.lower() or page.locator("text=Đăng nhập").count() > 0 or page.get_by_placeholder("Số điện thoại/Email").count() > 0:
-                    from app.services.import_scraper_cookies import get_pandamall_account
-                    acc = get_pandamall_account()
-                    username = acc.get("username", "")
-                    password = acc.get("password", "")
-
-                    if username and password:
-                        try:
-                            # Đảm bảo các field tồn tại trước khi điền
-                            if page.get_by_placeholder("Số điện thoại/Email").count() > 0:
-                                page.get_by_placeholder("Số điện thoại/Email").fill(username)
-                                page.get_by_placeholder("Mật khẩu").fill(password)
-                                page.get_by_role("button", name="Đăng nhập").first.click()
-                                page.wait_for_timeout(3000)
-                                try:
-                                    page.wait_for_load_state("networkidle", timeout=15000)
-                                except Exception:
-                                    pass
-                                # Nếu sau khi đăng nhập bị kẹt ở trang chủ, chuyển hướng lại về sản phẩm
-                                if "detail" not in page.url.lower():
-                                    page.goto(page_url, wait_until="domcontentloaded", timeout=45_000)
-                                    try:
-                                        page.wait_for_load_state("networkidle", timeout=15000)
-                                    except Exception:
-                                        pass
-                        except Exception as e:
-                            print(f"PandaMall auto-login failed: {e}")
+                try_pandamall_playwright_auto_login(page, page_url)
 
                 page.wait_for_timeout(2500)
                 for y in (500, 1200, 2200, 3600):
@@ -877,10 +911,10 @@ def pandamall_row_to_product_data(
 
     is_taobao = platform == PANDAMALL_PLATFORM_TAOBAO
     supply_slug = item_id if is_taobao else f"abb-{item_id}"
-    supply_url = supply_product_link_default_for_hibox_slug(supply_slug)
+    supply_url = supply_product_link_default_for_item_slug(supply_slug)
     if not is_taobao and item_id.isdigit():
         supply_url = canonical_1688_offer_pc_url(item_id) or supply_url
-    product_id = build_canonical_hibox_product_id(item_id) if is_taobao else f"A{item_id}"
+    product_id = build_canonical_taobao_product_id(item_id) if is_taobao else f"A{item_id}"
     origin = "taobao" if is_taobao else "1688"
     supply_platform = "taobao" if is_taobao else "1688"
     cny_for_excel = _pick_cny_price(row, price_vnd)

@@ -1,8 +1,11 @@
 # Huong dan them nguon import tu link san pham
 
-Tai lieu nay ghi lai luong `Import tu link (1688 / Hibox)` de sau nay them nguon moi
-(vi du Taobao, Tmall, Shopee, Hibox domain khac, v.v.) khong bi roi vao loi sai source
+Tai lieu nay ghi lai luong `Import tu link` (Vipomall / PandaMall / CSSBuy / 1688 khi bat)
+de sau nay them nguon moi (vi du Taobao, Tmall, Shopee, v.v.) khong bi roi vao loi sai source
 nhu `Link 1688 khong hop le hoac thieu offerId`.
+
+> **Cap nhat:** Mot nguon import cu da go. `fetch_target=auto` quy ve Vipomall.
+> Draft/DB cu van duoc match legacy qua `import_source_ids.py` (khong scrape lai).
 
 ## Muc tieu cua luong import link
 
@@ -210,18 +213,10 @@ Import1688JobCreate: url, download_images, source
 
 ```bash
 curl -H "Authorization: Bearer <ADMIN_TOKEN>" \
-  "https://188.com.vn/api/v1/import-1688/debug/classify-url?url=https%3A%2F%2Fhibox.mn%2Fv%2Fabb-922386436529"
+  "https://188.com.vn/api/v1/import-1688/debug/classify-url?url=https%3A%2F%2Fvipomall.vn%2Fsan-pham%2F922386436529%3Fplatform_type%3D10"
 ```
 
-Ket qua ky vong:
-
-```json
-{
-  "is_hibox": true,
-  "hibox_slug": "abb-922386436529",
-  "would_accept_for_post_jobs": true
-}
-```
+Ket qua ky vong: `would_accept_for_post_jobs=true`, co `vipomall_coerced_url` (hoac URL Vipomall).
 
 4. Test tao job:
 
@@ -229,7 +224,7 @@ Ket qua ky vong:
 curl -X POST "https://188.com.vn/api/v1/import-1688/jobs" \
   -H "Authorization: Bearer <ADMIN_TOKEN>" \
   -H "Content-Type: application/json" \
-  -d "{\"url\":\"https://hibox.mn/v/abb-922386436529\",\"download_images\":false,\"source\":\"hibox\"}"
+  -d "{\"url\":\"https://vipomall.vn/san-pham/922386436529?platform_type=10\",\"download_images\":false,\"source\":\"vipomall\"}"
 ```
 
 Ky vong HTTP `202` va co `job_id`, `draft_id`.
@@ -238,7 +233,7 @@ Ky vong HTTP `202` va co `job_id`, `draft_id`.
 
 - Request phai di toi domain server dung, khong phai `localhost`.
 - Path phai co `/api/v1/import-1688/jobs`.
-- Body phai co `source: "hibox"` voi Hibox.
+- Body nen gui `source: "vipomall"` / `"pandamall"` (token nguon da go se bi 400).
 
 ### Loi thuong gap tren server
 
@@ -253,7 +248,7 @@ Ky vong HTTP `202` va co `job_id`, `draft_id`.
 
 ### Ghi chu Playwright tren server
 
-1688 va Hibox scraper dung Playwright. Server can cai dependency:
+Vipomall / PandaMall / 1688 scraper dung Playwright. Server can cai dependency:
 
 ```bash
 pip install -r backend/requirements.txt
@@ -267,7 +262,7 @@ python -m playwright install --with-deps chromium
 ```
 
 Neu chay trong Docker/VPS toi gian, loi Playwright se hien trong job `errors` voi dang
-`Loi Playwright/Hibox` hoac `Backend chua cai Playwright`.
+`Loi Playwright/Vipomall` hoac `Backend chua cai Playwright`.
 
 ## Source contract
 
@@ -278,9 +273,9 @@ Request body tao job:
 
 ```json
 {
-  "url": "https://hibox.mn/v/abb-922386436529",
+  "url": "https://vipomall.vn/san-pham/922386436529?platform_type=10",
   "download_images": false,
-  "source": "hibox"
+  "source": "vipomall"
 }
 ```
 
@@ -292,14 +287,15 @@ Quy tac hien tai:
 
 | Source | URL mau | `source` gui tu frontend | `download_images` |
 | --- | --- | --- | --- |
-| `1688` | `https://detail.1688.com/offer/123.html` hoac co `?offerId=123` | `1688` | `false` (giu link goc) |
-| `hibox` | `https://hibox.mn/v/abb-922386436529` | `hibox` | `false` |
+| `vipomall` | `https://vipomall.vn/san-pham/{id}?platform_type=10|21` | `vipomall` | `false` |
+| `pandamall` | `https://pandamall.vn/1688/detail/{id}` | `pandamall` | `false` |
+| `1688` | `https://detail.1688.com/offer/123.html` (khi `IMPORT_1688_ENABLED`) | `1688` | `false` |
 
 Backend uu tien:
 
-1. `payload.source == "hibox"` -> chay Hibox.
-2. URL chua host `hibox.mn` -> chay Hibox.
-3. Neu co `offerId` hoac `/offer/{id}.html` -> chay 1688.
+1. Token nguon da go -> 400 `removed_import_source`.
+2. URL Vipomall / PandaMall / Taobao/Tmall / T{id} / abb-* -> quy ve Vipomall (hoac PandaMall).
+3. Neu `IMPORT_1688_ENABLED` va co offer 1688 -> co the chay 1688 truc tiep.
 4. Con lai -> 400 `unsupported_import_link`.
 
 Nguyen tac quan trong: **neu URL thuoc source moi thi khong duoc roi xuong scraper 1688**.
@@ -340,9 +336,9 @@ Khung them source moi:
 if requested_source == "new_source" or is_new_source_url(source_url):
     ext_id = extract_new_source_id(source_url) or "new_source_import"
     src = "new_source"
-elif force_hibox or is_hibox_import_url(source_url):
-    ext_id = extract_hibox_slug(source_url) or "hibox_import"
-    src = "hibox"
+elif is_vipomall_import_url(source_url) or requested_source == "vipomall":
+    ext_id = extract_vipomall_offer_id(source_url) or "vipomall_import"
+    src = "vipomall"
 else:
     offer_id = extract_offer_id(source_url)
     ...
@@ -353,8 +349,8 @@ Trong worker:
 ```py
 if saved_source == "new_source" or is_new_source_url(norm_url):
     source = "new_source"
-elif saved_source == "hibox" or "hibox.mn" in norm_url.lower() or is_hibox_import_url(norm_url):
-    source = "hibox"
+elif saved_source == "vipomall" or is_vipomall_import_url(norm_url):
+    source = "vipomall"
 else:
     source = saved_source
 ```
@@ -389,9 +385,9 @@ Draft export dang dung `_excel_row_from_product`, vi vay moi source phai dien ca
 
 | Key | Y nghia | Ghi chu |
 | --- | --- | --- |
-| `product_id` | id san pham duy nhat | Nen prefix source, vd `hibox_<slug>` |
+| `product_id` | id san pham duy nhat | `A{offer}` (1688) / `T{id}` (Taobao) |
 | `code` | SKU | Neu khong co, dung id/slug |
-| `origin` | nguon | vd `hibox.mn`, `1688.com` |
+| `origin` | nguon | vd `vipomall.vn`, `1688.com` |
 | `name` | ten san pham | bat buoc |
 | `description` | noi dung mo ta | co the gom thong so |
 | `price` | gia numeric | float/int |
@@ -421,7 +417,7 @@ Khong duoc gop tat ca anh vao mot field. Hien tai can tach:
 Can sua:
 
 - `resolveImportLinkUrl(raw)`: tach URL sach tu text admin dan vao;
-- `isHiboxProductUrl` hoac them `isNewSourceProductUrl`;
+- `isVipomallProductUrl` / `isNewSourceProductUrl`;
 - `handleImport1688`: gui `source` dung;
 - text UI: label, placeholder, toast, error title.
 
@@ -429,7 +425,7 @@ Mau:
 
 ```ts
 const fromNewSource = isNewSourceProductUrl(url);
-const source = fromNewSource ? 'new_source' : fromHibox ? 'hibox' : '1688';
+const source = fromNewSource ? 'new_source' : fromVipomall ? 'vipomall' : 'pandamall';
 const started = await adminProductAPI.startImport1688(url, source === '1688', source);
 ```
 
@@ -446,7 +442,7 @@ body: JSON.stringify({ url, download_images: downloadImages, source })
 Neu them source moi, cap nhat type:
 
 ```ts
-source?: '1688' | 'hibox' | 'new_source'
+source?: 'vipomall' | 'pandamall' | '1688' | 'new_source'
 ```
 
 ## Debug khi bi 400 / 404 / thieu offerId
@@ -529,20 +525,18 @@ Nghia la code da goi `scrape_1688_product`. Neu dang dan link source khac, can k
    - publish draft neu source du du lieu.
 9. Restart backend va frontend, verify live OpenAPI co schema/route moi.
 
-## Test nhanh Hibox hien tai
+## Test nhanh Vipomall hien tai
 
 URL:
 
 ```text
-https://hibox.mn/v/abb-922386436529
+https://vipomall.vn/san-pham/922386436529?platform_type=10
 ```
 
 Ky vong:
 
-- frontend gui `source: "hibox"`;
+- frontend gui `source: "vipomall"`;
 - `download_images: false`;
-- backend tao draft `source="hibox"`;
-- worker chay `scrape_hibox_for_import`;
+- backend tao draft `source="vipomall"`;
+- worker chay `scrape_vipomall_for_import`;
 - khong bao `thieu offerId`.
-
-Neu co loi scrape Hibox, message phai la `ImportHiboxError` / `Loi Playwright/Hibox`, khong phai loi 1688.

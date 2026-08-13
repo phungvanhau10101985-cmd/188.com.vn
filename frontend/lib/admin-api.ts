@@ -552,15 +552,12 @@ export interface AdminSourceStockActivityReportSampleRow {
   /** URL trang item CSSBuy sau quy đổi (như batch Excel / worker). */
   link_convert_cssbuy?: string;
   link_convert_cssbuy_err?: string;
-  /** URL Hibox scrape sau quy đổi. */
-  link_convert_hibox?: string;
-  link_convert_hibox_err?: string;
   /** URL Vipomall (gương 1688) sau quy đổi. */
   link_convert_vipomall?: string;
   link_convert_vipomall_err?: string;
   source_stock_status: string | null;
   source_stock_checked_at: string | null;
-  /** Nền đã đọc PDP cho kết quả kiểm tra (worker: cssbuy / hibox; batch: cssbuy, hibox, cssbuy+hibox…) */
+  /** Nền đã đọc PDP cho kết quả kiểm tra (worker: cssbuy; batch: cssbuy, vipomall, cssbuy+vipomall…) */
   source_stock_check_platform?: string | null;
   admin_source_batch_scanned_at: string | null;
   available: number;
@@ -642,7 +639,7 @@ export interface AdminSourceStockForceWorkerRecheckResult {
   source_stock_next_check_at?: string | null;
 }
 
-/** Thử PDP theo một link — không ghi DB (CSSBuy→Hibox như worker). */
+/** Thử PDP theo một link — không ghi DB (CSSBuy→Vipomall như worker). */
 export interface AdminSourceStockPreviewUrlBranch {
   status: string;
   error?: string | null;
@@ -652,10 +649,10 @@ export interface AdminSourceStockPreviewUrlBranch {
 export interface AdminSourceStockPreviewUrlCoercion {
   cssbuy_url: string;
   cssbuy_coercion_error: string;
-  hibox_url: string;
-  hibox_coercion_error: string;
   vipomall_url?: string;
   vipomall_coercion_error?: string;
+  pandamall_url?: string;
+  pandamall_coercion_error?: string;
 }
 
 export interface AdminSourceStockPreviewUrlResult {
@@ -664,8 +661,8 @@ export interface AdminSourceStockPreviewUrlResult {
   link_eligible: boolean;
   coercion: AdminSourceStockPreviewUrlCoercion;
   cssbuy: AdminSourceStockPreviewUrlBranch;
-  hibox: AdminSourceStockPreviewUrlBranch;
   vipomall?: AdminSourceStockPreviewUrlBranch;
+  pandamall?: AdminSourceStockPreviewUrlBranch;
   merged: AdminSourceStockPreviewUrlBranch;
 }
 
@@ -1382,8 +1379,8 @@ async function deleteSourceStockBatchProductsByDbIdsImpl(
 }
 
 export const adminProductAPI = {
-  getPandamallAccount: async (): Promise<{ username?: string }> => {
-    return fetchAdmin<{ username?: string }>('/admin/pandamall-account');
+  getPandamallAccount: async (): Promise<{ username?: string; password?: string }> => {
+    return fetchAdmin<{ username?: string; password?: string }>('/admin/pandamall-account');
   },
 
   savePandamallAccount: async (username: string, password?: string): Promise<{ message: string }> => {
@@ -1464,7 +1461,7 @@ export const adminProductAPI = {
       body: JSON.stringify({ product_ids: productIds }),
     }),
 
-  /** Xếp hàng kiểm tra tình trạng nguồn qua worker scrape Hibox (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
+  /** Xếp hàng kiểm tra tình trạng nguồn qua worker scrape (`SOURCE_STOCK_CHECK_*`). Không chờ worker xong. */
   enqueueSourceStockCheckByDbId: (dbPkId: number) =>
     fetchAdmin<{
       queued: boolean;
@@ -1473,9 +1470,9 @@ export const adminProductAPI = {
       source_stock_next_check_at?: string | null;
     }>(`/products/by-id/${dbPkId}/source-stock-check/enqueue`, { method: 'POST' }),
 
-  /** Một SP kế trong DB — kiểm tra qua Hibox hoặc CSSBuy. */
+  /** Một SP kế trong DB — kiểm tra qua CSSBuy hoặc Vipomall. */
   runSourceStockBatchNextFromDb: (params: {
-    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    domain: 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     cursorAfterProductId?: number;
     /** products.id — giữ kiểm tra lại đúng SP sau lỗi tạm (captcha/chặn…). */
@@ -1499,9 +1496,9 @@ export const adminProductAPI = {
       timeoutMs: ADMIN_SOURCE_STOCK_SCAN_TIMEOUT_MS,
     }),
 
-  /** Nạp `link_default` trong DB — lọc theo miền kiểm tra (hibox vs cssbuy). */
+  /** Nạp `link_default` trong DB — lọc theo miền kiểm tra (cssbuy vs vipomall). */
   fetchSourceStockProductUrls: (params: {
-    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    domain: 'cssbuy' | 'vipomall';
     limit?: number;
     activeOnly?: boolean;
   }) =>
@@ -1510,7 +1507,7 @@ export const adminProductAPI = {
       { timeoutMs: 120_000 },
     ),
 
-  fetchSourceStockQueueStats: (params: { domain: 'hibox' | 'cssbuy' | 'vipomall'; activeOnly?: boolean }) =>
+  fetchSourceStockQueueStats: (params: { domain: 'cssbuy' | 'vipomall'; activeOnly?: boolean }) =>
     fetchAdmin<AdminSourceStockQueueStats>(
       `/products/admin/source-stock-batch/queue-stats?domain=${encodeURIComponent(params.domain)}&active_only=${params.activeOnly ?? true}`,
       { timeoutMs: 60_000 },
@@ -1530,7 +1527,7 @@ export const adminProductAPI = {
 
   /** Đếm đã kiểm tra / OOS / còn hàng trong cửa sổ + mẫu chi tiết (phân trang, mới nhất trước). */
   fetchSourceStockActivityReport: (params: {
-    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    domain: 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     windowDays?: number;
     samplesOosPage?: number;
@@ -1554,7 +1551,7 @@ export const adminProductAPI = {
 
   /** Toàn bộ id DB gắn cờ hết hàng trong cửa sổ báo cáo (không chỉ 200 dòng trang mẫu). */
   fetchSourceStockWindowOosDbIds: (params: {
-    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    domain: 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     windowDays?: number;
     limit?: number;
@@ -1590,7 +1587,7 @@ export const adminProductAPI = {
       },
     ),
 
-  /** Một request thử PDP (CSSBuy→Hibox→Vipomall) theo URL — không cập nhật products. */
+  /** Một request thử PDP (CSSBuy→Vipomall) theo URL — không cập nhật products. */
   previewSourceStockByUrl: (url: string) =>
     fetchAdmin<AdminSourceStockPreviewUrlResult>('/products/admin/source-stock-batch/preview-url', {
       method: 'POST',
@@ -1603,7 +1600,7 @@ export const adminProductAPI = {
    * Xóa hàng chờ RAM chỉ trên một process backend.
    */
   resetSourceStockPdpCycle: (params: {
-    domain: 'hibox' | 'cssbuy' | 'vipomall';
+    domain: 'cssbuy' | 'vipomall';
     activeOnly?: boolean;
     confirm: boolean;
   }) =>
@@ -1801,7 +1798,7 @@ export const adminProductAPI = {
       { method: 'POST', timeoutMs: 30_000 },
     ),
 
-  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'hibox' | 'vipomall' | 'pandamall') =>
+  startImport1688: (url: string, downloadImages = true, source?: '1688' | 'vipomall' | 'pandamall') =>
     fetchAdmin<{ job_id: string; draft_id: number; message?: string; poll_url?: string }>(
       '/import-1688/jobs',
       {
@@ -2054,7 +2051,7 @@ export const adminProductAPI = {
 
   uploadImport1688ExcelBatch: async (
     file: File,
-    fetchTarget: 'auto' | 'hibox' | 'vipomall' | 'pandamall' = 'auto',
+    fetchTarget: 'auto' | 'vipomall' | 'pandamall' = 'auto',
     appendBatchToken?: string | null,
   ): Promise<AdminImport1688ExcelBatchStart> => {
     const token = getAdminToken();

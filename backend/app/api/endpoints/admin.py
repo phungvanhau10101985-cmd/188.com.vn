@@ -195,7 +195,7 @@ def admin_save_import_1688_cookie_settings(
     )
     settings.IMPORT_1688_ENABLED = True
     return _import_1688_cookie_settings_out(
-        f"Đã lưu {count} cookie scrape chung (Hibox, Vipomall, kiểm tra tồn kho)."
+        f"Đã lưu {count} cookie scrape chung (Vipomall, PandaMall, kiểm tra tồn kho)."
     )
 
 
@@ -1424,6 +1424,17 @@ def admin_integrations_api_keys_overview(
             ],
         ),
         AdminIntegrationKeyGroup(
+            title="Cổng tra cứu vận chuyển (partner)",
+            items=[
+                AdminIntegrationKeyRow(
+                    env_var="SHIPPING_LOOKUP_API_KEY",
+                    label="API GET|POST /api/v1/shipping/lookup — mã đơn / SĐT / mã EMS",
+                    configured=_integration_secret_configured(settings.SHIPPING_LOOKUP_API_KEY, min_len=8),
+                    hint="Header X-Api-Key hoặc Authorization: Bearer. Nhiều key cách nhau bằng dấu phẩy. Để trống = API tắt (503).",
+                ),
+            ],
+        ),
+        AdminIntegrationKeyGroup(
             title="Thanh toán SePay",
             items=[
                 AdminIntegrationKeyRow(
@@ -1525,13 +1536,16 @@ class PandamallAccountUpdate(BaseModel):
 def admin_get_pandamall_account(
     _: models.AdminUser = Depends(require_privileged_admin),
 ):
-    """Lấy tài khoản Pandamall đã cấu hình (chỉ trả về username)."""
+    """Lấy tài khoản PandaMall đã cấu hình (username + mật khẩu, chỉ admin privileged)."""
     try:
         from app.services.import_scraper_cookies import get_pandamall_account
         data = get_pandamall_account()
-        return {"username": data.get("username", "")}
+        return {
+            "username": data.get("username", ""),
+            "password": data.get("password", ""),
+        }
     except ImportError:
-        return {"username": ""}
+        return {"username": "", "password": ""}
 
 
 @router.put("/pandamall-account")

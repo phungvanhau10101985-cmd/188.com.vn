@@ -1,5 +1,5 @@
 """
-Scrape trang Vipomall 1688 mirror -> product_data giống luồng import Hibox/1688.
+Scrape trang Vipomall 1688 mirror -> product_data giống luồng import 1688 / PandaMall.
 
 Vipomall là Angular SPA nên cần Playwright để lấy variant, bảng size/giá/tồn,
 gallery và ảnh mô tả sau khi bấm "Xem thêm" / "Xem thêm chi tiết".
@@ -13,14 +13,15 @@ from urllib.parse import parse_qs, urlparse
 
 from app.core.config import settings
 from app.services.alicdn_urls import normalize_product_image_url
-from app.services.import_hibox_scraper import (
-    build_canonical_hibox_product_id,
-    extract_hibox_1688_offer_digits,
-    extract_hibox_slug,
+from app.services.import_source_ids import (
+    build_canonical_taobao_product_id,
+    extract_abb_offer_digits,
+    extract_legacy_mirror_slug,
     extract_taobao_tmall_item_id,
+    is_legacy_placeholder_slug,
     normalize_product_import_url,
     parse_t_prefixed_item_id,
-    supply_product_link_default_for_hibox_slug,
+    supply_product_link_default_for_item_slug,
 )
 from app.services.vipomall_source_stock import (
     VIPOMALL_PLATFORM_1688,
@@ -92,8 +93,8 @@ def infer_vipomall_platform_type(source_url: str, offer_id: str) -> int:
     norm = normalize_product_import_url((source_url or "").strip())
     if parse_t_prefixed_item_id(norm) or extract_taobao_tmall_item_id(norm):
         return VIPOMALL_PLATFORM_TAOBAO
-    slug = extract_hibox_slug(norm)
-    if slug and slug != "hibox_import" and not extract_hibox_1688_offer_digits(slug):
+    slug = extract_legacy_mirror_slug(norm)
+    if slug and not is_legacy_placeholder_slug(slug) and not extract_abb_offer_digits(slug):
         if re.fullmatch(r"\d+", slug or ""):
             return VIPOMALL_PLATFORM_TAOBAO
     return VIPOMALL_PLATFORM_1688
@@ -101,7 +102,7 @@ def infer_vipomall_platform_type(source_url: str, offer_id: str) -> int:
 
 def resolve_vipomall_import_url(raw: str) -> Tuple[str, int]:
     """
-    Chuẩn hoá mọi link Taobao/Tmall/T-id/Hibox số/Vipomall → URL Vipomall + platform_type.
+    Chuẩn hoá mọi link Taobao/Tmall/T-id/abb-*/Vipomall → URL Vipomall + platform_type.
     Taobao/Tmall → platform_type=21; 1688 → platform_type=10.
     """
     trimmed = (raw or "").strip()
@@ -124,9 +125,9 @@ def resolve_vipomall_import_url(raw: str) -> Tuple[str, int]:
     if tid:
         return build_vipomall_taobao_pdp_url(tid), VIPOMALL_PLATFORM_TAOBAO
 
-    slug = extract_hibox_slug(norm)
-    if slug and slug != "hibox_import":
-        abb = extract_hibox_1688_offer_digits(slug)
+    slug = extract_legacy_mirror_slug(norm)
+    if slug and not is_legacy_placeholder_slug(slug):
+        abb = extract_abb_offer_digits(slug)
         if abb:
             return build_vipomall_1688_pdp_url(abb), VIPOMALL_PLATFORM_1688
         if re.fullmatch(r"\d+", slug):
@@ -139,7 +140,7 @@ def resolve_vipomall_import_url(raw: str) -> Tuple[str, int]:
         return build_vipomall_1688_pdp_url(oid1688), VIPOMALL_PLATFORM_1688
 
     raise ImportVipomallError(
-        "Không quy đổi được sang Vipomall. Cần link Taobao/Tmall, T{id}, Hibox số/abb-*, offer 1688, hoặc vipomall.vn/san-pham/{id}."
+        "Không quy đổi được sang Vipomall. Cần link Taobao/Tmall, T{id}, abb-*/số, offer 1688, hoặc vipomall.vn/san-pham/{id}."
     )
 
 
@@ -958,8 +959,8 @@ def vipomall_row_to_product_data(
     shop_cn = _pick_shop_name_chinese(row)
     is_taobao = platform_type == VIPOMALL_PLATFORM_TAOBAO
     supply_slug = offer_id if is_taobao else f"abb-{offer_id}"
-    supply_url = supply_product_link_default_for_hibox_slug(supply_slug)
-    product_id = build_canonical_hibox_product_id(offer_id) if is_taobao else f"A{offer_id}"
+    supply_url = supply_product_link_default_for_item_slug(supply_slug)
+    product_id = build_canonical_taobao_product_id(offer_id) if is_taobao else f"A{offer_id}"
     origin = "taobao" if is_taobao else "1688"
     supply_platform = "taobao" if is_taobao else "1688"
     cny_for_excel = _pick_cny_price(row, price_vnd)

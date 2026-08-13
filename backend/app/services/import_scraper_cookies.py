@@ -1,5 +1,5 @@
 """
-Cookie Playwright dùng chung: lấy thông tin SP (Hibox, Vipomall, 1688), kiểm tra tồn kho nguồn.
+Cookie Playwright dùng chung: lấy thông tin SP (Vipomall, PandaMall, 1688), kiểm tra tồn kho nguồn.
 
 Một file JSON trên server — mỗi scraper chỉ áp cookie khớp domain trang đang mở.
 Link không cần đăng nhập vẫn scrape được; cookie giúp trang khó / đã đăng nhập.
@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from app.core.config import settings
+from app.services.import_source_ids import legacy_mirror_cookie_hosts, legacy_mirror_cookie_seed_urls
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,14 @@ _LEGACY_COOKIE_FILENAME = "1688-cookies.json"
 
 # Origin mở trước khi add_cookies (Playwright yêu cầu khớp domain).
 _HOST_SEED_URLS: Dict[str, str] = {
-    "hibox.mn": "https://hibox.mn/",
-    "taobao1688.kz": "https://taobao1688.kz/",
+    **legacy_mirror_cookie_seed_urls(),
     "vipomall.vn": "https://vipomall.vn/",
     "taobao.com": "https://www.taobao.com/",
     "tmall.com": "https://www.tmall.com/",
     "1688.com": "https://www.1688.com/",
     "alibaba.com": "https://www.alibaba.com/",
     "pandamall.vn": "https://pandamall.vn/",
+    "cssbuy.com": "https://www.cssbuy.com/",
 }
 
 
@@ -216,16 +217,24 @@ def cookie_domain_warnings(domains: List[str]) -> List[str]:
     for d in domains:
         if d == "188.com.vn" or d.endswith(".188.com.vn"):
             warnings.append(
-                "Phát hiện cookie 188.com.vn — không dùng cho scrape Hibox/Vipomall. "
-                "Export lại từ hibox.mn / vipomall.vn."
+                "Phát hiện cookie 188.com.vn — không dùng cho scrape Vipomall/PandaMall. "
+                "Export lại từ vipomall.vn / pandamall.vn."
             )
             break
-    scrape_hosts = {"hibox.mn", "vipomall.vn", "pandamall.vn", "taobao.com", "tmall.com", "1688.com", "taobao1688.kz"}
+    scrape_hosts = {
+        "vipomall.vn",
+        "pandamall.vn",
+        "taobao.com",
+        "tmall.com",
+        "1688.com",
+        "cssbuy.com",
+        *legacy_mirror_cookie_hosts(),
+    }
     if domains and not any(
         any(d == h or d.endswith("." + h) for h in scrape_hosts) for d in domains
     ):
         warnings.append(
-            "Không thấy domain scrape (hibox.mn, vipomall.vn, pandamall.vn, taobao…). Kiểm tra lại file export."
+            "Không thấy domain scrape (vipomall.vn, pandamall.vn, cssbuy, taobao…). Kiểm tra lại file export."
         )
     return warnings
 
@@ -340,9 +349,9 @@ def scraper_cookie_settings_dict(message: str | None = None) -> dict[str, Any]:
         "cookie_warnings": warnings,
         "message": message,
         "usage_note": (
-            "Một bộ cookie cho Hibox, Vipomall, PandaMall, kiểm tra tồn kho và scrape 1688 (nếu bật). "
+            "Một bộ cookie cho Vipomall, PandaMall, CSSBuy, kiểm tra tồn kho và scrape 1688 (nếu bật). "
             "Dán JSON export từ Chrome (EditThisCookie / Cookie-Editor) khi đã đăng nhập "
-            "hibox.mn / vipomall.vn / pandamall.vn / taobao / 1688 — không dùng cookie 188.com.vn."
+            "vipomall.vn / pandamall.vn / taobao / 1688 — không dùng cookie 188.com.vn."
         ),
         **expiry,
     }

@@ -60,11 +60,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     })).filter((g) => g.items.length > 0);
   }, [hydrated, adminRole, adminModules]);
 
-  const adminHomeHref = useMemo(
-    () => defaultAdminHomeFromState((adminRole || '').trim() || null, adminModules),
-    [adminRole, adminModules],
-  );
-
   const showClearCacheButton = hydrated && (adminRole === null || isPrivilegedAdminRole(adminRole));
 
   useEffect(() => {
@@ -147,9 +142,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const sidebarInner = (
     <>
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-3 py-3 lg:px-4">
-        <Link href={adminHomeHref} className="min-w-0 text-lg font-bold text-white truncate">
+        <a
+          href={`${getStorefrontOrigin()}/`}
+          className="min-w-0 text-lg font-bold text-white truncate"
+          title="Về trang chủ 188.com.vn"
+        >
           188 Admin
-        </Link>
+        </a>
         <button
           type="button"
           className="rounded-lg p-2 text-slate-300 hover:bg-slate-700 hover:text-white lg:hidden"
@@ -220,13 +219,14 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <Link
-              href={adminHomeHref}
+            <a
+              href={`${getStorefrontOrigin()}/`}
               className="min-w-0 truncate text-base font-bold text-slate-800"
+              title="Về trang chủ 188.com.vn"
               onClick={closeMobileNav}
             >
               188 Admin
-            </Link>
+            </a>
           </div>
 
           <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:flex-nowrap lg:w-auto lg:ml-auto">

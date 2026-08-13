@@ -9,6 +9,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict
 
+from app.services.import_source_ids import (
+    legacy_draft_source_name,
+    market_info_has_legacy_mnt_footprint,
+)
+
 
 _INNER_WEB_KEYS = frozenset(
     {
@@ -50,26 +55,25 @@ def _truthy(val: Any) -> bool:
     return True
 
 
-def _should_compact_hibox_style_product_info(pi: Dict[str, Any]) -> bool:
-    """Nhận diện bản scrape catalog Hibox/Vipomall — không phụ thuộc nhãn tên miền trong JSON."""
+def _should_compact_import_style_product_info(pi: Dict[str, Any]) -> bool:
+    """Nhận diện bản scrape catalog Vipomall/PandaMall/listing — gồm footprint draft legacy."""
     inner_chk = pi.get("product_info")
     if isinstance(inner_chk, dict):
-        if str(inner_chk.get("source") or "").lower() == "hibox":
+        src_inner = str(inner_chk.get("source") or "").lower()
+        if src_inner in {"vipomall", "pandamall"} or src_inner == legacy_draft_source_name():
             return True
         if str(inner_chk.get("origin") or "").lower() == "1688" and inner_chk.get("listing_sku_hint"):
             return True
     var_chk = pi.get("variants")
     if isinstance(var_chk, dict):
-        if str(var_chk.get("source") or "").lower() in {"hibox", "vipomall", "pandamall"}:
+        src_var = str(var_chk.get("source") or "").lower()
+        if src_var in {"vipomall", "pandamall"} or src_var == legacy_draft_source_name():
             return True
     mk = pi.get("market_info")
     if isinstance(mk, dict):
         if str(mk.get("currency") or "").strip().upper() == "MNT":
             return True
-        # Listing Hibox sau khi quy ₮→VNĐ vẫn lưu footprint giá nguồn Hibox (draft đời cũ có thể thiếu variants.source).
-        if mk.get("hibox_display_mnt_integer") is not None:
-            return True
-        if mk.get("hibox_mnt_per_cny_used") is not None:
+        if market_info_has_legacy_mnt_footprint(mk):
             return True
     return False
 
@@ -78,10 +82,10 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     """
     Mutate `product_data['product_info']` thành cấu trúc gọn cho PDP.
 
-    Chỉ áp dụng khi payload nhận diện là import Hibox/Vipomall/listing (`_should_compact_hibox_style_product_info`),
-    để không làm mất cấu trúc cột AK do Excel nhập tay.
+    Chỉ áp dụng khi payload nhận diện là import Vipomall/PandaMall/listing
+    (`_should_compact_import_style_product_info`), để không làm mất cấu trúc cột AK do Excel nhập tay.
 
-    Không giữ `supplier_specs_excerpt` / `hibox_specs_excerpt`, `vipomall_info_texts`,
+    Không giữ `supplier_specs_excerpt` / legacy specs excerpt, `vipomall_info_texts`,
     `import_taxonomy_meta`, `pairs`, `color_swatches`, `vipomall_rows`, link ảnh/source URL…;
     `market_info.note` không đưa ra web (ghi chú máy scrape).
     """
@@ -89,7 +93,7 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     if not isinstance(pi, dict):
         return
 
-    if not _should_compact_hibox_style_product_info(pi):
+    if not _should_compact_import_style_product_info(pi):
         return
 
     slim_inner: Dict[str, Any] = {}

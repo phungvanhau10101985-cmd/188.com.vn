@@ -2,9 +2,8 @@
 Dịch tên biến thể màu (JSON [{"name","img"}]) sang tiếng Việt qua DeepSeek khi có DEEPSEEK_API_KEY.
 
 Bật dịch khi một trong các điều kiện:
-  • Nguồn **Hibox** (`variants.source` / `import_source="hibox"`) — bắt buộc mọi luồng lấy SP qua hibox.mn;
   • EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE=true (import Excel — mặc định tắt; file đã chuẩn Variant thì không bật);
-  • IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED (import link Vipomall/1688 khi scrape — không áp import Excel).
+  • IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED (import link Vipomall/PandaMall/1688 khi scrape — không áp import Excel).
 
 Mặc định dịch khi tên có CJK/Kirin/Cyrillic; thêm nhãn Latin (vd. Black Suede, 15 Black Suede (91536)).
 """
@@ -13,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -21,7 +20,7 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Trung / Nhật / Hàn + Kirin (tiếng Mông Cổ / một số ngôn ngữ trên Hibox)
+# Trung / Nhật / Hàn + Cyrillic (một số nhãn nguồn)
 _CJK_RE = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]")
 _CYR_RE = re.compile(r"[\u0400-\u04FF]")
 
@@ -36,15 +35,12 @@ _SIZE_LIKE_RE = re.compile(
     r"^(xxl|xxxl|xxxxl|xs|xl|[sm])\s*$|^\d{2,3}\s*[-–/]\s*[a-z0-9]+\s*$",
     re.IGNORECASE,
 )
-# Nhãn màu/chất liệu tiếng Anh trên Hibox/1688 (vd. Black Suede, Champagne Gold).
+# Nhãn màu/chất liệu tiếng Anh trên nguồn 1688/Vipomall (vd. Black Suede, Champagne Gold).
 _EN_FASHION_COLOR_RE = re.compile(
     r"(?i)\b(black|white|red|blue|green|gold|silver|champagne|beige|navy|pink|"
     r"grey|gray|brown|suede|leather|ivory|cream|rose|nude|khaki|burgundy|wine|"
     r"purple|orange|yellow|tan|camel|apricot|mint|olive)\b",
 )
-
-
-_HIBOX_SOURCES = frozenset({"hibox"})
 
 
 def _product_import_source(product_data: Optional[Dict[str, Any]]) -> str:
@@ -68,9 +64,7 @@ def variant_color_translate_enabled(
     """Có gọi API dịch tên màu hay không."""
     if not (settings.DEEPSEEK_API_KEY or "").strip():
         return False
-    src = (import_source or _product_import_source(product_data) or "").strip().lower()
-    if src in _HIBOX_SOURCES:
-        return True
+    _ = (import_source or _product_import_source(product_data) or "").strip().lower()
     if getattr(settings, "EXCEL_VARIANT_COLORS_DEEPSEEK_TRANSLATE", False):
         return True
     if getattr(settings, "IMPORT_LINK_DEEPSEEK_TAXONOMY_ENABLED", False):
@@ -98,7 +92,7 @@ def _looks_like_unlocalized_latin_label(s: str) -> bool:
         return False
     if not re.search(r"[A-Za-z]", t):
         return False
-    # Cho phép SKU trong ngoặc, %, dấu phẩy (banner/ghép size+màu trên Hibox).
+    # Cho phép SKU trong ngoặc, %, dấu phẩy (banner/ghép size+màu).
     if not re.match(r"^[A-Za-z0-9\s\-–/\.(),\[\]%+]+$", t):
         return False
     return True
@@ -197,7 +191,7 @@ def apply_variant_color_translation_to_product_data(
 ) -> int:
     """
     Dịch mọi nhãn màu trong product_data (colors, pairs, swatches) và đồng bộ cột `color` + variants.colors.
-    Trả số nhãn đã ghi đè. Dùng sau scrape Hibox (import_source='hibox') và trước taxonomy.
+    Trả số nhãn đã ghi đè. Dùng sau scrape import link và trước taxonomy.
     """
     if not product_data:
         return 0
@@ -274,32 +268,6 @@ def apply_variant_color_translation_to_product_data(
         len(unique),
     )
     return n_applied
-
-
-def apply_hibox_variant_color_translation(product_data: Dict[str, Any]) -> List[str]:
-    """
-    Bắt buộc cho mọi luồng scrape Hibox (hibox.mn / mirror taobao1688.kz).
-    Trả cảnh báo nếu thiếu API key hoặc còn nhãn chưa Việt hóa.
-    """
-    warnings: List[str] = []
-    if not (settings.DEEPSEEK_API_KEY or "").strip():
-        warnings.append(
-            "Hibox: thiếu DEEPSEEK_API_KEY — không dịch được phiên bản màu sang tiếng Việt."
-        )
-        return warnings
-    try:
-        n = apply_variant_color_translation_to_product_data(product_data, import_source="hibox")
-        if n == 0:
-            pending = list_untranslated_variant_color_labels(product_data)
-            if pending:
-                warnings.append(
-                    "Hibox: DeepSeek không dịch được nhãn màu (kiểm tra API/log). "
-                    f"Ví dụ còn: {pending[0][:80]}"
-                )
-    except Exception as exc:
-        logger.warning("Hibox variant color translate: %s", exc)
-        warnings.append(f"Hibox: lỗi dịch màu — {type(exc).__name__}: {exc}")
-    return warnings
 
 
 def _collect_unique_names(products: List[Dict[str, Any]]) -> List[str]:
@@ -439,7 +407,7 @@ def apply_deepseek_translations_to_variant_colors(products: List[Dict[str, Any]]
 
 
 def apply_deepseek_translations_to_color_entries(entries: List[Dict[str, Any]]) -> None:
-    """Dịch `name` trong list dict màu (vd. Hibox `colors_out`); không dùng trường `label` trùng lặp."""
+    """Dịch `name` trong list dict màu (vd. `colors_out`); không dùng trường `label` trùng lặp."""
     if not entries:
         return
     if not variant_color_translate_enabled():
