@@ -127,13 +127,9 @@ def phone_last9(phone: str) -> str:
 
 
 def _sql_normalize_vn_phone(column):
-    """Cùng quy tắc normalize_vn_phone trên cột SQL (PostgreSQL)."""
+    """Cùng khóa khớp Python: bỏ ký tự lạ rồi lấy 9 số cuối (= bỏ 0 / +84)."""
     raw = func.regexp_replace(func.coalesce(column, ""), r"[^0-9]", "", "g")
-    without_cc = func.case(
-        (func.and_(raw.like("84%"), func.length(raw) >= 11), func.substr(raw, 3)),
-        else_=raw,
-    )
-    return func.ltrim(without_cc, "0")
+    return func.right(raw, 9)
 
 
 def recipient_label_matches_phone(label: str, phone: str) -> bool:
