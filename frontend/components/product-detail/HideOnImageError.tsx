@@ -180,7 +180,7 @@ export function ProductFillImage({
 
   const imgClassName =
     fit === 'natural'
-      ? 'block w-full h-auto max-h-[85vh] object-contain object-center'
+      ? 'block w-full h-auto'
       : fit === 'contain'
         ? 'absolute inset-0 h-full w-full object-contain object-center'
         : 'absolute inset-0 h-full w-full object-cover';

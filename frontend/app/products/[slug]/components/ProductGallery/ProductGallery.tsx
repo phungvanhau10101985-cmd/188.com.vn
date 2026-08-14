@@ -34,6 +34,7 @@ export default function ProductGallery({
 }: ProductGalleryProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [broken, setBroken] = useState<Record<string, true>>({});
+  const [heroAspect, setHeroAspect] = useState<string | undefined>();
   const mediaCarouselRef = useRef<MobileProductMediaCarouselHandle>(null);
   const thumbStripRef = useRef<HTMLElement>(null);
   const thumbButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
@@ -84,6 +85,15 @@ export default function ProductGallery({
   const mediaCount = thumbItems.length;
   const firstPhotoUrl = visiblePhotoUrls[0] ?? null;
   const restPhotoUrls = visiblePhotoUrls.slice(1);
+
+  useEffect(() => {
+    setHeroAspect(undefined);
+  }, [firstPhotoUrl]);
+
+  const handleHeroNaturalSize = useCallback((width: number, height: number) => {
+    if (width < 2 || height < 2) return;
+    setHeroAspect((prev) => prev ?? `${width} / ${height}`);
+  }, []);
 
   useEffect(() => {
     setSelectedIndex((prev) => {
@@ -154,15 +164,18 @@ export default function ProductGallery({
   };
 
   const thumbSizeClass = isBleed ? 'w-14 h-14' : 'w-16 h-16';
-  // bleed: vuông full-width sát mép (chiều cao = 100vw, không inset)
-  const frameAspect = isBleed
-    ? 'aspect-square relative w-full overflow-hidden bg-gray-100'
-    : 'aspect-square relative w-full overflow-hidden bg-gray-100 lg:rounded-lg';
+  const photoFrameClass = isBleed
+    ? 'relative w-full bg-gray-100'
+    : 'relative w-full bg-gray-100 lg:rounded-lg';
+  const videoFrameClass = isBleed
+    ? 'relative w-full overflow-hidden bg-black'
+    : 'relative w-full overflow-hidden bg-black lg:rounded-lg';
+  const videoFrameStyle = { aspectRatio: heroAspect ?? '3 / 4' };
 
   const renderVideoSlide = () => {
     if (!parsedVideo) return null;
     return (
-      <div className={frameAspect}>
+      <div className={videoFrameClass} style={videoFrameStyle}>
         {parsedVideo.kind === 'youtube' ? (
           <iframe
             title={`Video ${product.name}`}
@@ -188,13 +201,14 @@ export default function ProductGallery({
   const renderPhotoSlide = (url: string, priority = false) => (
     <ProductFillImage
       src={getOptimizedImage(url, {
-        width: isBleed ? 720 : 900,
-        height: isBleed ? 720 : 900,
+        width: isBleed ? 960 : 1200,
         hideProductPng: true,
       })}
       alt={product.name}
-      frameClassName={frameAspect}
+      frameClassName={photoFrameClass}
+      fit="natural"
       priority={priority}
+      onNaturalSize={handleHeroNaturalSize}
       onBroken={() => markBroken(url)}
     />
   );
@@ -297,17 +311,17 @@ export default function ProductGallery({
               }
             >
               {firstPhotoUrl ? (
-                <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
+                <MobileProductMediaSlide key={firstPhotoUrl} className="bg-gray-100">
                   {renderPhotoSlide(firstPhotoUrl, true)}
                 </MobileProductMediaSlide>
               ) : null}
               {hasVideo && parsedVideo ? (
-                <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
+                <MobileProductMediaSlide className="bg-gray-100">
                   {renderVideoSlide()}
                 </MobileProductMediaSlide>
               ) : null}
               {restPhotoUrls.map((img) => (
-                <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
+                <MobileProductMediaSlide key={img} className="bg-gray-100">
                   {renderPhotoSlide(img)}
                 </MobileProductMediaSlide>
               ))}
@@ -321,7 +335,7 @@ export default function ProductGallery({
 
   return (
     <div className="image_list min-w-0 flex flex-col gap-2">
-      <div className="min-w-0 w-full lg:rounded-lg lg:overflow-hidden">
+      <div className="min-w-0 w-full lg:rounded-lg">
         {isShowingVideo && parsedVideo ? (
           renderVideoSlide()
         ) : mainRaw ? (

@@ -236,9 +236,9 @@ export default function ProductDetailMobile({
     setHeroAspect((prev) => prev ?? `${width} / ${height}`);
   }, []);
 
-  const photoFrameClass = 'relative w-full max-h-[85vh] overflow-hidden bg-gray-100';
-  const photoFrameStyle = { aspectRatio: heroAspect ?? '3 / 4' };
-  const videoFrameClass = 'relative w-full max-h-[85vh] overflow-hidden bg-black';
+  const photoFrameClass = 'relative w-full bg-gray-100';
+  const videoFrameClass = 'relative w-full overflow-hidden bg-black';
+  const videoFrameStyle = { aspectRatio: heroAspect ?? '3 / 4' };
 
   const nanoPayload = buildNanoAiGatewayPayloadFrom188Product(product, {
     imageUrl: mainImageRaw,
@@ -304,13 +304,12 @@ export default function ProductDetailMobile({
               }
             >
               {firstPhotoUrl ? (
-                <MobileProductMediaSlide key={firstPhotoUrl} className="overflow-hidden bg-gray-100">
+                <MobileProductMediaSlide key={firstPhotoUrl} className="bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(firstPhotoUrl, { width: 960, height: 960, hideProductPng: true })}
+                    src={getOptimizedImage(firstPhotoUrl, { width: 960, hideProductPng: true })}
                     alt={product.name}
                     frameClassName={photoFrameClass}
-                    frameStyle={photoFrameStyle}
-                    fit="contain"
+                    fit="natural"
                     priority
                     onNaturalSize={handleHeroNaturalSize}
                     onBroken={() => markBrokenPhoto(firstPhotoUrl)}
@@ -328,8 +327,8 @@ export default function ProductDetailMobile({
                 </MobileProductMediaSlide>
               ) : null}
               {hasVideo && parsedVideo ? (
-                <MobileProductMediaSlide className="overflow-hidden bg-gray-100">
-                  <div className={videoFrameClass} style={photoFrameStyle}>
+                <MobileProductMediaSlide className="bg-gray-100">
+                  <div className={videoFrameClass} style={videoFrameStyle}>
                     {parsedVideo.kind === 'youtube' ? (
                       <>
                         <iframe
@@ -367,13 +366,12 @@ export default function ProductDetailMobile({
                 </MobileProductMediaSlide>
               ) : null}
               {restPhotoUrls.map((img) => (
-                <MobileProductMediaSlide key={img} className="overflow-hidden bg-gray-100">
+                <MobileProductMediaSlide key={img} className="bg-gray-100">
                   <ProductFillImage
-                    src={getOptimizedImage(img, { width: 960, height: 960, hideProductPng: true })}
+                    src={getOptimizedImage(img, { width: 960, hideProductPng: true })}
                     alt={product.name}
                     frameClassName={photoFrameClass}
-                    frameStyle={photoFrameStyle}
-                    fit="contain"
+                    fit="natural"
                     onBroken={() => markBrokenPhoto(img)}
                   >
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/50 text-white text-[10px] px-2 py-1 rounded">
