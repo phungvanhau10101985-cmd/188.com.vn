@@ -22,6 +22,11 @@ type MobileProductMediaCarouselProps = {
   children: ReactNode;
   /** Chỉ số hiện tại cho overlay (dots/counter) — cập nhật mượt trong carousel, không re-render parent. */
   renderOverlay?: (liveIndex: number) => ReactNode;
+  /**
+   * Chiếm hết chiều cao parent (hero fill).
+   * Không bật thì scroller `h-auto` — slide chỉ có ảnh `position:absolute` sẽ cao 0px.
+   */
+  fillHeight?: boolean;
 };
 
 const SCROLL_END_FALLBACK_MS = 120;
@@ -37,6 +42,7 @@ const MobileProductMediaCarousel = forwardRef<
     className = '',
     children,
     renderOverlay,
+    fillHeight = false,
   },
   ref,
 ) {
@@ -160,10 +166,12 @@ const MobileProductMediaCarousel = forwardRef<
   }
 
   return (
-    <div className={`relative min-w-0 ${className}`}>
+    <div className={`relative min-w-0 ${fillHeight ? 'h-full' : ''} ${className}`}>
       <div
         ref={scrollerRef}
-        className="product-gallery-media-carousel flex h-auto min-w-0 w-full items-start overflow-x-auto scrollbar-hide"
+        className={`product-gallery-media-carousel flex min-w-0 w-full overflow-x-auto scrollbar-hide ${
+          fillHeight ? 'h-full items-stretch' : 'h-auto items-start'
+        }`}
         onScroll={handleScroll}
         onTouchStart={handleTouchStart}
         onPointerDown={(e) => {

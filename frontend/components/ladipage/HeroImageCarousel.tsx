@@ -115,10 +115,11 @@ export default function HeroImageCarousel({
         selectedIndex={index}
         onSelectedIndexChange={setIndex}
         slideCount={slides.length}
+        fillHeight
         className="absolute inset-0 h-full w-full touch-pan-x"
       >
         {slides.map((src, i) => (
-          <MobileProductMediaSlide key={`${src}-${i}`} className="relative h-full min-h-full">
+          <MobileProductMediaSlide key={`${src}-${i}`} className="relative h-full min-h-0">
             <Image
               src={src}
               alt={`${alt} — ${i + 1}/${slides.length}`}
