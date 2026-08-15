@@ -24,6 +24,45 @@ logger = logging.getLogger(__name__)
 _last_sent: dict[str, float] = {}
 _report_ip_bucket: dict[str, deque] = defaultdict(deque)
 
+# Crawler chạy JS trên /auth/login rồi POST report-login-failure — không phải khách.
+# Không gồm FBAN/FBIOS/Zalo in-app (đó là khách thật trong WebView).
+_CRAWLER_UA_MARKERS = (
+    "meta-webindexer",
+    "facebookexternalhit",
+    "facebookcatalog",
+    "facebot",
+    "googlebot",
+    "google-inspectiontool",
+    "adsbot-google",
+    "bingbot",
+    "baiduspider",
+    "yandexbot",
+    "duckduckbot",
+    "slurp",
+    "applebot",
+    "bytespider",
+    "semrushbot",
+    "ahrefsbot",
+    "dotbot",
+    "petalbot",
+    "gptbot",
+    "chatgpt-user",
+    "oai-searchbot",
+    "claudebot",
+    "anthropic-ai",
+    "perplexitybot",
+    "amazonbot",
+    "twitterbot",
+    "linkedinbot",
+    "discordbot",
+    "telegrambot",
+)
+
+
+def is_crawler_user_agent(user_agent: Optional[str]) -> bool:
+    low = (user_agent or "").lower()
+    return any(marker in low for marker in _CRAWLER_UA_MARKERS)
+
 
 def _cooldown_seconds() -> float:
     return float(getattr(settings, "AUTH_LOGIN_FAILURE_ALERT_COOLDOWN_SECONDS", 180) or 180)
@@ -151,6 +190,7 @@ def _send_auth_failure_emails_task(
     detail: str,
     customer_email: Optional[str],
     client_ip: str,
+    user_agent: str = "",
 ) -> None:
     from app.services.email_service import send_email
 
@@ -181,6 +221,7 @@ def _send_auth_failure_emails_task(
             f"Lý do: {detail}",
             f"Email khách (nếu có): {email_line}",
             f"IP: {client_ip}",
+            f"User-Agent: {user_agent or '(không có)'}",
             "",
             "Vui lòng kiểm tra SMTP, Google OAuth, hoặc hỗ trợ khách đăng nhập.",
         ]
@@ -189,6 +230,7 @@ def _send_auth_failure_emails_task(
     safe_email = html.escape(email_line)
     safe_path = html.escape(f"{method} {path}")
     safe_ip = html.escape(client_ip)
+    safe_ua = html.escape((user_agent or "(không có)")[:300])
     html_body = (
         "<p><strong>Khách không đăng nhập được</strong> trên 188.com.vn.</p>"
         f"<p><strong>Thời gian:</strong> {html.escape(now)}<br>"
@@ -196,7 +238,8 @@ def _send_auth_failure_emails_task(
         f"<strong>Mã HTTP:</strong> {status_code}<br>"
         f"<strong>Lý do:</strong> {safe_detail}<br>"
         f"<strong>Email khách:</strong> {safe_email}<br>"
-        f"<strong>IP:</strong> {safe_ip}</p>"
+        f"<strong>IP:</strong> {safe_ip}<br>"
+        f"<strong>User-Agent:</strong> {safe_ua}</p>"
         "<p>Vui lòng kiểm tra SMTP, Google OAuth, hoặc hỗ trợ khách.</p>"
     )
 
@@ -224,6 +267,14 @@ def maybe_notify_auth_login_failure(
     detail_str = _format_detail(detail)
     customer_email = _extract_email_from_request(request)
     client_ip = _client_ip(request)
+    user_agent = request.headers.get("user-agent") or ""
+    if is_crawler_user_agent(user_agent):
+        logger.info(
+            "auth_failure_alert skip: crawler ua path=%s ip=%s",
+            path,
+            client_ip,
+        )
+        return
     tail = path[len("/api/v1/auth") :].lstrip("/") if path.startswith("/api/v1/auth") else ""
     if tail == "report-login-failure" and _report_endpoint_rate_limited(client_ip):
         logger.warning("auth_failure_alert skip: report-login-failure rate limited ip=%s", client_ip)
@@ -245,6 +296,7 @@ def maybe_notify_auth_login_failure(
             "detail": detail_str,
             "customer_email": customer_email,
             "client_ip": client_ip,
+            "user_agent": user_agent[:300],
         },
         daemon=True,
     ).start()

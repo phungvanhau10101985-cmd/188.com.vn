@@ -27,12 +27,34 @@ export class APIError extends Error {
   }
 }
 
+const CRAWLER_UA_MARKERS = [
+  'meta-webindexer',
+  'facebookexternalhit',
+  'facebookcatalog',
+  'facebot',
+  'googlebot',
+  'bingbot',
+  'baiduspider',
+  'yandexbot',
+  'bytespider',
+  'gptbot',
+  'claudebot',
+];
+
+function isCrawlerUserAgent(ua: string): boolean {
+  const low = ua.toLowerCase();
+  return CRAWLER_UA_MARKERS.some((marker) => low.includes(marker));
+}
+
 /** Báo lỗi đăng nhập cho admin (không chặn UI nếu thất bại). */
 export async function reportLoginFailureToAdmins(payload: {
   source: string;
   message: string;
   email?: string;
 }): Promise<void> {
+  if (typeof navigator !== 'undefined' && isCrawlerUserAgent(navigator.userAgent || '')) {
+    return;
+  }
   try {
     await fetch(`${getApiBaseUrl()}/auth/report-login-failure`, {
       method: 'POST',
