@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import type { CartItem } from '@/features/cart/types/cart';
-import { getOptimizedImage, stripAlicdnToBaseJpg } from '@/lib/image-utils';
+import { getOptimizedImage, getOriginalImageUrl, stripAlicdnToBaseJpg } from '@/lib/image-utils';
 import { resolveCartItemImageUrl } from '@/lib/product-color-variant';
 
 type CartLineThumbnailProps = {
@@ -33,6 +33,12 @@ export default function CartLineThumbnail({ item, size = 80, className = '' }: C
 
   const handleError = () => {
     if (triedBase || !raw) return;
+    const original = getOriginalImageUrl(raw, { width: size, height: size, fallbackStrategy: 'local' });
+    if (original && original !== src && !original.startsWith('data:')) {
+      setTriedBase(true);
+      setSrc(original);
+      return;
+    }
     const base = stripAlicdnToBaseJpg(raw);
     if (!base || base === raw) {
       setTriedBase(true);
@@ -40,7 +46,7 @@ export default function CartLineThumbnail({ item, size = 80, className = '' }: C
       return;
     }
     setTriedBase(true);
-    setSrc(buildSrc(item, size, base));
+    setSrc(getOptimizedImage(undefined, { width: size, height: size, fallbackStrategy: 'local' }));
   };
 
   return (

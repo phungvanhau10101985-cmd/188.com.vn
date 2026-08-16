@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { getOptimizedImage, isAlibabaCdnImageUrl, stripAlicdnToBaseJpg } from '@/lib/image-utils';
+import { getOptimizedImage, getOriginalImageUrl, isAlibabaCdnImageUrl, stripAlicdnToBaseJpg } from '@/lib/image-utils';
 
 function buildRemoteImgSrc(raw: string, size: number, rawOverride?: string): string {
   const s = (rawOverride || raw).trim();
@@ -45,10 +45,21 @@ function RemoteProductImg({
 
   const handleError = () => {
     if (!triedBase && isAlibabaCdnImageUrl(src)) {
+      const original = getOriginalImageUrl(src, {
+        width: displaySize,
+        height: displaySize,
+        fallbackStrategy: 'local',
+        hideProductPng: true,
+      });
+      if (original && original !== currentSrc && !original.startsWith('data:')) {
+        setTriedBase(true);
+        setCurrentSrc(original);
+        return;
+      }
       const base = stripAlicdnToBaseJpg(src);
       if (base && base !== stripAlicdnToBaseJpg(currentSrc)) {
         setTriedBase(true);
-        setCurrentSrc(buildRemoteImgSrc(src, displaySize, base));
+        setCurrentSrc(base);
         return;
       }
     }

@@ -6,6 +6,14 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   /** VPS: layout SSR có thể chậm khi API/DB bận — tránh fail build sau 60s mặc định. */
   staticPageGenerationTimeout: 180,
+  // /index.html là alias homepage cũ; không để [legacySlug] biến thành /?q=index.html (GSC tách traffic).
+  async redirects() {
+    return [
+      { source: "/index.html", destination: "/", permanent: true },
+      { source: "/index.htm", destination: "/", permanent: true },
+      { source: "/index.php", destination: "/", permanent: true },
+    ];
+  },
   // Trình duyệt mặc định GET /favicon.ico — không có file .ico thì trả về favicon.png (200).
   async rewrites() {
     return [
@@ -82,8 +90,8 @@ const nextConfig = {
       { protocol: "https", hostname: "**" },
       { protocol: "http", hostname: "**" },
     ],
-    // Luôn dùng URL ảnh gốc (không qua /_next/image → không ép WebP/AVIF, không q=75).
-    // Đổi lại: không resize phía Next — ảnh nặng hơn nếu URL là file lớn ( Bunny / alicdn …).
+    // Resize tại CDN (Bunny ?width= / alicdn _600x600q90) — không qua /_next/image
+    // để tránh q=75 mặc định của Next. Giữ nét ảnh đại diện (2×, sàn q90).
     unoptimized: true,
   },
   typescript: { ignoreBuildErrors: false },

@@ -2,13 +2,18 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import GoogleLoginButton from './GoogleLoginButton';
-import EmailOtpPanel from './EmailOtpPanel';
 import { useAuth } from '../hooks/useAuth';
 import { APIError, reportLoginFailureToAdmins } from '../api/auth-api';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+
+const EmailOtpPanel = dynamic(() => import('./EmailOtpPanel'), {
+  ssr: false,
+  loading: () => <div className="h-28 animate-pulse rounded-xl bg-gray-100" aria-hidden />,
+});
 
 export default function RegisterForm() {
   const loginHref = useLoginRedirectHref();

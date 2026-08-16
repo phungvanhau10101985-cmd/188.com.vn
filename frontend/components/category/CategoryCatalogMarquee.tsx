@@ -1,25 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Image from 'next/image';
+import { useMemo, useState } from 'react';
 import LoadingLink from '@/components/ui/LoadingLink';
 import { useRouter } from 'next/navigation';
-import { getOptimizedImage } from '@/lib/image-utils';
+import { LISTING_CARD_IMAGE } from '@/lib/image-utils';
+import CdnFillImage from '@/components/CdnFillImage';
 import { categorySegmentForUrl } from '@/lib/category-url';
 import type { HeroCategoryTile } from '@/types/api';
-
-function useGridCols(desktopCols: number): number {
-  const [cols, setCols] = useState(2);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(min-width: 768px)');
-    const update = () => setCols(mq.matches ? desktopCols : 2);
-    update();
-    mq.addEventListener('change', update);
-    return () => mq.removeEventListener('change', update);
-  }, [desktopCols]);
-  return cols;
-}
 
 export function categoryTileHref(tile: HeroCategoryTile): string {
   const s1 = categorySegmentForUrl(tile.category);
@@ -41,44 +28,39 @@ export function formatItemCount(count: number): string {
   return `${n.toLocaleString('vi-VN')} mặt`;
 }
 
-function chunkTiles(list: HeroCategoryTile[], cols: number, padLastRow: boolean): HeroCategoryTile[][] {
-  if (list.length === 0) return [];
-  const rows: HeroCategoryTile[][] = [];
-  for (let i = 0; i < list.length; i += cols) {
-    const row = list.slice(i, i + cols);
-    if (padLastRow) {
-      let pad = 0;
-      while (row.length < cols) {
-        row.push(list[pad % list.length]);
-        pad += 1;
-      }
-    }
-    rows.push(row);
+function desktopGridClass(desktopCols: number): string {
+  if (desktopCols >= 5) return 'grid grid-cols-2 md:grid-cols-5';
+  return 'grid grid-cols-2 md:grid-cols-4';
+}
+
+function lastColBorderClass(desktopCols: number): string {
+  if (desktopCols >= 5) {
+    return 'border-r border-white/10 [&:nth-child(2n)]:border-r-0 md:[&:nth-child(2n)]:border-r md:[&:nth-child(5n)]:border-r-0';
   }
-  return rows;
+  return 'border-r border-white/10 [&:nth-child(2n)]:border-r-0 md:[&:nth-child(2n)]:border-r md:[&:nth-child(4n)]:border-r-0';
+}
+
+function tileHeightFromRowClass(rowClassName: string): string {
+  const parts = rowClassName.split(/\s+/).filter((c) => /^(h-|sm:h-|md:h-|lg:h-)/.test(c));
+  return parts.join(' ') || 'h-[100px] sm:h-[112px] md:h-[148px]';
 }
 
 function CategoryGridTile({
   tile,
-  isLastInRow,
   priorityImage = false,
+  heightClass,
+  borderClass,
 }: {
   tile: HeroCategoryTile;
-  isLastInRow?: boolean;
   priorityImage?: boolean;
+  heightClass: string;
+  borderClass: string;
 }) {
   const router = useRouter();
   const href = categoryTileHref(tile);
   const title = tileTitle(tile);
   const itemCountLabel = formatItemCount(tile.product_count);
-  const img = tile.image_url
-    ? getOptimizedImage(tile.image_url, {
-        width: 400,
-        height: 400,
-        quality: 82,
-        fallbackStrategy: 'local',
-      })
-    : null;
+  const img = (tile.image_url || '').trim();
 
   return (
     <LoadingLink
@@ -86,14 +68,16 @@ function CategoryGridTile({
       title={itemCountLabel ? `${tile.name} · ${itemCountLabel}` : tile.name}
       onMouseEnter={() => router.prefetch(href)}
       onFocus={() => router.prefetch(href)}
-      className={`hero-category-tile btn-interactive group relative flex h-full min-w-0 flex-1 flex-col overflow-hidden border-r border-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white active:brightness-105 ${isLastInRow ? 'border-r-0' : ''}`}
+      className={`hero-category-tile btn-interactive group relative flex min-w-0 flex-col overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white active:brightness-105 ${heightClass} ${borderClass}`}
     >
       <div className="relative flex-1 min-h-0 overflow-hidden bg-gradient-to-br from-orange-600/95 via-orange-500/90 to-amber-700/95">
         {img ? (
-          <Image
-            src={img}
+          <CdnFillImage
+            rawSrc={img}
+            widthHint={LISTING_CARD_IMAGE.width}
+            heightHint={LISTING_CARD_IMAGE.height}
+            quality={LISTING_CARD_IMAGE.quality}
             alt={title}
-            fill
             sizes="(max-width: 767px) 50vw, 20vw"
             priority={priorityImage}
             fetchPriority={priorityImage ? 'high' : undefined}
@@ -133,6 +117,36 @@ export interface CategoryCatalogMarqueeProps {
   desktopCols?: number;
 }
 
+function TileGrid({
+  tiles,
+  desktopCols,
+  heightClass,
+  borderClass,
+  duplicateKey,
+  priorityFirst,
+}: {
+  tiles: HeroCategoryTile[];
+  desktopCols: number;
+  heightClass: string;
+  borderClass: string;
+  duplicateKey: string;
+  priorityFirst: boolean;
+}) {
+  return (
+    <div className={`${desktopGridClass(desktopCols)} w-full`}>
+      {tiles.map((tile, index) => (
+        <CategoryGridTile
+          key={`${duplicateKey}-${tile.level}-${tile.name}-${tile.category}-${index}`}
+          tile={tile}
+          heightClass={heightClass}
+          borderClass={borderClass}
+          priorityImage={priorityFirst && index === 0}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function CategoryCatalogMarquee({
   tiles,
   maxTiles,
@@ -142,7 +156,6 @@ export default function CategoryCatalogMarquee({
   manualScroll = false,
   desktopCols = 4,
 }: CategoryCatalogMarqueeProps) {
-  const gridCols = useGridCols(desktopCols);
   const [touchPaused, setTouchPaused] = useState(false);
   const [hoverPaused, setHoverPaused] = useState(false);
 
@@ -152,19 +165,11 @@ export default function CategoryCatalogMarquee({
     return l23.slice(0, cap);
   }, [tiles, maxTiles]);
 
-  const rows = useMemo(() => {
-    const chunked = chunkTiles(displayTiles, gridCols, !manualScroll);
-    if (manualScroll || chunked.length === 0) return chunked;
-    let expanded = [...chunked];
-    while (expanded.length < 2) {
-      expanded = expanded.concat(chunked);
-    }
-    return [...expanded, ...expanded];
-  }, [displayTiles, gridCols, manualScroll]);
-
+  const heightClass = tileHeightFromRowClass(rowClassName);
+  const borderClass = lastColBorderClass(desktopCols);
   const isPaused = touchPaused || hoverPaused;
 
-  if (rows.length === 0) return null;
+  if (displayTiles.length === 0) return null;
 
   if (manualScroll) {
     return (
@@ -173,20 +178,14 @@ export default function CategoryCatalogMarquee({
         aria-label={ariaLabel}
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-        <div className="relative z-0 flex w-full flex-col">
-          {rows.map((rowTiles, rowIndex) => (
-            <div key={`row-${rowIndex}`} className={rowClassName}>
-              {rowTiles.map((tile, colIndex) => (
-                <CategoryGridTile
-                  key={`${rowIndex}-${tile.level}-${tile.name}-${tile.category}`}
-                  tile={tile}
-                  isLastInRow={colIndex === rowTiles.length - 1}
-                  priorityImage={rowIndex === 0 && colIndex === 0}
-                />
-              ))}
-            </div>
-          ))}
-        </div>
+        <TileGrid
+          tiles={displayTiles}
+          desktopCols={desktopCols}
+          heightClass={heightClass}
+          borderClass={borderClass}
+          duplicateKey="manual"
+          priorityFirst
+        />
       </div>
     );
   }
@@ -206,18 +205,22 @@ export default function CategoryCatalogMarquee({
         aria-hidden
       />
       <div className="hero-category-marquee-vertical relative z-0 flex w-full flex-col">
-        {rows.map((rowTiles, rowIndex) => (
-          <div key={`row-${rowIndex}`} className={rowClassName}>
-            {rowTiles.map((tile, colIndex) => (
-              <CategoryGridTile
-                key={`${rowIndex}-${tile.level}-${tile.name}-${tile.category}`}
-                tile={tile}
-                isLastInRow={colIndex === rowTiles.length - 1}
-                priorityImage={rowIndex === 0 && colIndex === 0}
-              />
-            ))}
-          </div>
-        ))}
+        <TileGrid
+          tiles={displayTiles}
+          desktopCols={desktopCols}
+          heightClass={heightClass}
+          borderClass={borderClass}
+          duplicateKey="a"
+          priorityFirst
+        />
+        <TileGrid
+          tiles={displayTiles}
+          desktopCols={desktopCols}
+          heightClass={heightClass}
+          borderClass={borderClass}
+          duplicateKey="b"
+          priorityFirst={false}
+        />
       </div>
     </div>
   );

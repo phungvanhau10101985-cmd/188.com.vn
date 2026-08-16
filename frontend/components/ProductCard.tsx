@@ -1,12 +1,12 @@
 // frontend/components/ProductCard.tsx - FIXED VERSION
 'use client';
 
-import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { memo, useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
-import { getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
+import { LISTING_CARD_IMAGE, getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
+import CdnFillImage from '@/components/CdnFillImage';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi, productPdpHref } from '@/lib/product-path-slug';
 import ProductPdpLink from '@/components/ProductPdpLink';
@@ -218,7 +218,7 @@ interface ProductCardProps {
 const getImageSize = (size: string) => {
   switch (size) {
     case 'small':
-      return { width: 200, height: 200 };
+      return { width: 250, height: 250 };
     case 'large':
       return { width: 400, height: 400 };
     case 'medium':
@@ -281,15 +281,9 @@ export default function ProductCard({
   // Sử dụng image utils với kích thước tối ưu — ảnh màu thanh lý thay ảnh đại diện khi có kho sale
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
-  if (!hasValidProductImageUrl(cardImageSource)) {
+  if (!hasValidProductImageUrl(cardImageSource) || !cardImageSource) {
     return null;
   }
-  const imageUrl = getOptimizedImage(cardImageSource, {
-    width: getImageSize(size).width,
-    height: getImageSize(size).height,
-    quality: 85,
-    fallbackStrategy: 'local'
-  });
 
   // Tạo blur placeholder từ image utils
   const blurDataUrl = getOptimizedImage(undefined, { 
@@ -344,10 +338,12 @@ export default function ProductCard({
                   <div className="text-gray-400 text-xs">Đang tải...</div>
                 </div>
               )}
-              <Image
-                src={imageUrl}
+              <CdnFillImage
+                rawSrc={cardImageSource}
+                widthHint={getImageSize(size).width}
+                heightHint={getImageSize(size).height}
+                quality={90}
                 alt={product.name}
-                fill
                 className={`object-cover group-hover:scale-105 transition-transform duration-300 ${
                   imageLoading ? 'opacity-0' : 'opacity-100'
                 }`}
@@ -544,16 +540,10 @@ const SimpleProductCardComponent = ({
   const fullyOutOfStock = isFullyOutOfStock(product);
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
-  if (!hasValidProductImageUrl(cardImageSource)) {
+  if (!hasValidProductImageUrl(cardImageSource) || !cardImageSource) {
     return null;
   }
 
-  const imageUrl = getOptimizedImage(cardImageSource, {
-    width: 250,
-    height: 250,
-    quality: 80,
-    fallbackStrategy: 'local'
-  });
   const blurDataUrl = getOptimizedImage(undefined, { width: 20, height: 20 });
 
   const handleFavorite = (e: React.MouseEvent) => {
@@ -581,10 +571,12 @@ const SimpleProductCardComponent = ({
         }`}
       >
         {!imageError ? (
-          <Image
-            src={imageUrl}
+          <CdnFillImage
+            rawSrc={cardImageSource}
+            widthHint={LISTING_CARD_IMAGE.width}
+            heightHint={LISTING_CARD_IMAGE.height}
+            quality={LISTING_CARD_IMAGE.quality}
             alt={product.name}
-            fill
             className="object-cover group-hover:scale-105 transition-transform duration-300"
             onError={handleImageError}
             sizes="(max-width: 768px) 50vw, 25vw"

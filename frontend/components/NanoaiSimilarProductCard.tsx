@@ -1,7 +1,7 @@
 'use client';
 
 import type { NanoaiSearchProduct } from '@/types/api';
-import { getOptimizedImage } from '@/lib/image-utils';
+import { LISTING_CARD_IMAGE, getOptimizedImage, getOriginalImageUrl } from '@/lib/image-utils';
 import { truncateText } from '@/lib/utils';
 
 /** Hiển thị giá VND theo thói quen VN: nhóm nghìn + hậu tố đ (không dùng ký hiệu ₫ của Intl). */
@@ -76,7 +76,12 @@ interface NanoaiSimilarProductCardProps {
 export default function NanoaiSimilarProductCard({ item }: NanoaiSimilarProductCardProps) {
   const name = item.name || 'Sản phẩm';
   const imgRaw = item.image_url
-    ? getOptimizedImage(item.image_url, { width: 400, height: 400, fallbackStrategy: 'local' })
+    ? getOptimizedImage(item.image_url, {
+        width: LISTING_CARD_IMAGE.width,
+        height: LISTING_CARD_IMAGE.height,
+        quality: LISTING_CARD_IMAGE.quality,
+        fallbackStrategy: 'local',
+      })
     : '';
   const img =
     imgRaw && !imgRaw.startsWith('data:image/svg') ? imgRaw : '';
@@ -128,13 +133,25 @@ export default function NanoaiSimilarProductCard({ item }: NanoaiSimilarProductC
     <>
       <div className="relative aspect-square bg-gray-50 overflow-hidden rounded-t-xl">
         {img ? (
-          <img
-            src={img}
-            alt={name}
-            className="absolute inset-0 h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-            decoding="async"
-          />
+            <img
+              src={img}
+              alt={name}
+              className="absolute inset-0 h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+              loading="lazy"
+              decoding="async"
+              onError={(e) => {
+                if (!item.image_url) return;
+                const original = getOriginalImageUrl(item.image_url, {
+                  width: LISTING_CARD_IMAGE.width,
+                  height: LISTING_CARD_IMAGE.height,
+                  quality: LISTING_CARD_IMAGE.quality,
+                  fallbackStrategy: 'local',
+                });
+                if (original && original !== e.currentTarget.src && !original.startsWith('data:')) {
+                  e.currentTarget.src = original;
+                }
+              }}
+            />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gray-200 text-gray-400 text-xs">
             Không có ảnh

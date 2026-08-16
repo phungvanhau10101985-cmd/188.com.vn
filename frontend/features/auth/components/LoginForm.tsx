@@ -2,15 +2,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useAuth } from '../hooks/useAuth';
 import GoogleLoginButton from './GoogleLoginButton';
-import EmailOtpPanel from './EmailOtpPanel';
 import { APIError, reportLoginFailureToAdmins } from '../api/auth-api';
 import { getOrCreateDeviceId } from '@/lib/auth-device-id';
 import {
   clearNanoAiOverlayPassThrough,
   releaseNanoAiClickBlockers,
 } from '@/lib/nanoai-overlay-pass-through';
+
+const EmailOtpPanel = dynamic(() => import('./EmailOtpPanel'), {
+  ssr: false,
+  loading: () => <div className="h-28 animate-pulse rounded-xl bg-gray-100" aria-hidden />,
+});
 
 export default function LoginForm() {
   const [loading, setLoading] = useState(false);

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import {
   getOptimizedImage,
+  getOriginalImageUrl,
   isAlibabaCdnImageUrl,
   isHiddenWebPngImageUrl,
 } from '@/lib/image-utils';
@@ -46,7 +47,24 @@ function wireImage(img: HTMLImageElement) {
   if (!img.getAttribute('decoding')) {
     img.setAttribute('decoding', 'async');
   }
-  const onFail = () => hideBrokenImg(img);
+  const onFail = () => {
+    if (img.dataset.origTried === '1') {
+      hideBrokenImg(img);
+      return;
+    }
+    img.dataset.origTried = '1';
+    const original = getOriginalImageUrl(normalized.startsWith('//') ? `https:${normalized}` : normalized, {
+      width: 600,
+      height: 600,
+      fallbackStrategy: 'local',
+      hideProductPng: true,
+    });
+    if (original && original !== img.getAttribute('src') && !original.startsWith('data:')) {
+      img.setAttribute('src', original);
+      return;
+    }
+    hideBrokenImg(img);
+  };
   const onLoad = () => {
     if (img.naturalWidth < 2 || img.naturalHeight < 2) onFail();
   };
@@ -54,7 +72,7 @@ function wireImage(img: HTMLImageElement) {
     if (img.naturalWidth < 2 || img.naturalHeight < 2) onFail();
     return;
   }
-  img.addEventListener('error', onFail, { once: true });
+  img.addEventListener('error', onFail);
   img.addEventListener('load', onLoad, { once: true });
 }
 

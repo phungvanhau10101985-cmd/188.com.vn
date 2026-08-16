@@ -45,7 +45,7 @@ const EXACT_BLOCKED = new Set(
 );
 
 /** Slug có đuôi file — không phải PDP marketing (…-1164016). */
-const BLOCKED_EXTENSION = /\.(js|json|xml|php|env|txt|ico|css|map|woff2?|ttf|svg|gif|png|jpe?g|webp|aspx|asp)$/i;
+const BLOCKED_EXTENSION = /\.(html?|js|json|xml|php|env|txt|ico|css|map|woff2?|ttf|svg|gif|png|jpe?g|webp|aspx|asp)$/i;
 
 export function isReservedNonProductSlug(raw: string): boolean {
   const s = (raw || '').trim().toLowerCase();

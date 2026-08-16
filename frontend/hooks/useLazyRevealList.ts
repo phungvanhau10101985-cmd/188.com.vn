@@ -14,7 +14,9 @@ export function useLazyRevealList<T>(
   items: T[],
   { initial = 8, step = 8, rootMargin = '280px' }: UseLazyRevealListOptions = {}
 ) {
-  const [visibleCount, setVisibleCount] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(() =>
+    items.length === 0 ? 0 : Math.min(initial, items.length)
+  );
 
   useEffect(() => {
     if (items.length === 0) {

@@ -6,6 +6,7 @@ import type { Product } from '@/types/api';
 import { SimpleProductCard } from './ProductCard';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 
 interface ProductGridProps {
   products: Product[];
@@ -267,6 +268,7 @@ export default function ProductGrid({
       }),
     [filteredProducts, sortBy]
   );
+  const gridReveal = useLazyRevealList(sortedProducts, { initial: 12, step: 12 });
 
   /**
    * Ref giữ giá trị mới nhất — cho phép `handleFavorite` có reference ỔN ĐỊNH (deps rỗng)
@@ -340,21 +342,28 @@ export default function ProductGrid({
 
       {/* Products Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-5">
-        {sortedProducts.map((product) => (
+        {gridReveal.revealed.map((product, index) => (
           <SimpleProductCard
             key={product.id}
             product={product}
             onFavorite={handleFavorite}
             isFavorited={favoriteIds.has(product.id)}
+            priority={index < 2}
           />
         ))}
       </div>
+      {gridReveal.hasMore ? (
+        <p className="text-center text-xs text-gray-500 py-3" aria-live="polite">
+          Đang hiển thị {gridReveal.revealed.length} / {gridReveal.total} — kéo xuống để xem thêm
+        </p>
+      ) : null}
+      <div ref={gridReveal.sentinelRef} className="h-4 w-full" aria-hidden />
 
       {/* Load More Section */}
       {sortedProducts.length > 0 && (
         <div className="text-center py-10 mt-10">
           <p className="text-sm text-gray-500 mb-4">
-            Đang hiển thị {sortedProducts.length} trong tổng số {products.length} sản phẩm
+            Đang hiển thị {gridReveal.revealed.length} trong tổng số {products.length} sản phẩm
           </p>
           {sortedProducts.length < products.length && (
             <button className="bg-[#ea580c] hover:bg-[#c2410c] text-white px-6 py-2.5 rounded-xl font-medium transition-colors duration-200 text-sm shadow-sm">

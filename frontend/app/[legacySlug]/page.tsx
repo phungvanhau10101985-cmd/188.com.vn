@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation';
+import { notFound, permanentRedirect, redirect } from 'next/navigation';
 import ErrorState from '@/app/products/[slug]/components/ErrorState/ErrorState';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { resolveOosListingPathForSlug } from '@/lib/product-oos-page';
@@ -17,6 +17,8 @@ type Props = {
  * Slug một-segment không phải PDP thật, thường xuất hiện từ hash/id section hoặc URL cũ.
  * Chặn sớm để tránh SSR gọi nhiều API fallback sản phẩm.
  */
+const LEGACY_HOMEPAGE_ALIASES = new Set(['index.html', 'index.htm', 'index.php']);
+
 const LEGACY_NON_PRODUCT_REDIRECTS: Record<string, string> = {
   'tim-kiem-sp': '/',
   'san-pham-cung-shop': '/#san-pham-cung-shop',
@@ -30,7 +32,12 @@ const LEGACY_NON_PRODUCT_REDIRECTS: Record<string, string> = {
  */
 export default async function LegacyMarketingProductPage({ params }: Props) {
   const { legacySlug: raw } = await params;
-  const legacySlug = normalizeLegacyProductPath(decodeURIComponent((raw || '').trim()));
+  const rawDecoded = decodeURIComponent((raw || '').trim()).replace(/^\/+/, '');
+  const rawKey = rawDecoded.toLowerCase();
+  if (LEGACY_HOMEPAGE_ALIASES.has(rawKey)) {
+    permanentRedirect('/');
+  }
+  const legacySlug = normalizeLegacyProductPath(rawDecoded);
   if (!legacySlug) {
     redirect('/');
   }

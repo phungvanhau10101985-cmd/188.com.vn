@@ -1,9 +1,9 @@
 /**
  * Image Utility for Long-term Management
  * Features:
- * - Alibaba CDN: URL gốc (không gắn _800x800q90…)
- * - Bunny CDN: optional width/quality query params
- * - Placeholder / fallback strategies
+ * - Alibaba CDN: hậu tố _{size}x{size}q90.jpg (2× ô hiển thị, sàn q90)
+ * - Bunny CDN: ?width=&quality= (≥90)
+ * - Fallback URL gốc khi bản resize 404
  */
 
 import { cdnUrl, rewriteLegacyBunnyCdnUrl } from '@/lib/cdn-url';
@@ -64,14 +64,33 @@ export function filterVisibleWebImageUrls(urls: Iterable<string | null | undefin
   return out;
 }
 
-/** Giới hạn pixel tải về — Bunny optimizer. */
+/** Giới hạn pixel tải về — Bunny / alicdn. Trần 960 để PDP vẫn sắc, không lấy file gốc vài MB. */
 const MAX_DISPLAY_PIXELS = 960;
+/** Sàn chất lượng — không nén thấp hơn q90 (tránh ảnh đại diện bị mềm). */
+const MIN_DISPLAY_QUALITY = 90;
+/** Cỡ alicdn chuẩn — chọn mức ≥ pixel 2×, không downscale. */
+const ALICDN_SNAP_SIZES = [160, 220, 320, 400, 500, 600, 640, 750, 800, 960] as const;
+
+/** Ảnh đại diện lưới/card: ~300 CSS px × 2 = 600px, q90. */
+export const LISTING_CARD_IMAGE = { width: 300, height: 300, quality: 90 } as const;
 
 function displayPixelSize(width: number, height: number): { w: number; h: number } {
   return {
     w: Math.min(Math.max(1, Math.ceil(width * 2)), MAX_DISPLAY_PIXELS),
     h: Math.min(Math.max(1, Math.ceil(height * 2)), MAX_DISPLAY_PIXELS),
   };
+}
+
+function snapAlicdnSize(px: number): number {
+  const need = Math.min(MAX_DISPLAY_PIXELS, Math.max(1, Math.round(px)));
+  for (const size of ALICDN_SNAP_SIZES) {
+    if (size >= need) return size;
+  }
+  return MAX_DISPLAY_PIXELS;
+}
+
+function clampDisplayQuality(quality: number): number {
+  return Math.min(100, Math.max(MIN_DISPLAY_QUALITY, Math.round(quality)));
 }
 
 function truncateAlicdnToFirstJpg(url: string): string {
@@ -97,8 +116,8 @@ export function stripAlicdnToBaseJpg(url: string): string {
   return truncateAlicdnToFirstJpg(u);
 }
 
-/** Alibaba CDN: dùng URL gốc — không gắn _800x800q90.jpg. */
-function applyAlicdnDisplaySize(url: string): string {
+/** Bản alicdn không hậu tố size — dùng khi URL resize 404. */
+export function getAlicdnOriginalUrl(url: string): string {
   if (!isAlibabaCdnImageUrl(url)) return url;
   const lower = url.toLowerCase();
   if (lower.includes('gw.alicdn.com/mt/')) return url;
@@ -108,6 +127,19 @@ function applyAlicdnDisplaySize(url: string): string {
   base = base.replace(/\.png\.jpg$/i, '.png');
   base = base.replace(/(_\d+x\d+q?\d*|\.sum)\.(jpg|jpeg|png|webp)$/i, '');
   return base || url;
+}
+
+/** Alibaba CDN: gắn _{size}x{size}q{quality}.jpg theo ô hiển thị (2×, sàn q90). */
+function applyAlicdnDisplaySize(url: string, pixelSize: number, quality: number): string {
+  if (!isAlibabaCdnImageUrl(url)) return url;
+  const lower = url.toLowerCase();
+  if (lower.includes('gw.alicdn.com/mt/')) return url;
+
+  const base = getAlicdnOriginalUrl(url);
+  if (!base) return url;
+  const size = snapAlicdnSize(pixelSize);
+  const q = clampDisplayQuality(quality);
+  return `${base}_${size}x${size}q${q}.jpg`;
 }
 
 function isBunnyCdnUrl(url: string): boolean {
@@ -120,14 +152,27 @@ function isBunnyCdnUrl(url: string): boolean {
   }
 }
 
-/** Bunny Optimizer: ?width=&quality=95 */
-function applyBunnyDisplaySize(url: string, width: number, quality = 95): string {
+/** Bunny Optimizer: ?width=&quality= (≥90). */
+function applyBunnyDisplaySize(url: string, width: number, quality = 90): string {
   if (!isBunnyCdnUrl(url)) return url;
   try {
     const u = new URL(url);
     if (u.searchParams.has('width')) return url;
     u.searchParams.set('width', String(Math.max(1, Math.round(width))));
-    u.searchParams.set('quality', String(Math.min(100, Math.max(85, Math.round(quality)))));
+    u.searchParams.set('quality', String(clampDisplayQuality(quality)));
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
+function stripBunnyDisplayParams(url: string): string {
+  if (!isBunnyCdnUrl(url)) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.delete('width');
+    u.searchParams.delete('height');
+    u.searchParams.delete('quality');
     return u.toString();
   } catch {
     return url;
@@ -162,7 +207,7 @@ const getOptimizedImageUrl = (
   const { w, h } = displayPixelSize(width, height);
 
   if (isAlibabaCdnImageUrl(processed)) {
-    return applyAlicdnDisplaySize(processed);
+    return applyAlicdnDisplaySize(processed, Math.max(w, h), quality);
   }
   if (isBunnyCdnUrl(processed)) {
     return applyBunnyDisplaySize(processed, Math.max(w, h), quality);
@@ -180,6 +225,8 @@ export const getOptimizedImage = (
     fallbackStrategy?: 'local' | 'cdn' | 'external';
     /** Chỉ bật trên PDP / ảnh thông tin SP — không ảnh hưởng logo, cài đặt web, listing. */
     hideProductPng?: boolean;
+    /** true = không gắn size alicdn / ?width Bunny (fallback khi resize 404). */
+    skipDisplayResize?: boolean;
   } = {}
 ): string => {
   const {
@@ -188,6 +235,7 @@ export const getOptimizedImage = (
     quality = 90,
     fallbackStrategy = 'local',
     hideProductPng = false,
+    skipDisplayResize = false,
   } = options;
 
   if (!url) {
@@ -216,12 +264,25 @@ export const getOptimizedImage = (
   }
 
   try {
+    if (skipDisplayResize) {
+      if (isAlibabaCdnImageUrl(processedUrl)) return getAlicdnOriginalUrl(processedUrl);
+      if (isBunnyCdnUrl(processedUrl)) return stripBunnyDisplayParams(processedUrl);
+      return processedUrl;
+    }
     return getOptimizedImageUrl(processedUrl, width, height, quality);
   } catch (error) {
     console.error('Error processing image URL:', error);
     return getFallbackImage(fallbackStrategy, width, height);
   }
 };
+
+/** URL gốc (không resize) — fallback khi bản alicdn/Bunny theo size 404. */
+export function getOriginalImageUrl(
+  url: string | undefined,
+  options: Omit<Parameters<typeof getOptimizedImage>[1], 'skipDisplayResize'> = {}
+): string {
+  return getOptimizedImage(url, { ...options, skipDisplayResize: true });
+}
 
 const getFallbackImage = (strategy: string, width: number, height: number): string => {
   switch (strategy) {

@@ -68,10 +68,12 @@ import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
 import { getGuestCategoryInterest } from '@/lib/guest-category-interest';
-import GuestCategoryPicker from '@/components/home/GuestCategoryPicker';
+const GuestCategoryPicker = dynamic(() => import('@/components/home/GuestCategoryPicker'), {
+  ssr: false,
+});
 
 /** Lần đầu block «CÓ THỂ BẠN THÍCH» — ít SP hơn để luôn có «Xem thêm» khi còn dữ liệu. */
-const HOME_MIX_INITIAL_LIMIT = 24;
+const HOME_MIX_INITIAL_LIMIT = 12;
 const HOME_MIX_LOAD_MORE_LIMIT = 24;
 
 /**
@@ -1187,12 +1189,17 @@ export default function HomePageClient({
   const visibleProductTotal =
     sellableProducts.length === 0 && products.length > 0 ? 0 : totalProducts;
   // Filter sản phẩm client-side cho price range (tạm thời)
-  const filteredProducts = shouldApplyPriceFilter
-    ? sellableProducts.filter(product => {
-      const productPrice = product.price || 0;
-      return productPrice >= priceRange[0] && productPrice <= priceRange[1];
-    })
-    : sellableProducts;
+  const filteredProducts = useMemo(
+    () =>
+      shouldApplyPriceFilter
+        ? sellableProducts.filter((product) => {
+            const productPrice = product.price || 0;
+            return productPrice >= priceRange[0] && productPrice <= priceRange[1];
+          })
+        : sellableProducts,
+    [shouldApplyPriceFilter, sellableProducts, priceRange]
+  );
+  const homeGridReveal = useLazyRevealList(filteredProducts, { initial: 12, step: 12 });
 
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
 
@@ -1457,7 +1464,7 @@ export default function HomePageClient({
               ) : filteredProducts.length > 0 ? (
                 <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {filteredProducts.map((product, index) => (
+                  {homeGridReveal.revealed.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
@@ -1467,6 +1474,12 @@ export default function HomePageClient({
                     />
                   ))}
                 </div>
+                {homeGridReveal.hasMore ? (
+                  <p className="text-center text-xs text-gray-500 py-3" aria-live="polite">
+                    Đang hiển thị {homeGridReveal.revealed.length} / {homeGridReveal.total} — kéo xuống để xem thêm
+                  </p>
+                ) : null}
+                <div ref={homeGridReveal.sentinelRef} className="h-4 w-full" aria-hidden />
                 </>
               ) : (
                 <div className="space-y-6">
@@ -1641,7 +1654,7 @@ export default function HomePageClient({
             ) : filteredProducts.length > 0 ? (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {filteredProducts.map((product, index) => (
+                  {homeGridReveal.revealed.map((product, index) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
@@ -1651,6 +1664,12 @@ export default function HomePageClient({
                     />
                   ))}
                 </div>
+                {homeGridReveal.hasMore ? (
+                  <p className="text-center text-xs text-gray-500 py-3" aria-live="polite">
+                    Đang hiển thị {homeGridReveal.revealed.length} / {homeGridReveal.total} — kéo xuống để xem thêm
+                  </p>
+                ) : null}
+                <div ref={homeGridReveal.sentinelRef} className="h-4 w-full" aria-hidden />
                 {showPagination && (
                   <HomeProductPagination
                     currentPage={currentPage}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { PublicSiteEmbeds } from '@/lib/site-embeds-public';
 import {
   clearGoogleAdsSendToAdminOnlyMode,
@@ -83,10 +83,8 @@ function prependBodyFragment(html: string) {
 }
 
 /**
- * Client-only: chèn mã embed vào head/body sau khi React gắn root (layout effect = trước paint).
- *
- * Phải chạy **đồng bộ trong useLayoutEffect** (không defer `setTimeout`): hook con (Analytics, trang deposit)
- * dùng `useEffect` — nếu pixel inject trễ hơn, `fbq` chưa có hoặc sự kiện `188-site-embeds-ready` lệ pha với listener.
+ * Client-only: chèn mã embed body / phần head còn lại sau LCP (idle), không chặn first paint.
+ * Stub gtag/fbq inline vẫn SSR trong head; script src dùng defer. `whenFbqReady` đợi tới 20s.
  */
 export default function SiteEmbedsRootClient({
   embeds,
@@ -128,7 +126,7 @@ export default function SiteEmbedsRootClient({
   const initial = useRef({ embeds, headClientRemainders });
   initial.current = { embeds, headClientRemainders };
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const inject = () => {
@@ -158,7 +156,30 @@ export default function SiteEmbedsRootClient({
       }
     };
 
-    inject();
+    let idleId = 0;
+    let timeoutId = 0;
+    const start = () => {
+      const ric = window.requestIdleCallback;
+      if (typeof ric === 'function') {
+        idleId = ric(() => inject(), { timeout: 2500 });
+      } else {
+        timeoutId = window.setTimeout(() => inject(), 200);
+      }
+    };
+
+    if (document.readyState === 'complete') {
+      start();
+    } else {
+      window.addEventListener('load', start, { once: true });
+    }
+
+    return () => {
+      window.removeEventListener('load', start);
+      if (idleId && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId);
+      }
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   return null;

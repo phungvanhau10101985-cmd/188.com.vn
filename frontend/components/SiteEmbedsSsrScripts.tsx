@@ -18,8 +18,7 @@ export default function SiteEmbedsSsrScripts({ specs }: Props) {
             <script
               key={key}
               src={s.src}
-              async={s.async || undefined}
-              defer={s.defer || undefined}
+              defer
               data-188-ssr-head="1"
             />
           );

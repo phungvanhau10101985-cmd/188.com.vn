@@ -1,5 +1,5 @@
 import { preload } from 'react-dom';
-import { getOptimizedImage } from '@/lib/image-utils';
+import { LISTING_CARD_IMAGE, getOptimizedImage } from '@/lib/image-utils';
 import type { HeroCategoryTilesResponse, ProductListResponse } from '@/types/api';
 
 /** Gọi từ server page — preload ảnh LCP tiềm năng, không đổi UI. */
@@ -13,10 +13,10 @@ export function preloadHomeLcpImages(
   const firstProduct = initialPlainHome?.products?.[0];
 
   const heroHref = heroTile?.image_url
-    ? getOptimizedImage(heroTile.image_url, { width: 400, height: 400, quality: 90 })
+    ? getOptimizedImage(heroTile.image_url, { ...LISTING_CARD_IMAGE })
     : null;
   const productHref = firstProduct?.main_image
-    ? getOptimizedImage(firstProduct.main_image, { width: 250, height: 250, quality: 90 })
+    ? getOptimizedImage(firstProduct.main_image, { ...LISTING_CARD_IMAGE })
     : null;
 
   const href = heroHref ?? productHref;
