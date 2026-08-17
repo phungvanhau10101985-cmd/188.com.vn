@@ -3759,6 +3759,26 @@ def _facet_str_nonempty(val: Optional[str]) -> bool:
     return bool(s and s.lower() != "nan")
 
 
+def apply_shop_name_chinese_filter(query, shop_name_chinese: Optional[str], *, contains: bool = False):
+    """
+    Lọc `shop_name_chinese`.
+    Storefront (contains=False): khớp đúng sau trim/lower — listing cùng shop.
+    Admin (contains=True): ILIKE chứa chuỗi — gõ một đoạn tên shop là ra.
+    """
+    sc = (shop_name_chinese or "").strip()
+    if not sc or sc.lower() == "nan":
+        return query
+    if contains:
+        return query.filter(
+            Product.shop_name_chinese.isnot(None),
+            Product.shop_name_chinese.ilike(f"%{sc}%"),
+        )
+    return query.filter(
+        Product.shop_name_chinese.isnot(None),
+        sql_func.lower(sql_func.trim(Product.shop_name_chinese)) == sc.lower(),
+    )
+
+
 def _facet_listing_dimensions_present(
     *,
     category: Optional[str] = None,
@@ -4184,13 +4204,7 @@ def get_product_listing_facets(
                 Product.style.isnot(None),
                 sql_func.lower(sql_func.trim(Product.style)) == st.lower(),
             )
-    if shop_name_chinese:
-        sc = shop_name_chinese.strip()
-        if sc and sc.lower() != "nan":
-            query = query.filter(
-                Product.shop_name_chinese.isnot(None),
-                sql_func.lower(sql_func.trim(Product.shop_name_chinese)) == sc.lower(),
-            )
+    query = apply_shop_name_chinese_filter(query, shop_name_chinese, contains=False)
     if chinese_name:
         cn = chinese_name.strip()
         if cn and cn.lower() != "nan":
@@ -4387,13 +4401,9 @@ def get_products(
                 Product.style.isnot(None),
                 sql_func.lower(sql_func.trim(Product.style)) == st.lower(),
             )
-    if shop_name_chinese:
-        sc = shop_name_chinese.strip()
-        if sc and sc.lower() != "nan":
-            query = query.filter(
-                Product.shop_name_chinese.isnot(None),
-                sql_func.lower(sql_func.trim(Product.shop_name_chinese)) == sc.lower(),
-            )
+    query = apply_shop_name_chinese_filter(
+        query, shop_name_chinese, contains=bool(admin_list_query)
+    )
     if chinese_name:
         cn = chinese_name.strip()
         if cn and cn.lower() != "nan":

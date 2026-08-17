@@ -575,7 +575,8 @@ def _read_products_list_impl(
 
     raw_q = (q or "").strip()
     pid = (product_id or "").strip()
-    if admin_list and not skip_total and not raw_q and not pid:
+    shop_cn = (shop_name_chinese or "").strip()
+    if admin_list and not skip_total and not raw_q and not pid and not shop_cn:
         skip_total = True
     if _should_skip_total_storefront_list(
         admin_list=admin_list,
@@ -907,7 +908,13 @@ def read_products(
     shop_name: Optional[str] = Query(None, description="Lọc theo shop_name"),
     shop_id: Optional[str] = Query(None, description="Lọc theo shop_id"),
     style: Optional[str] = Query(None, description="Lọc theo Style (cột Style / AF import)"),
-    shop_name_chinese: Optional[str] = Query(None, description="Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM)"),
+    shop_name_chinese: Optional[str] = Query(
+        None,
+        description=(
+            "Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM). "
+            "Storefront: khớp đúng tên; admin_list: chứa chuỗi."
+        ),
+    ),
     chinese_name: Optional[str] = Query(None, description="Lọc theo tên shop/chuỗi Trung Quốc (cột chinese_name)"),
     pro_lower_price: Optional[str] = Query(None, description="Lọc theo nhóm giá thấp hơn (chuỗi)"),
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),
@@ -1031,7 +1038,13 @@ def read_products_full_list(
     shop_name: Optional[str] = Query(None, description="Lọc theo shop_name"),
     shop_id: Optional[str] = Query(None, description="Lọc theo shop_id"),
     style: Optional[str] = Query(None, description="Lọc theo Style (cột Style / AF import)"),
-    shop_name_chinese: Optional[str] = Query(None, description="Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM)"),
+    shop_name_chinese: Optional[str] = Query(
+        None,
+        description=(
+            "Lọc theo Shop Trung Quốc (cột shop_name_chinese / AM). "
+            "Storefront: khớp đúng tên; admin_list: chứa chuỗi."
+        ),
+    ),
     chinese_name: Optional[str] = Query(None, description="Lọc theo tên shop/chuỗi Trung Quốc (cột chinese_name)"),
     pro_lower_price: Optional[str] = Query(None, description="Lọc theo nhóm giá thấp hơn (chuỗi)"),
     pro_high_price: Optional[str] = Query(None, description="Lọc theo nhóm giá cao hơn (chuỗi)"),

@@ -715,6 +715,7 @@ export default function AdminProductsPage() {
   /** Phân biệt lỗi API với danh sách rỗng thật */
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [searchName, setSearchName] = useState('');
+  const [searchShopChinese, setSearchShopChinese] = useState('');
   const [searchId, setSearchId] = useState('');
   const [listSort, setListSort] = useState<AdminProductListSort>('id_desc');
   /** Chỉ fetch sau khi đọc localStorage để không bị sort mặc định một nhịp rồi đổi. */
@@ -960,12 +961,13 @@ export default function AdminProductsPage() {
       setFetchError(null);
     }
     try {
-      const hasFilter = Boolean(searchName.trim() || searchId.trim());
+      const hasFilter = Boolean(searchName.trim() || searchShopChinese.trim() || searchId.trim());
       const res = await adminProductAPI.getProducts(
         {
           skip: (page - 1) * PAGE_SIZE,
           limit: PAGE_SIZE,
           q: searchName.trim() || undefined,
+          shop_name_chinese: searchShopChinese.trim() || undefined,
           product_id: searchId.trim() || undefined,
           sort: listSort,
           skipTotal: !hasFilter,
@@ -985,7 +987,7 @@ export default function AdminProductsPage() {
     } finally {
       if (!silent && !ctrl.signal.aborted) setLoading(false);
     }
-  }, [page, searchName, searchId, listSort]);
+  }, [page, searchName, searchShopChinese, searchId, listSort]);
 
   useEffect(() => {
     try {
@@ -1001,7 +1003,7 @@ export default function AdminProductsPage() {
   useEffect(() => {
     if (!listSortReady) return;
     fetchProducts();
-  }, [listSortReady, page, searchName, searchId, listSort, fetchProducts]);
+  }, [listSortReady, page, searchName, searchShopChinese, searchId, listSort, fetchProducts]);
 
   useEffect(() => {
     setSelectedProductIds(new Set());
@@ -4747,10 +4749,13 @@ export default function AdminProductsPage() {
             />
 
             {/* Hàng 1: lọc + thao tác danh sách */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 items-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1.15fr)_minmax(0,1fr)_minmax(0,0.95fr)_auto] gap-3 items-end">
               <div className="min-w-0">
-                <label className="block text-xs font-medium text-gray-600 mb-1">Tên sản phẩm</label>
+                <label htmlFor="admin-products-name" className="block text-xs font-medium text-gray-600 mb-1">
+                  Tên sản phẩm
+                </label>
                 <input
+                  id="admin-products-name"
                   type="text"
                   value={searchName}
                   onChange={(e) => setSearchName(e.target.value)}
@@ -4759,8 +4764,25 @@ export default function AdminProductsPage() {
                 />
               </div>
               <div className="min-w-0">
-                <label className="block text-xs font-medium text-gray-600 mb-1">ID hoặc SKU</label>
+                <label htmlFor="admin-products-shop-cn" className="block text-xs font-medium text-gray-600 mb-1">
+                  Shop Trung Quốc
+                </label>
                 <input
+                  id="admin-products-shop-cn"
+                  type="text"
+                  value={searchShopChinese}
+                  onChange={(e) => setSearchShopChinese(e.target.value)}
+                  placeholder="广州…, tên shop TQ…"
+                  className="w-full h-9 rounded-lg border border-gray-300 px-3 text-sm"
+                  aria-label="Tìm theo tên shop Trung Quốc"
+                />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="admin-products-id" className="block text-xs font-medium text-gray-600 mb-1">
+                  ID hoặc SKU
+                </label>
+                <input
+                  id="admin-products-id"
                   type="text"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}

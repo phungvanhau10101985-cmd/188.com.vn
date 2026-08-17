@@ -1406,6 +1406,8 @@ export const adminProductAPI = {
       limit?: number;
       q?: string;
       product_id?: string;
+      /** Shop Trung Quốc — admin khớp chứa chuỗi (`shop_name_chinese`). */
+      shop_name_chinese?: string;
       sort?: AdminProductListSort;
       /** Bỏ COUNT(*) — lưới admin mặc định bật khi không lọc. */
       skipTotal?: boolean;
@@ -1417,6 +1419,7 @@ export const adminProductAPI = {
     sp.set('limit', String(params?.limit ?? 100));
     if (params?.q) sp.set('q', params.q);
     if (params?.product_id) sp.set('product_id', params.product_id);
+    if (params?.shop_name_chinese) sp.set('shop_name_chinese', params.shop_name_chinese);
     if (params?.sort) sp.set('sort', params.sort);
     if (params?.skipTotal) sp.set('skip_total', 'true');
     sp.set('admin_list', 'true');
