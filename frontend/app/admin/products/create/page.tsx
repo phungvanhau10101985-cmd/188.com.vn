@@ -567,7 +567,7 @@ function StudioAiImageSettings({
         </select>
         {materialLocked ? (
           <p className="mt-1 text-[11px] text-amber-800">
-            Ảnh chất liệu luôn dùng Pro 2K — collage nhiều góc cận cảnh (4:3 ngang).
+            Ảnh chất liệu luôn dùng Pro 2K — poster kính lúp + 4 ô cận cảnh + cam kết đổi trả.
           </p>
         ) : null}
       </label>
@@ -592,7 +592,7 @@ function StudioAiImageSettings({
       </label>
       <p className={`text-[11px] text-slate-500 ${compact ? 'sm:col-span-2' : 'sm:col-span-2'}`}>
         {materialLocked
-          ? 'Ảnh chất liệu cố định 4:3 ngang — collage 1 panel lớn + 4 strip cận cảnh.'
+          ? 'Ảnh chất liệu cố định 4:3 ngang — poster: tiêu đề, kính lúp zoom vải, 4 ô 2 tầng chữ, banner cam kết.'
           : 'Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.'}
       </p>
     </div>
@@ -2762,9 +2762,10 @@ export default function AdminManualProductCreatePage() {
                   ) : (
                     ' (chưa có — quay lại bước Thuộc tính để nhập)'
                   )}
-                  , tự soạn 3 ưu điểm riêng của đúng chất liệu đó (DeepSeek — vd lụa thì nói óng ảnh/mát, da thì nói vân da/bền) rồi in lên ảnh dạng nhãn tiếng Việt.{' '}
-                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI ghép collage «Chi tiết chất liệu»:
-                  1 panel ngang lớn + 4 strip cận cảnh khác nhau (vải, đường may, cổ tay, viền…), nhãn ưu điểm ở margin.
+                  , tự soạn 3 ưu điểm riêng của đúng chất liệu đó (DeepSeek — vd lụa thì nói óng ảnh/mát, da thì nói vân da/bền) rồi in chú thích tiếng Việt dưới 4 ô cận cảnh.{' '}
+                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI ghép poster:
+                  tiêu đề + 3 lợi ích, ảnh SP giữa có kính lúp zoom đúng vải, 4 ô cận cảnh (tiêu đề + mô tả + icon),
+                  banner «Cam kết: bao đổi trả 7 ngày — cho kiểm tra hàng».
                   Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
               ) : null}

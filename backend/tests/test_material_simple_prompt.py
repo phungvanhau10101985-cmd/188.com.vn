@@ -17,13 +17,20 @@ def test_material_simple_prompt_lists_declared_benefits():
     prompt = _simple_material_prompt(
         material_name="Da bò cao cấp",
         material_callouts=["Vân da độc bản tự nhiên", "Càng dùng càng lên màu", "Bền đẹp theo thời gian dùng"],
+        product_name="Túi xách da bò",
+        product_type="bag",
     )
-    assert "material details collage" in prompt.lower()
-    assert "TOP PANEL" in prompt
+    assert "sales infographic" in prompt.lower()
+    assert "CENTER HERO" in prompt
+    assert "TOP-LEFT" in prompt
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
+    assert "magnifying-glass" in prompt.lower()
     assert "Da bò cao cấp" in prompt
     assert "Vân da độc bản tự nhiên" in prompt
+    assert "CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP" in prompt
     assert "verbatim" in prompt.lower()
     assert "premium" in prompt.lower()
+    assert "PRODUCT LOCK" in prompt
 
 
 def test_generic_callouts_detected():
@@ -127,16 +134,51 @@ def test_build_studio_slot_prompt_material_uses_simple_template():
     prompt = _build_studio_slot_prompt(state, slot)
     assert "Linen" in prompt
     assert "Nhẹ" in prompt
-    assert "material details collage" in prompt.lower()
-    assert "TOP PANEL" in prompt
-    assert "STRIP" in prompt
-    assert "corners" in prompt.lower() or "margins" in prompt.lower()
+    assert "sales infographic" in prompt.lower()
+    assert "CENTER HERO" in prompt
+    assert "TOP-LEFT" in prompt
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
+    assert "magnifying-glass" in prompt.lower()
 
 
 def test_material_composition_for_bag():
     from app.services.manual_product_create_service import _material_collage_panel_brief
 
     brief = _material_collage_panel_brief("bag")
-    assert "TOP" in brief
-    assert "STRIP" in brief
+    assert "TOP-LEFT" in brief
+    assert "BOTTOM-RIGHT" in brief
     assert "grain" in brief.lower()
+
+
+def test_material_board_copy_uses_sales_headline():
+    from app.services.manual_product_create_service import _material_board_sales_copy
+
+    headline, sub, trust = _material_board_sales_copy(
+        product_name="Áo polo dệt kim premium",
+        material="dệt kim",
+        product_type="apparel",
+        gender="Nam",
+        benefit_bullets=["Vải mềm mịn", "Thấm hút tuyệt đối", "Giữ phom chuẩn"],
+    )
+    assert "ÁO POLO DỆT KIM PREMIUM" in headline
+    assert "CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP" in headline
+    assert "Vải mềm mịn" in sub
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in trust
+
+
+def test_simple_prompt_includes_four_captions_and_center_model():
+    prompt = _simple_material_prompt(
+        material_name="Cotton",
+        material_callouts=["Thấm hút vượt trội tự nhiên", "Mềm mại chuẩn cotton nguyên chất", "Thoáng khí suốt ngày dài"],
+        product_type="apparel",
+        gender="Nam",
+        product_name="Áo polo dệt kim",
+    )
+    assert "wearing the EXACT same garment" in prompt
+    assert "magnifying-glass" in prompt.lower()
+    assert "honeycomb knit" in prompt.lower()
+    assert "PHOM DÁNG HOÀN HẢO" in prompt
+    assert "Giữ form, tôn dáng" in prompt
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
+    assert "needle-and-thread" in prompt
+    assert "PRODUCT LOCK" in prompt

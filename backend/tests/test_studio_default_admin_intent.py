@@ -28,9 +28,10 @@ def _state(*, product_type="apparel", model_presence="model", vision_product_kin
 
 def test_material_default_intent_without_admin_input():
     intent = _default_studio_admin_intent(_state(), kind="material")
-    assert "material details collage" in intent.lower()
+    assert "sales infographic" in intent.lower()
     assert "Cotton 100%" in intent
-    assert "TOP PANEL" in intent
+    assert "CENTER HERO" in intent
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in intent
 
 
 def test_resolve_material_ignores_admin_prompt():

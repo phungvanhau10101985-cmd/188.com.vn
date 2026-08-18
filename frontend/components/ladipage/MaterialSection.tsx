@@ -7,7 +7,7 @@ import HeroDisplayImage from './HeroDisplayImage';
 import { MaterialImageZoomView, isAiMaterialImage } from './MaterialImageZoomView';
 import type { HeroImageOption, MaterialSectionData } from './types';
 
-/** Ảnh chất liệu AI: collage 4:3 — 1 panel ngang + 4 strip cận cảnh. */
+/** Ảnh chất liệu AI: poster 4:3 — kính lúp + 4 ô 2 tầng chữ + banner cam kết. */
 const MATERIAL_IMAGE_ASPECT = 'aspect-[4/3]';
 const MATERIAL_IMAGE_FIT = 'contain' as const;
 

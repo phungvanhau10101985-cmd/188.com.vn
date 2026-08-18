@@ -1013,21 +1013,32 @@ def generate_material_image(
     single_product: Optional[Dict[str, Any]] = None,
     category_name: Optional[str] = None,
 ) -> Dict[str, str]:
-    callout_str = "; ".join(callouts) if callouts else "chất lượng bền đẹp; đáng đồng tiền; dễ bảo quản"
     category_hint = f" thuộc danh mục «{category_name}»" if category_name else ""
     candidate_urls = pick_usable_product_image_urls(single_product) if single_product else []
 
-    if candidate_urls and not custom_prompt:
-        prompt = (
-            f"Chỉnh sửa ảnh sản phẩm thật đính kèm{category_hint} thành collage «Chi tiết chất liệu» chuyên nghiệp "
-            f"cho chất liệu «{material}»: "
-            "1 panel ngang lớn phía trên + 4 strip dọc phía dưới — mỗi panel crop cận cảnh KHÁC NHAU "
-            "của cùng sản phẩm (vải/vân da/đường may/cổ tay/viền…), viền trắng mỏng giữa các panel, "
-            "nền beige studio ấm. GIỮ NGUYÊN CHÍNH XÁC loại sản phẩm, màu sắc/hoạ tiết/kết cấu thật. "
-            f"Trên ảnh in trực tiếp các chú thích ngắn tiếng Việt dạng nhãn callout ở margin/góc "
-            f"(không che panel chất liệu): {callout_str}. "
-            "Tỷ lệ 4:3 ngang. Không watermark, không chữ tiếng Trung, không logo hãng khác."
+    def _material_prompt() -> str:
+        from app.services.manual_product_create_service import _simple_material_prompt
+
+        pname = ""
+        if isinstance(single_product, dict):
+            pname = str(
+                single_product.get("name")
+                or single_product.get("product_name")
+                or ""
+            ).strip()
+        text = _simple_material_prompt(
+            material_name=material,
+            material_callouts=callouts,
+            product_name=pname,
         )
+        if category_hint:
+            return (
+                f"Category context{category_hint}. Keep the product type matching that category. {text}"
+            )
+        return text
+
+    if candidate_urls and not custom_prompt:
+        prompt = _material_prompt()
         last_exc: Optional[Exception] = None
         for source_photo in candidate_urls:
             try:
@@ -1047,13 +1058,7 @@ def generate_material_image(
                 last_exc,
             )
 
-    prompt = custom_prompt or (
-        f"Collage «Chi tiết chất liệu» thương mại điện tử cho chất liệu «{material}»"
-        f"{category_hint}: 1 panel ngang lớn + 4 strip dọc — mỗi panel crop cận cảnh khác nhau "
-        "của cùng loại sản phẩm khớp danh mục, viền trắng mỏng, nền beige studio, ánh sáng mềm. "
-        f"In nhãn callout tiếng Việt ở margin/góc: {callout_str}. "
-        "Tỷ lệ 4:3 ngang. Không watermark, không chữ tiếng Trung, không logo hãng khác."
-    )
+    prompt = custom_prompt or _material_prompt()
     raw = gemini_generate_image_from_text(prompt)
     url = _upload_ladipage_image(ladipage_id, raw, name_hint=f"material-{material}")
     return {"image_url": url, "prompt_used": prompt}
