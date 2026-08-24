@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Product, type ProductQuestionItem } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
+import { invalidatePdpProductQuestions } from '@/lib/pdp-request-dedupe';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice } from '@/lib/utils';
 import { getOptimizedImage } from '@/lib/image-utils';
@@ -154,6 +155,7 @@ export default function ProductQASection({ product, embedded, modalOnly, modalOp
     setSubmitting(true);
     try {
       await apiClient.askProductQuestion(product.id, content);
+      invalidatePdpProductQuestions(product.id);
       const refreshed = await apiClient.getProductQuestions(product.id);
       setQuestions(Array.isArray(refreshed) ? refreshed : []);
       setAskContent('');

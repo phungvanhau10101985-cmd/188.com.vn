@@ -252,7 +252,7 @@ export default function SingleProductLadipageView({
     </SectionErrorBoundary>
   );
 
-  const renderLadipageSections = () => (
+  const renderLadipageSections = (layout: 'mobile' | 'desktop') => (
     <>
       {highlightsSection && (
         <SectionErrorBoundary>
@@ -270,7 +270,7 @@ export default function SingleProductLadipageView({
       )}
       <div className="border-t border-gray-100 pt-2">
         <SectionErrorBoundary>
-          <ProductTabs product={product} />
+          <ProductTabs product={product} layout={layout} />
         </SectionErrorBoundary>
       </div>
       {trustCtaSection && (
@@ -324,7 +324,7 @@ export default function SingleProductLadipageView({
           {renderProductInfo({ enableMobileStickyBar: true, compactMobile: true })}
         </div>
 
-        <div className="px-4 pt-2">{renderLadipageSections()}</div>
+        <div className="px-4 pt-2">{renderLadipageSections('mobile')}</div>
       </div>
 
       {/* Desktop: giữ hero marketing + gallery cạnh thông tin mua */}
@@ -366,10 +366,10 @@ export default function SingleProductLadipageView({
         </div>
 
         <SectionErrorBoundary>
-          <OutfitSuggestions product={product} />
+          <OutfitSuggestions product={product} layout="desktop" />
         </SectionErrorBoundary>
 
-        {renderLadipageSections()}
+        {renderLadipageSections('desktop')}
       </div>
 
       <ProductBuyModal

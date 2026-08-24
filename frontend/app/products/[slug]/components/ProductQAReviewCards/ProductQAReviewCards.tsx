@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Product } from '@/types/api';
 import type { ProductQuestionItem } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
+import { loadPdpProductQuestions } from '@/lib/pdp-request-dedupe';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useProductReviews } from '@/lib/product-reviews-context';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
@@ -63,10 +64,10 @@ export default function ProductQAReviewCards({
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
-    apiClient
-      .getProductQuestions(product.id)
+    const authKey = `${isAuthenticated ? 'auth' : 'guest'}:${user?.id ?? 0}`;
+    loadPdpProductQuestions(product.id, authKey)
       .then((list) => {
-        if (!cancelled && Array.isArray(list)) {
+        if (!cancelled) {
           setQuestionCount(list.length);
           setSampleQuestion(list.length > 0 ? list[0] : null);
         }

@@ -9,6 +9,9 @@ import { readNavCategoryTreeCache } from '@/lib/nav-category-tree-cache';
 import { useInferredCategoryGender } from '@/lib/use-inferred-category-gender';
 import type { CategoryLevel1 } from '@/types/api';
 
+/** Ghi nhận xem SP khi đang PDP — chỉ refetch inferred-gender sau khi rời trang sản phẩm. */
+let pendingInferredGenderRefresh = false;
+
 /**
  * Cây danh mục đã sắp theo giới (Nam/Nữ) từ 8 SP xem gần nhất hoặc hồ sơ.
  * SSR vẫn trả cây alphabet; client reorder sau khi có inferred-gender.
@@ -29,12 +32,24 @@ export function usePersonalizedCategoryTree(
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const onView = () => setViewTick((t) => t + 1);
+    const onView = () => {
+      if (pathname?.startsWith('/products/')) {
+        pendingInferredGenderRefresh = true;
+        return;
+      }
+      setViewTick((t) => t + 1);
+    };
     window.addEventListener('188-product-viewed', onView);
     return () => window.removeEventListener('188-product-viewed', onView);
-  }, []);
+  }, [pathname]);
 
-  const genderFetchKey = `${pathname}|${isAuthenticated}|${user?.gender ?? ''}|${viewTick}`;
+  useEffect(() => {
+    if (pathname?.startsWith('/products/') || !pendingInferredGenderRefresh) return;
+    pendingInferredGenderRefresh = false;
+    setViewTick((t) => t + 1);
+  }, [pathname]);
+
+  const genderFetchKey = `${isAuthenticated}|${user?.gender ?? ''}|${viewTick}`;
   const genderSuffix = useInferredCategoryGender(genderFetchKey);
 
   const resolvedBase = hasRealCategoryTree(baseTree) ? baseTree! : cachedTree;

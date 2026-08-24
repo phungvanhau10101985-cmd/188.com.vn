@@ -163,7 +163,7 @@ export default function ProductGallery({
     else onSelectImage?.(null);
   };
 
-  const thumbSizeClass = isBleed ? 'w-14 h-14' : 'w-16 h-16';
+  const thumbSizeClass = isBleed ? 'w-14 h-14' : 'w-full aspect-square';
   const photoFrameClass = isBleed
     ? 'relative w-full bg-gray-100'
     : 'relative w-full bg-gray-100 lg:rounded-lg';
@@ -216,10 +216,12 @@ export default function ProductGallery({
   const thumbStrip = mediaCount > 1 ? (
     <nav
       ref={thumbStripRef}
-      className={`product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory ${
-        isBleed ? 'py-2 px-4' : 'py-1'
-      }`}
-      style={{ WebkitOverflowScrolling: 'touch' }}
+      className={
+        isBleed
+          ? 'product-gallery-thumb-strip flex items-center gap-2 overflow-x-auto scrollbar-hide snap-x snap-mandatory py-2 px-4'
+          : 'grid grid-cols-5 gap-2 py-1'
+      }
+      style={isBleed ? { WebkitOverflowScrolling: 'touch' } : undefined}
       aria-label="Thư viện ảnh sản phẩm"
     >
       {thumbItems.map((item) =>
@@ -231,7 +233,7 @@ export default function ProductGallery({
             }}
             type="button"
             onClick={() => selectMedia(item.mediaIndex)}
-            className={`relative flex-shrink-0 snap-center snap-always ${thumbSizeClass} rounded-lg border-2 transition-all overflow-hidden ${
+            className={`relative ${isBleed ? 'flex-shrink-0 snap-center snap-always' : ''} ${thumbSizeClass} rounded-lg border-2 transition-all overflow-hidden ${
               selectedIndex === item.mediaIndex
                 ? 'border-[#ea580c] scale-[1.02] shadow-md'
                 : 'border-gray-300 hover:border-gray-400'
@@ -259,8 +261,12 @@ export default function ProductGallery({
         ) : (
           <GalleryThumbImage
             key={item.url}
-            src={getOptimizedImage(item.url, { width: 64, height: 64, hideProductPng: true })}
-            sizeClass={`${thumbSizeClass} snap-center snap-always flex-shrink-0`}
+            src={getOptimizedImage(item.url, {
+              width: isBleed ? 64 : 160,
+              height: isBleed ? 64 : 160,
+              hideProductPng: true,
+            })}
+            sizeClass={isBleed ? `${thumbSizeClass} snap-center snap-always flex-shrink-0` : thumbSizeClass}
             selectedClassName="border-[#ea580c] scale-[1.02] shadow-md"
             unselectedClassName="border-gray-300 hover:border-gray-400"
             selected={selectedIndex === item.mediaIndex}

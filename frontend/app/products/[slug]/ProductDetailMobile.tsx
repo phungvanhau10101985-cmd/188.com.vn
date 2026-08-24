@@ -604,7 +604,7 @@ export default function ProductDetailMobile({
         {/* Mô tả & Thông tin sản phẩm (tabs như desktop) */}
         <div className="mb-4">
           <SectionErrorBoundary>
-            <ProductTabs product={product} />
+            <ProductTabs product={product} layout="mobile" />
           </SectionErrorBoundary>
         </div>
 

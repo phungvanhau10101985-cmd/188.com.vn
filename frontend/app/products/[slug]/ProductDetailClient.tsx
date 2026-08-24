@@ -729,12 +729,12 @@ export default function ProductDetailClient({
             </div>
             <div className="hidden md:block px-4 pb-2">
               <SectionErrorBoundary>
-                <OutfitSuggestions product={product} />
+                <OutfitSuggestions product={product} layout="desktop" />
               </SectionErrorBoundary>
             </div>
             <div className="border-t">
               <SectionErrorBoundary>
-                <ProductTabs product={product} />
+                <ProductTabs product={product} layout="desktop" />
               </SectionErrorBoundary>
             </div>
             <ProductQASection product={product} modalOnly modalOpen={qaModalOpen} onModalClose={() => setQaModalOpen(false)} onModalOpen={() => setQaModalOpen(true)} />

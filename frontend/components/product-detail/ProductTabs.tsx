@@ -14,6 +14,8 @@ import DescriptionHtmlSafeImages from '@/components/product-detail/DescriptionHt
 
 interface ProductTabsProps {
   product: Product;
+  /** Khớp khung PDP — truyền xuống phối đồ / SP liên quan. */
+  layout?: 'mobile' | 'desktop';
 }
 
 /** Khóa đoạn thông số gốc từ NCC — ưu tiên thấp khi đã có bản VI; đọc cả khóa legacy trong DB cũ (không hiện branding). */
@@ -330,7 +332,7 @@ function collectDetailImageUrls(product: Product): string[] {
   return out;
 }
 
-export default function ProductTabs({ product }: ProductTabsProps) {
+export default function ProductTabs({ product, layout = 'mobile' }: ProductTabsProps) {
   const [activeTab, setActiveTab] = useState('description');
   const [brokenDetailImages, setBrokenDetailImages] = useState<Record<string, true>>({});
 
@@ -379,9 +381,9 @@ export default function ProductTabs({ product }: ProductTabsProps) {
         {activeTab === 'description' && (
           <div className="space-y-4">
             <div className="md:hidden">
-              <OutfitSuggestions product={product} />
+              <OutfitSuggestions product={product} layout="mobile" />
             </div>
-            <RelatedProducts currentProduct={product} />
+            <RelatedProducts currentProduct={product} layout={layout} />
 
             {/* Product Description */}
             <div className="space-y-2">

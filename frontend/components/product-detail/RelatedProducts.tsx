@@ -35,8 +35,12 @@ const RELATED_LIST_BASE: Pick<ProductSearchParams, 'skip_total' | 'is_active'> =
   is_active: true,
 };
 
+type PdpStripLayout = 'mobile' | 'desktop';
+
 interface RelatedProductsProps {
   currentProduct: Product;
+  /** Khớp khung PDP: mobile luôn 2 ô / desktop luôn 5 ô. */
+  layout?: PdpStripLayout;
 }
 
 function sectionTitle(tab: ProductRelatedTabId): string {
@@ -120,22 +124,25 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
   );
 }
 
-const BESTSELLING_GRID_CLASS = 'grid grid-cols-2 lg:grid-cols-5 gap-4';
-const BESTSELLING_IMAGE_SIZES = '(max-width: 1023px) 50vw, (min-width: 1024px) 20vw';
-
-/** Desktop lg: 5 ô / +5; mobile: 2 ô / +2 — dùng cho «bán chạy» và lưới phụ cùng shop TQ + cấp 2. */
-function relatedStripInitialVisible(len: number): number {
-  if (typeof window === 'undefined') return Math.min(2, len);
-  const lg = window.matchMedia('(min-width: 1024px)').matches;
-  return Math.min(lg ? 5 : 2, len);
+function stripInitialVisible(len: number, layout: PdpStripLayout): number {
+  return Math.min(layout === 'desktop' ? 5 : 2, len);
 }
 
-function relatedStripStep(): number {
-  if (typeof window === 'undefined') return 2;
-  return window.matchMedia('(min-width: 1024px)').matches ? 5 : 2;
+function stripStep(layout: PdpStripLayout): number {
+  return layout === 'desktop' ? 5 : 2;
 }
 
-export default function RelatedProducts({ currentProduct }: RelatedProductsProps) {
+export default function RelatedProducts({
+  currentProduct,
+  layout = 'mobile',
+}: RelatedProductsProps) {
+  const gridClassName = layout === 'desktop' ? 'grid grid-cols-5 gap-4' : 'grid grid-cols-2 gap-4';
+  const imageSizes = layout === 'desktop' ? '20vw' : '50vw';
+  const initialVisible = layout === 'desktop' ? 5 : 2;
+  const actionsRowClass =
+    layout === 'desktop'
+      ? 'mt-4 flex w-full items-center justify-center gap-4'
+      : 'mt-4 flex w-full items-center justify-between gap-4';
   const searchParams = useSearchParams();
   const relatedTab = parseRelatedTabFromSearch(searchParams.get('rt'));
 
@@ -149,10 +156,10 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const [shopGroupProducts, setShopGroupProducts] = useState<Product[]>([]);
   const [loadingRelated, setLoadingRelated] = useState(true);
   const [loadingShopGroup, setLoadingShopGroup] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(5);
+  const [visibleCount, setVisibleCount] = useState(initialVisible);
   const [showAllLoading, setShowAllLoading] = useState(false);
 
-  const [shopGroupVisibleCount, setShopGroupVisibleCount] = useState(2);
+  const [shopGroupVisibleCount, setShopGroupVisibleCount] = useState(initialVisible);
   const [shopGroupShowAllLoading, setShopGroupShowAllLoading] = useState(false);
 
   const chineseShopCat2GroupParams = useMemo(
@@ -172,9 +179,9 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
     const applySnapshot = (list: Product[], sgList: Product[]) => {
       setRelatedProducts(list);
-      setVisibleCount(relatedTab === 'bestselling' ? relatedStripInitialVisible(list.length) : 5);
+      setVisibleCount(stripInitialVisible(list.length, layout));
       setShopGroupProducts(sgList);
-      setShopGroupVisibleCount(relatedStripInitialVisible(sgList.length));
+      setShopGroupVisibleCount(stripInitialVisible(sgList.length, layout));
     };
 
     const cached = getCachedRelatedProductsSnapshot(currentProduct, relatedTab);
@@ -218,7 +225,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
         if (ac.signal.aborted) return;
         setRelatedProducts([]);
         setShopGroupProducts([]);
-        setShopGroupVisibleCount(relatedStripInitialVisible(0));
+        setShopGroupVisibleCount(stripInitialVisible(0, layout));
       })
       .finally(() => {
         if (!ac.signal.aborted) {
@@ -230,17 +237,17 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     return () => {
       ac.abort();
     };
-  }, [currentProduct, relatedTab]);
+  }, [currentProduct, relatedTab, layout]);
 
   const plan = buildRelatedFetchPlan(currentProduct, relatedTab);
   const canShowShopGroupSection = relatedTab === 'bestselling' && !!chineseShopCat2GroupParams;
   const showShopGroupSkeleton = loadingShopGroup && canShowShopGroupSection;
   const showRelatedSkeleton = loadingRelated && plan.ok;
 
-  const relatedSkeleton = relatedTab === 'bestselling' ? (
+  const relatedSkeleton = (
     <>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-        {[...Array(5)].map((_, index) => (
+      <div className={gridClassName}>
+        {[...Array(initialVisible)].map((_, index) => (
           <div key={index} className="animate-pulse">
             <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
             <div className="h-4 bg-gray-200 rounded mb-1"></div>
@@ -248,21 +255,11 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
           </div>
         ))}
       </div>
-      <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+      <div className={actionsRowClass}>
         <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
         <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
       </div>
     </>
-  ) : (
-    <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-      {[...Array(4)].map((_, index) => (
-        <div key={index} className="animate-pulse">
-          <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded mb-1"></div>
-          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-        </div>
-      ))}
-    </div>
   );
 
   if (showShopGroupSkeleton && showRelatedSkeleton && !canShowShopGroupSection) {
@@ -279,8 +276,8 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
       <div className="border-t border-gray-200 pt-5">
         <div className="mb-8">
           <div className="h-6 bg-gray-200 rounded w-72 mb-3 animate-pulse max-w-full" />
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            {[...Array(5)].map((_, index) => (
+          <div className={gridClassName}>
+            {[...Array(initialVisible)].map((_, index) => (
               <div key={index} className="animate-pulse">
                 <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
                 <div className="h-4 bg-gray-200 rounded mb-1"></div>
@@ -288,7 +285,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
               </div>
             ))}
           </div>
-          <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+          <div className={actionsRowClass}>
             <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
             <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
           </div>
@@ -329,8 +326,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   const canShowAll = relatedProducts.length > 0 && visibleCount < relatedProducts.length;
 
   const handleLoadMore = () => {
-    const step = relatedTab === 'bestselling' ? relatedStripStep() : 5;
-    setVisibleCount((prev) => Math.min(prev + step, relatedProducts.length));
+    setVisibleCount((prev) => Math.min(prev + stripStep(layout), relatedProducts.length));
   };
 
   const handleShowAll = async () => {
@@ -357,13 +353,6 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
   };
 
   const isBestselling = relatedTab === 'bestselling';
-  const gridClassName = isBestselling
-    ? BESTSELLING_GRID_CLASS
-    : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4';
-
-  const imageSizes = isBestselling
-    ? BESTSELLING_IMAGE_SIZES
-    : '(min-width: 1024px) 20vw, (min-width: 640px) 25vw, 50vw';
 
   const shopGroupVisibleProducts = shopGroupProducts.slice(0, shopGroupVisibleCount);
   const shopGroupCanLoadMore = shopGroupVisibleCount < shopGroupProducts.length;
@@ -371,8 +360,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     shopGroupProducts.length > 0 && shopGroupVisibleCount < shopGroupProducts.length;
 
   const handleShopGroupLoadMore = () => {
-    const step = relatedStripStep();
-    setShopGroupVisibleCount((prev) => Math.min(prev + step, shopGroupProducts.length));
+    setShopGroupVisibleCount((prev) => Math.min(prev + stripStep(layout), shopGroupProducts.length));
   };
 
   const handleShopGroupShowAll = async () => {
@@ -409,13 +397,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
 
   const actionsRow =
     (canLoadMore || canShowAll) ? (
-      <div
-        className={`flex items-center gap-4 ${
-          isBestselling
-            ? 'mt-4 w-full justify-between lg:w-auto lg:justify-center lg:flex-wrap'
-            : 'justify-center mt-4'
-        }`}
-      >
+      <div className={actionsRowClass}>
         {canLoadMore && (
           <button
             type="button"
@@ -451,16 +433,16 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
     ) : null;
 
   const shopGroupGrid = (
-    <div className={BESTSELLING_GRID_CLASS}>
+    <div className={gridClassName}>
       {shopGroupVisibleProducts.map((product) => (
-        <ProductRelatedCard key={product.id} product={product} imageSizes={BESTSELLING_IMAGE_SIZES} />
+        <ProductRelatedCard key={product.id} product={product} imageSizes={imageSizes} />
       ))}
     </div>
   );
 
   const shopGroupActionsRow =
     shopGroupCanLoadMore || shopGroupCanShowAll ? (
-      <div className="flex items-center gap-4 mt-4 w-full justify-between lg:w-auto lg:justify-center lg:flex-wrap">
+      <div className={actionsRowClass}>
         {shopGroupCanLoadMore && (
           <button
             type="button"
@@ -504,8 +486,8 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
           </h3>
           {showShopGroupSkeleton ? (
             <>
-              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-                {[...Array(5)].map((_, index) => (
+              <div className={gridClassName}>
+                {[...Array(initialVisible)].map((_, index) => (
                   <div key={index} className="animate-pulse">
                     <div className="aspect-square bg-gray-200 rounded-lg mb-2"></div>
                     <div className="h-4 bg-gray-200 rounded mb-1"></div>
@@ -513,7 +495,7 @@ export default function RelatedProducts({ currentProduct }: RelatedProductsProps
                   </div>
                 ))}
               </div>
-              <div className="mt-4 flex w-full justify-between gap-4 lg:justify-center">
+              <div className={actionsRowClass}>
                 <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
                 <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
               </div>

@@ -2,10 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import ProductPdpLink from '@/components/ProductPdpLink';
+import LoadingLink from '@/components/ui/LoadingLink';
 import type { PdpOutfitResponse, PdpOutfitSlot, Product } from '@/types/api';
-import { apiClient } from '@/lib/api-client';
 import { trackEvent } from '@/lib/analytics';
 import { formatPrice, getProductMainImage } from '@/lib/utils';
 import { productPdpHref } from '@/lib/product-path-slug';
@@ -15,9 +14,23 @@ import { applyBirthdayDiscount } from '@/lib/birthday-discount';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import {
+  loadPdpOutfitSuggestions,
+  prefetchPdpOutfitSuggestions,
+  shouldTrackOutfitBlockView,
+} from '@/lib/pdp-request-dedupe';
 
-const GRID_CLASS = 'grid grid-cols-2 lg:grid-cols-5 gap-4';
-const IMAGE_SIZES = '(max-width: 1023px) 50vw, (min-width: 1024px) 20vw';
+const FETCH_LIMIT = 12;
+
+export type PdpStripLayout = 'mobile' | 'desktop';
+
+function stripInitialVisible(len: number, layout: PdpStripLayout): number {
+  return Math.min(layout === 'desktop' ? 5 : 2, len);
+}
+
+function stripStep(layout: PdpStripLayout): number {
+  return layout === 'desktop' ? 5 : 2;
+}
 
 function listingHref(params?: Record<string, string>): string | null {
   if (!params) return null;
@@ -37,11 +50,13 @@ function OutfitCard({
   reason,
   slotId,
   anchorId,
+  imageSizes,
 }: {
   product: Product;
   reason?: string;
   slotId: string;
   anchorId: number;
+  imageSizes: string;
 }) {
   const href = productPdpHref(product.slug, product.product_id) ?? `/products/${product.id}`;
   const birthdayDiscount = useBirthdayDiscount();
@@ -66,7 +81,7 @@ function OutfitCard({
           src={getProductMainImage(product)}
           alt={product.name}
           fill
-          sizes={IMAGE_SIZES}
+          sizes={imageSizes}
           loading="lazy"
           className="object-cover group-hover:scale-110 transition-transform duration-300"
           onError={(e) => {
@@ -106,28 +121,44 @@ function OutfitCard({
 type OutfitSuggestionsProps = {
   product: Product;
   className?: string;
+  /** Khớp khung PDP: mobile luôn 2 ô / desktop luôn 5 ô — không đoán theo window. */
+  layout?: PdpStripLayout;
 };
 
-export default function OutfitSuggestions({ product, className = '' }: OutfitSuggestionsProps) {
+export default function OutfitSuggestions({
+  product,
+  className = '',
+  layout = 'mobile',
+}: OutfitSuggestionsProps) {
+  const gridClass = layout === 'desktop' ? 'grid grid-cols-5 gap-4' : 'grid grid-cols-2 gap-4';
+  const imageSizes = layout === 'desktop' ? '20vw' : '50vw';
+  const actionsRowClass =
+    layout === 'desktop'
+      ? 'mt-4 flex w-full items-center justify-center gap-4'
+      : 'mt-4 flex w-full items-center justify-between gap-4';
   const [data, setData] = useState<PdpOutfitResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(() => (layout === 'desktop' ? 5 : 2));
 
   useEffect(() => {
     if (!product?.id) return;
     let cancelled = false;
     setLoading(true);
     setError(false);
-    apiClient
-      .getPdpOutfitSuggestions(product.id, { limit: 6 })
+    loadPdpOutfitSuggestions(product.id, FETCH_LIMIT, reloadKey > 0)
       .then((res) => {
         if (cancelled) return;
         setData(res);
         const first = res.applicable ? res.slots[0]?.id ?? null : null;
         setActiveSlot(first);
-        if (res.applicable && res.slots.length) {
+        if (
+          res.applicable &&
+          res.slots.length &&
+          shouldTrackOutfitBlockView(product.id, first)
+        ) {
           trackEvent('outfit_block_view', {
             anchor_id: product.id,
             slot: first,
@@ -155,11 +186,19 @@ export default function OutfitSuggestions({ product, className = '' }: OutfitSug
     [slots, activeSlot]
   );
 
+  useEffect(() => {
+    if (!current) return;
+    setVisibleCount(stripInitialVisible(current.items.length, layout));
+  }, [current?.id, current?.items.length, layout]);
+
   if (!loading && !error && (!data?.applicable || slots.length === 0)) {
     return null;
   }
 
   const moreHref = listingHref(current?.listing_params);
+  const visibleItems = current?.items.slice(0, visibleCount) ?? [];
+  const canLoadMore = !!current && visibleCount < current.items.length;
+  const canShowAll = !!moreHref || canLoadMore;
 
   return (
     <section className={`border-t border-gray-200 pt-5 ${className}`} aria-labelledby="outfit-suggestions-heading">
@@ -182,15 +221,21 @@ export default function OutfitSuggestions({ product, className = '' }: OutfitSug
       ) : null}
 
       {loading ? (
-        <div className={GRID_CLASS}>
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="animate-pulse">
-              <div className="aspect-square bg-gray-200 rounded-lg mb-2" />
-              <div className="h-4 bg-gray-200 rounded mb-1" />
-              <div className="h-4 bg-gray-200 rounded w-3/4" />
-            </div>
-          ))}
-        </div>
+        <>
+          <div className={gridClass}>
+            {[...Array(layout === 'desktop' ? 5 : 2)].map((_, i) => (
+              <div key={i} className="animate-pulse">
+                <div className="aspect-square bg-gray-200 rounded-lg mb-2" />
+                <div className="h-4 bg-gray-200 rounded mb-1" />
+                <div className="h-4 bg-gray-200 rounded w-3/4" />
+              </div>
+            ))}
+          </div>
+          <div className={actionsRowClass}>
+            <div className="h-9 w-24 rounded bg-gray-100 animate-pulse" />
+            <div className="h-9 w-28 rounded bg-gray-200 animate-pulse" />
+          </div>
+        </>
       ) : null}
 
       {!loading && !error && current ? (
@@ -222,22 +267,54 @@ export default function OutfitSuggestions({ product, className = '' }: OutfitSug
               );
             })}
           </div>
-          <div className={GRID_CLASS}>
-            {current.items.slice(0, 6).map((item) => (
+          <div className={gridClass}>
+            {visibleItems.map((item) => (
               <OutfitCard
                 key={item.product.id}
                 product={item.product}
                 reason={item.reasons?.[0]}
                 slotId={current.id}
                 anchorId={product.id}
+                imageSizes={imageSizes}
               />
             ))}
           </div>
-          {moreHref ? (
-            <div className="mt-3">
-              <Link href={moreHref} className="text-xs font-medium text-[#ea580c] hover:underline">
-                Xem thêm {current.label.toLowerCase()}
-              </Link>
+          {canShowAll ? (
+            <div className={actionsRowClass}>
+              {canLoadMore ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVisibleCount((prev) =>
+                      Math.min(prev + stripStep(layout), current.items.length),
+                    )
+                  }
+                  className="inline-flex shrink-0 items-center justify-center gap-2 text-sm text-gray-700 hover:text-[#ea580c]"
+                >
+                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full border border-gray-300">
+                    ↻
+                  </span>
+                  Xem thêm
+                </button>
+              ) : layout === 'mobile' ? (
+                <span />
+              ) : null}
+              {moreHref ? (
+                <LoadingLink
+                  href={moreHref}
+                  className="inline-flex shrink-0 items-center justify-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-orange-600"
+                >
+                  Xem tất cả
+                </LoadingLink>
+              ) : canLoadMore ? (
+                <button
+                  type="button"
+                  onClick={() => setVisibleCount(current.items.length)}
+                  className="inline-flex shrink-0 items-center justify-center px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-orange-600"
+                >
+                  Xem tất cả
+                </button>
+              ) : null}
             </div>
           ) : null}
         </>
@@ -247,6 +324,5 @@ export default function OutfitSuggestions({ product, className = '' }: OutfitSug
 }
 
 export function prefetchOutfitSuggestionsForPdp(productId: number): void {
-  if (!productId) return;
-  void apiClient.getPdpOutfitSuggestions(productId, { limit: 6 });
+  prefetchPdpOutfitSuggestions(productId, FETCH_LIMIT);
 }

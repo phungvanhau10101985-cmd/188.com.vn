@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { SimpleProductCard } from '@/components/ProductCard';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import { apiClient } from '@/lib/api-client';
+import { loadFavoriteProductIds, loadSameAgeGenderRecommendations } from '@/lib/pdp-request-dedupe';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -52,32 +53,35 @@ export default function AgeGenderRecommendationSection({
     [products, excludeProductId]
   );
 
-  const loadRecommendations = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    return apiClient
-      .getProductsViewedBySameAgeGender(limit)
-      .then(({ products: list, cohort_mode }) => {
-        setProducts(list ?? []);
-        setCohortMode(cohort_mode ?? 'requires_login');
-      })
-      .catch(() => {
-        setProducts([]);
-        setCohortMode('requires_login');
-        setError('Không tải được gợi ý. Vui lòng thử lại.');
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [limit]);
+  const favoriteAuthKey = `${isAuthenticated ? 'auth' : 'guest'}:${user?.id ?? 0}`;
+
+  const loadRecommendations = useCallback(
+    (force = false) => {
+      setLoading(true);
+      setError(null);
+      return loadSameAgeGenderRecommendations(limit, profileKey, force)
+        .then(({ products: list, cohort_mode }) => {
+          setProducts(list ?? []);
+          setCohortMode(cohort_mode ?? 'requires_login');
+        })
+        .catch(() => {
+          setProducts([]);
+          setCohortMode('requires_login');
+          setError('Không tải được gợi ý. Vui lòng thử lại.');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    },
+    [limit, profileKey],
+  );
 
   useEffect(() => {
     if (authLoading) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiClient
-      .getProductsViewedBySameAgeGender(limit)
+    loadSameAgeGenderRecommendations(limit, profileKey)
       .then(({ products: list, cohort_mode }) => {
         if (cancelled) return;
         setProducts(list ?? []);
@@ -99,20 +103,15 @@ export default function AgeGenderRecommendationSection({
 
   useEffect(() => {
     let cancelled = false;
-    apiClient
-      .getFavorites()
-      .then((list) => {
-        if (cancelled || !Array.isArray(list)) return;
-        const ids = list
-          .map((x: { product_id?: number }) => x.product_id)
-          .filter((n): n is number => typeof n === 'number');
-        setFavoriteIds(new Set(ids));
+    loadFavoriteProductIds(favoriteAuthKey)
+      .then((ids) => {
+        if (!cancelled) setFavoriteIds(new Set(ids));
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, user?.id]);
+  }, [favoriteAuthKey]);
 
   const hasCohortProductsForHeader =
     cohortMode != null &&
@@ -173,7 +172,7 @@ export default function AgeGenderRecommendationSection({
             {error}{' '}
             <button
               type="button"
-              onClick={() => void loadRecommendations()}
+              onClick={() => void loadRecommendations(true)}
               className="font-medium underline"
             >
               Thử lại

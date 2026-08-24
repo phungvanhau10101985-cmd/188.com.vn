@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useGoogleCustomerReviewsMerchantIdFromLayout } from '@/components/GoogleCustomerReviewsMerchantProvider';
-import { getApiBaseUrl } from '@/lib/api-base';
+import { fetchPublicSiteEmbeds } from '@/lib/site-embeds-public';
 
 export function useGoogleCustomerReviewsMerchantId(): number | null {
   const fromLayout = useGoogleCustomerReviewsMerchantIdFromLayout();
@@ -15,15 +15,12 @@ export function useGoogleCustomerReviewsMerchantId(): number | null {
       setMerchantId(fromLayout);
       return;
     }
-    const base = getApiBaseUrl();
     let cancelled = false;
-    fetch(`${base}/embed-codes/public`, { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { google_customer_reviews_merchant_id?: unknown } | null) => {
-        if (cancelled || !data) return;
-        const raw = data.google_customer_reviews_merchant_id;
-        const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw ?? ''), 10);
-        if (Number.isFinite(n) && n > 0) setMerchantId(n);
+    fetchPublicSiteEmbeds()
+      .then((data) => {
+        if (cancelled) return;
+        const n = data.googleCustomerReviewsMerchantId;
+        if (typeof n === 'number' && n > 0) setMerchantId(n);
       })
       .catch(() => {});
     return () => {
