@@ -230,6 +230,12 @@ echo "==> Security: SECRET_KEY (generate lần đầu nếu thiếu / key yếu)
 bash "${PROJECT_ROOT}/deploy/ensure-secret-key.sh" 2>/dev/null || \
   echo "⚠️  ensure-secret-key có bước lỗi — kiểm tra backend/.env"
 
+if [[ -f "${PROJECT_ROOT}/deploy/install-logrotate.sh" ]]; then
+  echo "==> Logrotate 188 (xoay theo ngày, giữ ${LOG_KEEP_DAYS:-7} ngày)"
+  bash "${PROJECT_ROOT}/deploy/install-logrotate.sh" || \
+    echo "⚠️  install-logrotate thất bại — log có thể phình lại"
+fi
+
 cd "${BACKEND}"
 if [[ "${DEPLOY_SKIP_DB_INIT:-0}" != "1" ]]; then
   echo "==> Database: PostgreSQL (tạo DB nếu bật) + init_database_tables (create_all + migrations: admin_users, orders, …)"
