@@ -38,7 +38,8 @@ def correct_search_query_via_ai(query: str, gender_context: Optional[str] = None
 Nhiệm vụ: Sửa cụm từ sau thành tiếng Việt có dấu đúng chuẩn, phù hợp tìm kiếm sản phẩm.{gender_note}
 - Thêm dấu nếu thiếu (vd: "cao long nam de" -> "cao lông nam đế")
 - Sửa lỗi chính tả phổ biến, ưu tiên lỗi gõ gần phím (m/n, s/x, d/gi/r...)
-- Giữ nguyên ý nghĩa, không thêm bớt từ
+- Giữ nguyên từ khóa sản phẩm, không cắt cụt từ (vd. "nhí" không thành "nh")
+- Bỏ từ đệm hội thoại: "có không bạn", "có không", "bạn ơi", "shop ơi"
 - Với cụm liên quan giới tính, ưu tiên "nam/nữ" thay vì suy diễn kiểu khác
 - Nếu gặp "giày nan" thì sửa thành "giày nam" (không đổi thành "giày đan")
 - Chỉ trả về cụm từ đã sửa, không giải thích, không markdown

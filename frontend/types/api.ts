@@ -183,6 +183,36 @@ export interface NanoaiSearchResponse {
   error?: string | null;
 }
 
+export type OutfitSlotId = 'top' | 'bottom' | 'dress' | 'shoes' | 'bag' | 'accessory';
+
+export interface PdpOutfitAnchor {
+  id: number;
+  role: OutfitSlotId;
+  role_label: string;
+  gender: 'Nam' | 'Nữ' | 'unisex';
+  title: string;
+}
+
+export interface PdpOutfitItem {
+  product: Product;
+  match_score: number;
+  reasons: string[];
+}
+
+export interface PdpOutfitSlot {
+  id: OutfitSlotId;
+  label: string;
+  listing_params?: Record<string, string>;
+  items: PdpOutfitItem[];
+}
+
+export interface PdpOutfitResponse {
+  applicable: boolean;
+  reason?: string | null;
+  anchor?: PdpOutfitAnchor | null;
+  slots: PdpOutfitSlot[];
+}
+
 export interface ProductInfoJSON {
   product_info?: { sku?: string; name?: string; brand?: string; origin?: string; category?: { level_1?: string; level_2?: string; level_3?: string } };
   specifications?: Record<string, unknown> & { upper_material?: string; lining_material?: string; outsole_material?: string; insole_material?: string; construction?: string; toe_shape?: string; heel_height?: string; weight_grams?: number; wearing_style?: string; features?: string[] };

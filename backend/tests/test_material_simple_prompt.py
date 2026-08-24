@@ -20,17 +20,19 @@ def test_material_simple_prompt_lists_declared_benefits():
         product_name="Túi xách da bò",
         product_type="bag",
     )
-    assert "sales infographic" in prompt.lower()
-    assert "CENTER HERO" in prompt
-    assert "TOP-LEFT" in prompt
+    assert "infographic" in prompt.lower()
+    assert "MAIN CENTER HERO IMAGE" in prompt
+    assert "Top Left Card" in prompt
     assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
-    assert "magnifying-glass" in prompt.lower()
+    assert "magnifying glass" in prompt.lower()
     assert "Da bò cao cấp" in prompt
     assert "Vân da độc bản tự nhiên" in prompt
     assert "CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP" in prompt
-    assert "verbatim" in prompt.lower()
-    assert "premium" in prompt.lower()
-    assert "PRODUCT LOCK" in prompt
+    assert "TÚI XÁCH DA BÒ CAO CẤP" in prompt
+    assert "EXACTLY ONE real product photo" in prompt
+    assert "1:1 aspect ratio" in prompt
+    assert "carrying" in prompt.lower()
+    assert "Never write VẬN" in prompt
 
 
 def test_generic_callouts_detected():
@@ -134,11 +136,11 @@ def test_build_studio_slot_prompt_material_uses_simple_template():
     prompt = _build_studio_slot_prompt(state, slot)
     assert "Linen" in prompt
     assert "Nhẹ" in prompt
-    assert "sales infographic" in prompt.lower()
-    assert "CENTER HERO" in prompt
-    assert "TOP-LEFT" in prompt
+    assert "infographic" in prompt.lower()
+    assert "MAIN CENTER HERO IMAGE" in prompt
+    assert "Top Left Card" in prompt
     assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
-    assert "magnifying-glass" in prompt.lower()
+    assert "magnifying glass" in prompt.lower()
 
 
 def test_material_composition_for_bag():
@@ -160,9 +162,9 @@ def test_material_board_copy_uses_sales_headline():
         gender="Nam",
         benefit_bullets=["Vải mềm mịn", "Thấm hút tuyệt đối", "Giữ phom chuẩn"],
     )
-    assert "ÁO POLO DỆT KIM PREMIUM" in headline
+    assert "ÁO POLO DỆT KIM CAO CẤP" in headline
     assert "CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP" in headline
-    assert "Vải mềm mịn" in sub
+    assert "Vải Mềm Mịn" in sub or "Vải mềm mịn" in sub
     assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in trust
 
 
@@ -174,11 +176,55 @@ def test_simple_prompt_includes_four_captions_and_center_model():
         gender="Nam",
         product_name="Áo polo dệt kim",
     )
-    assert "wearing the EXACT same garment" in prompt
-    assert "magnifying-glass" in prompt.lower()
-    assert "honeycomb knit" in prompt.lower()
+    assert "model wearing Áo polo dệt kim" in prompt
+    assert "magnifying glass" in prompt.lower()
+    assert "honeycomb" in prompt.lower()
     assert "PHOM DÁNG HOÀN HẢO" in prompt
-    assert "Giữ form, tôn dáng" in prompt
+    assert "Tôn dáng, mặc lên vừa vặn" in prompt
     assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY" in prompt
-    assert "needle-and-thread" in prompt
-    assert "PRODUCT LOCK" in prompt
+    assert "needle icon" in prompt
+    assert "do NOT print this full SEO title" in prompt
+    assert "EXACTLY ONE" in prompt
+
+
+def test_b0668_party_dress_fills_locked_template():
+    name = (
+        "Váy Dạ Tiệc Nữ Dáng Ôm Body Cổ chữ V Lớp Lót Phong Cách Châu Âu Màu Tím"
+    )
+    prompt = _simple_material_prompt(
+        product_name=name,
+        product_type="apparel",
+        gender="Nữ",
+    )
+    assert 'Print exactly:\n  "VÁY DẠ TIỆC CAO CẤP — CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP"' in prompt
+    assert "Ôm Dáng Sang Trọng • Lót Mềm Êm • Tôn Dáng Nữ Tính" in prompt
+    assert f"do NOT print this full SEO title): {name}" in prompt
+    assert "VÂN CHẤT LIỆU RÕ NÉT" in prompt
+    assert "ĐƯỜNG MAY TINH XẢO" in prompt
+    assert "CHI TIẾT TINH TẾ" in prompt
+    assert "PHOM DÁNG HOÀN HẢO" in prompt
+    assert "Rõ vân, cảm nhận ngay từ ảnh" in prompt
+    assert "Tôn dáng, mặc lên vừa vặn" in prompt
+    assert "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY — CHO KIỂM TRA HÀNG" in prompt
+    assert "1:1 aspect ratio" in prompt
+    assert "Never write VẬN" in prompt
+    assert "model wearing Váy Dạ Tiệc Nữ" in prompt
+
+
+def test_shoes_and_medicine_swap_corner_cards_not_frame():
+    shoes = _simple_material_prompt(
+        product_name="Giày sneaker nam",
+        product_type="shoes",
+        gender="Nam",
+    )
+    med = _simple_material_prompt(
+        product_name="Viên uống collagen",
+        product_type="medicine",
+    )
+    assert "[1. HEADER SECTION]" in shoes
+    assert "[4. FOOTER TRUST BANNER]" in shoes
+    assert "upper material grain" in shoes
+    assert "NO human model" in med
+    assert "CHI TIẾT CHẤT LƯỢNG" in med
+    assert "VÂN CHẤT LIỆU RÕ NÉT" in shoes
+    assert "VÂN CHẤT LIỆU RÕ NÉT" not in med

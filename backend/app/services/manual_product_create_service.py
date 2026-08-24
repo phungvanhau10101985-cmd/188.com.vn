@@ -235,7 +235,7 @@ def _normalize_studio_aspect_ratio(raw: Any) -> str:
 
 
 def _aspect_ratio_for_studio_kind(kind: str, plan_aspect: Any) -> str:
-    """Ảnh chất liệu luôn 4:3 — poster kính lúp + 4 ô + banner cam kết đổi trả."""
+    """Ảnh chất liệu luôn 1:1 — poster header / kính lúp / 4 card / footer."""
     if (kind or "").strip().lower() == "material":
         return STUDIO_MATERIAL_ASPECT_RATIO
     return _normalize_studio_aspect_ratio(plan_aspect)
@@ -1040,7 +1040,7 @@ def _ref_pool_from_payload(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 STUDIO_MIN_COLOR_IMAGES = 1
 STUDIO_MIN_GALLERY_IMAGES = 2
 STUDIO_MIN_MATERIAL_IMAGES = 1
-STUDIO_MATERIAL_ASPECT_RATIO = "4:3"
+STUDIO_MATERIAL_ASPECT_RATIO = "1:1"
 
 
 def _studio_color_count(studio: Dict[str, Any]) -> int:
@@ -1521,14 +1521,65 @@ def _default_material_callouts(product_type: str = "apparel") -> List[str]:
 _MATERIAL_TRUST_BANNER = "CAM KẾT: BAO ĐỔI TRẢ 7 NGÀY — CHO KIỂM TRA HÀNG"
 _MATERIAL_HEADLINE_HOOK = "CHẤT LƯỢNG KHẲNG ĐỊNH ĐẲNG CẤP"
 
+_HEADLINE_STOP_AFTER = frozenset({"mau", "size", "co"})
+_HEADLINE_SKIP_WORDS = frozenset({"cao", "cap", "premium"})
+_HEADLINE_GENDER_WORDS = frozenset({"nu", "nam", "unisex", "nu gioi", "nam gioi"})
+
+_LOCKED_CARD_SUBS = {
+    "bag": (
+        "Rõ vân, cảm nhận ngay từ ảnh",
+        "Bền đẹp, tỉ mỉ từng đường",
+        "Tinh tế, sang trọng chi tiết",
+        "Giữ form, chắc chắn khi đeo",
+    ),
+    "shoes": (
+        "Rõ vân, cảm nhận ngay từ ảnh",
+        "Bền đẹp, tỉ mỉ từng đường",
+        "Tinh tế, sang trọng chi tiết",
+        "Êm ái, ôm form bền lâu",
+    ),
+    "medicine": (
+        "Thành phần rõ ràng dễ hiểu",
+        "Hoàn thiện tỉ mỉ từng chi tiết",
+        "Bao bì kín, dễ bảo quản",
+        "Dễ dùng, an tâm chọn",
+    ),
+    "household": (
+        "Bề mặt sắc nét, chắc chắn",
+        "Gia công tỉ mỉ từng khớp",
+        "Chi tiết bền, dễ vệ sinh",
+        "Bền chắc, dùng lâu dài",
+    ),
+    "accessory": (
+        "Rõ vân, cảm nhận ngay từ ảnh",
+        "Bền đẹp, tỉ mỉ từng đường",
+        "Tinh tế, sang trọng chi tiết",
+        "Tinh tế, bền đẹp lâu",
+    ),
+    "apparel": (
+        "Rõ vân, cảm nhận ngay từ ảnh",
+        "Bền đẹp, tỉ mỉ từng đường",
+        "Tinh tế, sang trọng chi tiết",
+        "Tôn dáng, mặc lên vừa vặn",
+    ),
+    "generic": (
+        "Rõ vân, cảm nhận ngay từ ảnh",
+        "Bền đẹp, tỉ mỉ từng đường",
+        "Tinh tế, sang trọng chi tiết",
+        "Tôn dáng, mặc lên vừa vặn",
+    ),
+}
+
 _MATERIAL_BOARD_FOURTH_CAPTION = {
-    "bag": "Đường may chắc, giữ form túi",
-    "shoes": "Đế chắc, ôm form bền lâu",
-    "medicine": "Bao bì kín, dễ bảo quản",
-    "household": "Gia công chắc, bền lâu dài",
-    "accessory": "Hoàn thiện tinh tế, bền đẹp",
-    "apparel": "Giữ form, tôn dáng",
-    "generic": "Giữ form, tôn dáng",
+    kind: subs[3] for kind, subs in _LOCKED_CARD_SUBS.items()
+}
+
+_DEFAULT_USP_BY_KIND = {
+    "bag": "Vân Da Sắc Nét • Đường May Chắc • Giữ Form Túi",
+    "shoes": "Êm Ái Từng Bước • Giữ Form Bền • Dễ Phối Đồ",
+    "medicine": "Thành Phần Rõ Ràng • Dễ Sử Dụng • An Tâm Chọn",
+    "household": "Bền Chắc Chắn • Dễ Vệ Sinh • Dùng Lâu Dài",
+    "accessory": "Tinh Tế Sắc Nét • Gia Công Chắc • Bền Đẹp Lâu",
 }
 
 
@@ -1540,15 +1591,62 @@ def _studio_product_display_name(state: Dict[str, Any]) -> str:
     )
 
 
-def _material_board_headline_name(product_name: str, material: str) -> str:
-    raw = re.sub(r"\s+", " ", (product_name or "").strip())
-    if not raw:
-        mat = re.sub(r"\s+", " ", (material or "").strip())
-        raw = f"Chất liệu {mat}" if mat else "Sản phẩm premium"
-    title = " ".join(raw.split()[:8]).upper()
-    if "PREMIUM" not in title:
-        title = f"{title} PREMIUM"
+def _title_case_vi(text: str) -> str:
+    parts = [p for p in re.split(r"\s+", (text or "").strip()) if p]
+    return " ".join(w[:1].upper() + w[1:] if w else "" for w in parts)
+
+
+def _material_headline_category(product_name: str, product_type: str = "apparel") -> str:
+    """Tên ngắn in headline — không dùng full SEO title."""
+    words = [w for w in re.sub(r"\s+", " ", (product_name or "").strip()).split() if w]
+    kept: List[str] = []
+    for w in words:
+        key = _normalize_material_callout_phrase(w)
+        if key in _HEADLINE_STOP_AFTER:
+            break
+        if key in _HEADLINE_GENDER_WORDS:
+            if kept:
+                break
+            continue
+        if key in _HEADLINE_SKIP_WORDS:
+            continue
+        kept.append(w)
+        if len(kept) >= 4:
+            break
+    if not kept:
+        kept = {
+            "bag": "Túi xách",
+            "shoes": "Giày",
+            "medicine": "Sản phẩm",
+            "household": "Gia dụng",
+            "accessory": "Phụ kiện",
+        }.get((product_type or "").strip().lower(), "Sản phẩm").split()
+    title = " ".join(kept).upper()
+    if "CAO CẤP" not in title:
+        title = f"{title} CAO CẤP"
     return title
+
+
+def _material_board_headline_name(product_name: str, material: str) -> str:
+    return _material_headline_category(product_name, "apparel")
+
+
+def _material_usp_line(
+    material_callouts: Optional[List[str]],
+    *,
+    product_type: str,
+    gender: str,
+) -> str:
+    callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
+    if callouts and not _callouts_are_too_generic(callouts):
+        return " • ".join(_title_case_vi(c) for c in callouts)
+    kind = (product_type or "").strip().lower()
+    if kind in _DEFAULT_USP_BY_KIND:
+        return _DEFAULT_USP_BY_KIND[kind]
+    g = _normalize_material_callout_phrase(gender)
+    if "nam" in g or "men" in g or "male" in g:
+        return "Form Chuẩn Lịch Lãm • Vải Mềm Mịn • Tôn Dáng Nam Tính"
+    return "Ôm Dáng Sang Trọng • Lót Mềm Êm • Tôn Dáng Nữ Tính"
 
 
 def _material_board_sales_copy(
@@ -1559,12 +1657,12 @@ def _material_board_sales_copy(
     gender: str = "",
     benefit_bullets: Optional[List[str]] = None,
 ) -> Tuple[str, str, str]:
-    """Tiêu đề bán hàng + 3 lợi ích + banner cam kết đổi trả."""
-    title = _material_board_headline_name(product_name, material)
-    hook = _MATERIAL_HEADLINE_HOOK
-    headline = title if hook in title else f"{title} — {hook}"
-    bullets = [str(b).strip() for b in (benefit_bullets or []) if str(b).strip()][:3]
-    sub = " • ".join(bullets) if bullets else "Chất liệu cao cấp • Đáng để chọn • Giữ form chuẩn"
+    title = _material_headline_category(product_name, product_type)
+    headline = f"{title} — {_MATERIAL_HEADLINE_HOOK}"
+    if benefit_bullets:
+        sub = _material_usp_line(benefit_bullets, product_type=product_type, gender=gender)
+    else:
+        sub = _material_usp_line(None, product_type=product_type, gender=gender)
     return headline, sub, _MATERIAL_TRUST_BANNER
 
 
@@ -1574,164 +1672,95 @@ def _material_board_captions(
     material_name: str,
     product_type: str,
 ) -> List[str]:
-    """4 dòng mô tả dưới 4 ô: 3 ưu điểm chất liệu + 1 câu giữ form."""
+    kind = (product_type or "").strip().lower()
+    locked = list(_LOCKED_CARD_SUBS.get(kind, _LOCKED_CARD_SUBS["apparel"]))
     callouts = [str(c).strip() for c in (material_callouts or []) if str(c).strip()][:3]
     if not callouts or _callouts_are_too_generic(callouts):
         callouts = _fallback_callouts_for_material(material_name, product_type)
-    fourth = _MATERIAL_BOARD_FOURTH_CAPTION.get(
-        (product_type or "").strip().lower(),
-        "Giữ form, tôn dáng",
-    )
+    if _callouts_are_too_generic(callouts):
+        return locked
     out = list(callouts[:3])
+    fourth = locked[3]
     if fourth not in out:
         out.append(fourth)
     while len(out) < 4:
-        out.append("Hoàn thiện tinh tế, bền đẹp")
+        out.append(fourth)
     return out[:4]
 
 
-def _material_board_panel_titles(product_type: str, material_name: str) -> List[str]:
-    """4 tiêu đề IN HOA trên 4 ô cận cảnh."""
-    kind = (product_type or "").strip().lower()
-    short = _short_material_label(material_name, 3).upper()
-    if kind == "bag":
-        return [
-            f"VÂN {short}" if short else "VÂN CHẤT LIỆU",
-            "ĐƯỜNG MAY TỈ MỈ",
-            "PHỤ KIỆN CHẮC CHẮN",
-            "GIỮ FORM TÚI",
-        ]
-    if kind == "shoes":
-        return [
-            f"VÂN {short}" if short else "VÂN CHẤT LIỆU",
-            "ĐƯỜNG MAY TỈ MỈ",
-            "CHI TIẾT GIA CÔNG",
-            "ÊM ÁI GIỮ FORM",
-        ]
-    if kind in ("medicine", "household"):
-        return [
-            "CHI TIẾT CHẤT LƯỢNG",
-            "HOÀN THIỆN TỈ MỈ",
-            "KÍN BỀN CHẮC CHẮN",
-            "DỄ DÙNG BỀN LÂU",
-        ]
-    if kind == "accessory":
-        return [
-            f"VÂN {short}" if short else "CHI TIẾT CHẤT LIỆU",
-            "GIA CÔNG TỈ MỈ",
-            "PHỤ KIỆN TINH TẾ",
-            "BỀN ĐẸP LÂU DÀI",
-        ]
-    return [
-        f"VÂN VẢI {short}" if short else "CHI TIẾT CHẤT LIỆU",
-        "CHI TIẾT TINH TẾ",
-        "ĐƯỜNG MAY TINH XẢO",
-        "PHOM DÁNG HOÀN HẢO",
-    ]
-
-
-def _material_board_center_brief(product_kind: str) -> str:
-    kind = (product_kind or "").strip().lower()
-    if kind in ("medicine", "household"):
-        return (
-            "CENTER HERO (tall vertical rectangle, ~45% of width): product-only packshot of the EXACT item, "
-            "NO human, NO hands, clean cream/grey studio. Show the full product so the real shape is obvious."
-        )
-    if kind == "bag":
-        return (
-            "CENTER HERO (tall vertical rectangle, ~45% of width): a model naturally carrying the EXACT bag "
-            "(full bag visible, hand on handle/strap) or a clean studio product shot — cream/grey backdrop."
-        )
-    if kind == "shoes":
-        return (
-            "CENTER HERO (tall vertical rectangle, ~45% of width): the EXACT shoes worn on-model as a complete "
-            "outfit crop (feet to waist when possible) — cream/grey studio backdrop."
-        )
-    if kind == "accessory":
-        return (
-            "CENTER HERO (tall vertical rectangle, ~45% of width): the EXACT accessory worn or held naturally "
-            "in a catalog crop, cream/grey studio backdrop."
-        )
-    return (
-        "CENTER HERO (tall vertical rectangle, ~45% of width): a person wearing the EXACT same garment. "
-        "Show enough of the cut to recognize it: dress/skirt = neck to mid-calf; top/shirt = chest to waist or 3/4. "
-        "Do NOT invent extra length, extra skirt tiers, or extra ruffles. Cream/grey studio, photorealistic."
-    )
-
-
-def _material_board_icon_brief(product_kind: str) -> str:
+def _material_card_photo_subjects(product_kind: str) -> Tuple[str, str, str, str]:
     kind = (product_kind or "").strip().lower()
     if kind == "bag":
         return (
-            "TOP-LEFT: grain/leather icon. BOTTOM-LEFT: stitch/craftsmanship icon. "
-            "TOP-RIGHT: hardware/zipper icon. BOTTOM-RIGHT: structure/shape-hold icon."
+            "leather/fabric surface grain of THIS bag",
+            "inner lining, stitching, or handle junction that exists on the reference",
+            "zipper / clasp / hardware close-up that exists on the reference",
+            "silhouette / strap / shape-holding construction of THIS bag",
         )
     if kind == "shoes":
         return (
-            "TOP-LEFT: material/breathable icon. BOTTOM-LEFT: stitch icon. "
-            "TOP-RIGHT: needle-and-thread. BOTTOM-RIGHT: cushion/shape icon."
-        )
-    if kind in ("medicine", "household"):
-        return (
-            "TOP-LEFT: quality/seal icon. BOTTOM-LEFT: finish icon. "
-            "TOP-RIGHT: closure icon. BOTTOM-RIGHT: durability icon."
-        )
-    if kind == "accessory":
-        return (
-            "TOP-LEFT: material-finish icon. BOTTOM-LEFT: detail/logo icon. "
-            "TOP-RIGHT: clasp/hardware icon. BOTTOM-RIGHT: durability icon."
-        )
-    return (
-        "TOP-LEFT: wind lines + water droplets (airy/soft). "
-        "BOTTOM-LEFT: decorative lace/mandala or embroidery mark matching a real detail on THIS garment. "
-        "TOP-RIGHT: needle-and-thread. "
-        "BOTTOM-RIGHT: simple waist/hip silhouette (shape hold)."
-    )
-
-
-def _material_collage_panel_brief(product_kind: str) -> str:
-    """Mô tả 4 ô cận cảnh — chỉ crop chi tiết CÓ THẬT trên ảnh mẫu."""
-    kind = (product_kind or "").strip().lower()
-    if kind == "bag":
-        return (
-            "TOP-LEFT square: macro leather/fabric grain, folded to show the true texture. "
-            "BOTTOM-LEFT square: stitching, quilting, logo, or a signature detail that exists on the reference. "
-            "TOP-RIGHT square: zipper, clasp, or hardware that exists on the reference. "
-            "BOTTOM-RIGHT square: strap attachment, piping, or the construction that holds the bag's shape."
-        )
-    if kind == "shoes":
-        return (
-            "TOP-LEFT square: upper material grain macro from the reference. "
-            "BOTTOM-LEFT square: stitching, logo, or overlay that exists on the reference. "
-            "TOP-RIGHT square: collar, laces, or vamp construction that exists on the reference. "
-            "BOTTOM-RIGHT square: sole edge, welt, or heel that exists on the reference."
+            "upper material grain of THIS pair",
+            "lining, insole, or tongue construction that exists on the reference",
+            "stitching / welt / seam close-up",
+            "sole edge / heel / silhouette of THIS pair",
         )
     if kind == "medicine":
         return (
-            "TOP-LEFT square: label print / ingredient text macro. "
-            "BOTTOM-LEFT square: box/bottle finish. "
-            "TOP-RIGHT square: cap/seal/closure. "
-            "BOTTOM-RIGHT square: packaging edge or quality seal."
+            "label print / packaging surface of THIS item",
+            "cap / seal / closure that exists on the reference",
+            "box/bottle finish and print close-up",
+            "full pack shape / edge of THIS item",
         )
     if kind == "household":
         return (
-            "TOP-LEFT square: surface finish/coating macro. "
-            "BOTTOM-LEFT square: build joint or assembly detail. "
-            "TOP-RIGHT square: control/button/inset. "
-            "BOTTOM-RIGHT square: edge, base, or layered construction."
+            "surface finish/coating of THIS item",
+            "joint / assembly detail that exists on the reference",
+            "control / button / inset close-up",
+            "edge / base / silhouette of THIS item",
         )
     if kind == "accessory":
         return (
-            "TOP-LEFT square: grain/weave/metal finish macro. "
-            "BOTTOM-LEFT square: stitching, engraving, or logo that exists on the reference. "
-            "TOP-RIGHT square: clasp, buckle, or setting. "
-            "BOTTOM-RIGHT square: edge, plating, or layered construction."
+            "grain / metal / weave surface of THIS item",
+            "clasp / setting / logo that exists on the reference",
+            "micro-detail / engraving close-up",
+            "silhouette / edge of THIS item",
         )
     return (
-        "TOP-LEFT square: folded fabric close-up of the EXACT same textile (print, weave, sheerness) as the reference. "
-        "BOTTOM-LEFT square: a distinctive detail that EXISTS on the reference (lace, buttons, embroidery, logo) — do not invent. "
-        "TOP-RIGHT square: stitching / neckline / sleeve construction that EXISTS on the reference. "
-        "BOTTOM-RIGHT square: hem, drape, or waist of the EXACT same garment — do not add extra tiers or ruffles."
+        "fabric surface grain of THIS garment",
+        "inner lining or V-neck / neckline construction that exists on the reference",
+        "seam / stitching close-up",
+        "silhouette / hem / sleeve of THIS garment",
+    )
+
+
+def _material_card_titles(product_kind: str) -> Tuple[str, str, str, str]:
+    kind = (product_kind or "").strip().lower()
+    if kind in ("medicine", "household"):
+        return (
+            "CHI TIẾT CHẤT LƯỢNG",
+            "HOÀN THIỆN TỈ MỈ",
+            "BAO BÌ KÍN BỀN",
+            "DỄ DÙNG AN TÂM",
+        )
+    return (
+        "VÂN CHẤT LIỆU RÕ NÉT",
+        "ĐƯỜNG MAY TINH XẢO",
+        "CHI TIẾT TINH TẾ",
+        "PHOM DÁNG HOÀN HẢO",
+    )
+
+
+def _material_board_panel_titles(product_type: str, material_name: str) -> List[str]:
+    return list(_material_card_titles(product_type))
+
+
+def _material_collage_panel_brief(product_kind: str) -> str:
+    tl, bl, tr, br = _material_card_photo_subjects(product_kind)
+    return (
+        f"TOP-LEFT square: {tl}. "
+        f"BOTTOM-LEFT square: {bl}. "
+        f"TOP-RIGHT square: {tr}. "
+        f"BOTTOM-RIGHT square: {br}."
     )
 
 
@@ -1743,51 +1772,78 @@ def _simple_material_prompt(
     gender: str = "",
     product_name: str = "",
 ) -> str:
-    """Prompt cố định ảnh chất liệu — poster kiểu kính lúp + 4 ô 2 tầng chữ + cam kết đổi trả."""
-    mat = (material_name or "").strip() or "material from the product"
+    """Template infographic 1:1 — header / kính lúp / 4 card / footer; chỗ điền theo SP."""
+    mat_raw = (material_name or "").strip()
+    mat = mat_raw or "material from the product"
+    identity = (product_name or "").strip() or "the exact product in the attached photo"
     captions = _material_board_captions(
-        material_callouts, material_name=mat, product_type=product_type
+        material_callouts, material_name=mat_raw, product_type=product_type
     )
-    titles = _material_board_panel_titles(product_type, mat)
-    headline, subheadline, trust = _material_board_sales_copy(
-        product_name=product_name,
-        material=mat,
-        product_type=product_type,
-        gender=gender,
-        benefit_bullets=captions[:3],
+    titles = _material_card_titles(product_type)
+    subjects = _material_card_photo_subjects(product_type)
+    headline = f"{_material_headline_category(product_name, product_type)} — {_MATERIAL_HEADLINE_HOOK}"
+    subheadline = _material_usp_line(
+        material_callouts, product_type=product_type, gender=gender
     )
-    panels = _material_collage_panel_brief(product_type)
-    center = _material_board_center_brief(product_type)
-    icons = _material_board_icon_brief(product_type)
-    return (
-        "Create a premium e-commerce SALES infographic poster of the EXACT same product as the attached reference. "
-        "Light cream page, photo + thin-line icons + Vietnamese type. "
-        "NOT a single photo, NOT fabric swatch strips, NOT a wide-top-panel plus four vertical strips. "
-        "PRODUCT LOCK: copy the reference product EXACTLY — same silhouette, neckline, sleeves, waist, hem, "
-        "buttons, lace/trim, print motif, print scale, and colors. Do NOT redesign. Do NOT add extra skirt tiers, "
-        "ruffles, honeycomb knit, mesh holes, or any construction that is not visible on the reference. "
-        "Layout (mandatory):\n"
-        f"- TOP one-line bold Vietnamese headline: «{headline}». Do not split or duplicate words.\n"
-        f"- Under it, one benefit line with bullets: «{subheadline}».\n"
-        "- MIDDLE: one large vertical CENTER photo, TWO rectangular macros stacked LEFT and TWO stacked RIGHT. "
-        "Thin cream gutters. Under EACH rectangle: a small icon + a CAPS title + a shorter subtitle.\n"
-        "- Add ONE circular magnifying-glass callout with a thin leader line from a point on the CENTER product "
-        "to a circular extreme-macro of the EXACT same material and print as the reference. "
-        "The loupe must match the real fabric (chiffon stays chiffon, knit stays knit, leather stays leather). "
-        "NEVER substitute a honeycomb knit or mesh unless the reference already has that texture.\n"
-        f"- BOTTOM black-outlined trust banner with a package/check icon, Vietnamese EXACTLY «{trust}».\n"
-        f"{center} "
-        f"Four corner macros (each a DIFFERENT real region of THIS product): {panels} "
-        f"Small dark-grey line-art icons (no extra brand logos): {icons} "
-        "Panel titles + subtitles, verbatim Vietnamese — do NOT rewrite: "
-        f"TOP-LEFT title «{titles[0]}» subtitle «{captions[0]}»; "
-        f"BOTTOM-LEFT title «{titles[1]}» subtitle «{captions[1]}»; "
-        f"TOP-RIGHT title «{titles[2]}» subtitle «{captions[2]}»; "
-        f"BOTTOM-RIGHT title «{titles[3]}» subtitle «{captions[3]}». "
-        "Soft studio lighting, photorealistic, sharp texture in every inset. "
-        f"Declared material: {mat}. "
-        f"{STUDIO_MATERIAL_ASPECT_RATIO} landscape. No watermark, no Chinese text, no extra logos."
-    )
+    kind = (product_type or "").strip().lower()
+    if kind in ("medicine", "household"):
+        hero = (
+            f"- Center of the image features a high-resolution studio packshot of {identity} "
+            "(as visible in the product photo), matching the attached product photo exactly. "
+            "NO human model, NO hands."
+        )
+    elif kind == "bag":
+        hero = (
+            f"- Center of the image features a high-resolution studio shot of a model carrying {identity} "
+            "(as visible in the product photo), matching the attached product photo exactly. "
+            "Full bag visible, hand on handle/strap."
+        )
+    elif kind == "shoes":
+        hero = (
+            f"- Center of the image features a high-resolution studio shot of a model wearing {identity} "
+            "(as visible in the product photo), matching the attached product photo exactly."
+        )
+    elif kind == "accessory":
+        hero = (
+            f"- Center of the image features a high-resolution studio shot of a model wearing or holding {identity} "
+            "(as visible in the product photo), matching the attached product photo exactly."
+        )
+    else:
+        hero = (
+            f"- Center of the image features a high-resolution studio shot of a model wearing {identity} "
+            "(as visible in the product photo), matching the attached product photo exactly."
+        )
+    return f"""A professional high-converting e-commerce product feature infographic layout, 1:1 aspect ratio, clean cream studio aesthetic (plain warm wall). Commercial catalog graphic — not a luxury hotel interior.
+The user attached EXACTLY ONE real product photo. Depict THAT exact garment/item only (same cut, color, fabric, neckline, sleeves, length, hardware). Keep sequins/sparkle only if they are already in the source photo.
+[1. HEADER SECTION]:
+- Solid cream rectangular banner occupying the TOP ~12% of the canvas. The model's head sits BELOW this banner — never behind the letters.
+- Headline is 100% opaque black extra-bold, fully inside the banner, no letter cropped by the frame. Print exactly:
+  "{headline}"
+- Sub-headline underneath, smaller Title Case, fully visible on one line:
+  "{subheadline}"
+- FORBIDDEN: giant watermark letters; transparent overlay text; copying the source photo's doorway/gold furniture into the header.
+[2. MAIN CENTER HERO IMAGE]:
+{hero}
+- A realistic magnifying glass is placed over a specific detail on the product (such as the chest logo or fabric texture), pointing to a floating pop-up card that shows an extreme macro close-up view of the material structure. The loupe MUST match the real material of the attached photo (do not invent honeycomb knit/mesh unless it is already there).
+[3. SURROUNDING DETAIL CARDS (4 CORNERS)]:
+Each card MUST contain a real close-up photo filling most of the tile (never a blank/white empty card) plus a small icon and 2-line caption.
+- Top Left Card: Close-up image of {subjects[0]} with a small minimalist icon and text label "{titles[0]} - {captions[0]}".
+- Bottom Left Card: Close-up image of {subjects[1]} with a text label "{titles[1]} - {captions[1]}".
+- Top Right Card: Close-up image of {subjects[2]} with a needle icon and text label "{titles[2]} - {captions[2]}".
+- Bottom Right Card: Close-up image of {subjects[3]} with an icon and text label "{titles[3]} - {captions[3]}".
+Spell Vietnamese exactly. The word for fabric grain is VÂN (circumflex A). Never write VẬN.
+[4. FOOTER TRUST BANNER]:
+- A prominent bottom banner with a delivery/trust icon and bold text: "{_MATERIAL_TRUST_BANNER}".
+Style: Ultra-sharp details, high contrast, commercial advertising graphic style, sharp Vietnamese typography rendering.
+STRICT:
+- 4 photo tiles, 0 empty tiles.
+- Headline stays fully inside the top cream banner, not behind the model.
+- Product identity = attached photo only.
+- No watermark, prices, fake logos, medical claims.
+Shop catalog context (macros must match this item — do not invent a different material type):
+Product name (for identity only — do NOT print this full SEO title): {identity}
+Declared material: {mat}.
+Output only the generated image."""
 
 
 def _studio_ladipage_context(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3678,6 +3734,12 @@ def _run_generate_studio_slot(job_id: str) -> None:
             ref_urls=list(slot.get("ref_urls") or []),
             attach_url=str(slot.get("attach_url") or ""),
         )
+        if kind == "material":
+            refs = [u for u in refs if u][:1]
+            if not refs:
+                color1 = _first_approved_color_url(studio)
+                if color1:
+                    refs = [color1]
         if not refs:
             raise RuntimeError("Chọn ít nhất 1 ảnh tham khảo (hoặc gửi ảnh kèm).")
 
@@ -3743,7 +3805,7 @@ def _run_generate_studio_slot(job_id: str) -> None:
             slot["resolved_compose_intent"] = prompt
             studio["current_slot"] = slot
             msg = (
-                f"Đang tạo {label} — collage chi tiết chất liệu nhiều góc (Gemini)…"
+                f"Đang tạo {label} — poster infographic 1:1 (Gemini)…"
                 if kind == "material"
                 else f"Đang tạo {label} — góc ảnh khác ref (Gemini)…"
             )
@@ -4366,6 +4428,12 @@ def start_studio_generate(
         selected = [str(u).strip() for u in (ref_urls or []) if str(u).strip()]
         attach = (attach_url or "").strip()
         color_index = 0
+        if kind_n == "material":
+            selected = selected[:1]
+            if not selected:
+                color1 = _first_approved_color_url(studio)
+                if color1:
+                    selected = [color1]
         if kind_n == "color":
             color_index = len(
                 [c for c in (studio.get("colors") or []) if isinstance(c, dict) and c.get("img")]
@@ -4399,7 +4467,7 @@ def start_studio_generate(
             "url": None,
             "attempt": 0,
             "user_prompt": admin_prompt,
-            "ref_urls": selected[:3],
+            "ref_urls": selected[:1] if kind_n == "material" else selected[:3],
             "attach_url": attach or None,
         }
         studio["current_slot"] = slot
@@ -4473,7 +4541,8 @@ def approve_studio_image(job_id: str) -> Dict[str, Any]:
         }
         studio["phase"] = _phase_for_kind.get(kind, "color")
         if kind in ("gallery", "detail", "material"):
-            picked_refs = [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()][:3]
+            ref_cap = 1 if kind == "material" else 3
+            picked_refs = [str(u).strip() for u in (slot.get("ref_urls") or []) if str(u).strip()][:ref_cap]
             if picked_refs:
                 last_refs = dict(studio.get("last_ref_urls") or {})
                 last_refs[kind] = picked_refs
@@ -4810,7 +4879,8 @@ def regenerate_studio_image(
             slot["user_prompt"] = _studio_color_user_prompt(studio)
         slot_attach = str(slot.get("attach_url") or attach_url or "").strip()
         if ref_urls is not None:
-            picked = [str(u).strip() for u in ref_urls if str(u).strip()][:3]
+            ref_cap = 1 if kind_slot == "material" else 3
+            picked = [str(u).strip() for u in ref_urls if str(u).strip()][:ref_cap]
             if (slot.get("kind") or "").strip() == "color":
                 color_index = int(slot.get("index") or 0)
                 picked = _merge_customer_orig_refs(
@@ -4821,6 +4891,10 @@ def regenerate_studio_image(
                     attach_url=slot_attach,
                 )
             slot["ref_urls"] = picked
+            if kind_slot == "material" and not picked:
+                color1 = _first_approved_color_url(studio)
+                if color1:
+                    slot["ref_urls"] = [color1]
         elif (slot.get("kind") or "").strip() == "color":
             color_index = int(slot.get("index") or 0)
             slot["ref_urls"] = _merge_customer_orig_refs(

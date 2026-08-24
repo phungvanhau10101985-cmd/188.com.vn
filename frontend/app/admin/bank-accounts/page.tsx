@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminBankAPI, type BankAccountAdmin } from '@/lib/admin-api';
 import { DEFAULT_SEPAY_QR_TEMPLATE } from '@/lib/deposit-qr';
+import SepayHmacSecretPanel from '@/components/admin/SepayHmacSecretPanel';
 
 type DepositFormState = {
   account_number: string;
@@ -133,6 +134,9 @@ export default function AdminBankAccountsPage() {
           Quản lý tài khoản nhận tiền và URL mẫu QR (SePay, VietQR…). Chỉ tài khoản đang bật mới hiện cho khách khi
           thanh toán cọc.
         </p>
+
+        <SepayHmacSecretPanel />
+
         <button
           type="button"
           onClick={openAdd}

@@ -36,6 +36,7 @@ import {
   parseRelatedTabFromSearch,
 } from '@/lib/product-related-tabs';
 import { prefetchRelatedProductsForPdp } from '@/lib/related-products-pdp-fetch';
+import OutfitSuggestions, { prefetchOutfitSuggestionsForPdp } from '@/components/product-detail/OutfitSuggestions';
 import { cartLineMainImage } from '@/lib/product-color-variant';
 import { warehouseCartProductDataExtras } from '@/lib/warehouse-clearance';
 import { filterVisibleWebImageUrls } from '@/lib/image-utils';
@@ -182,6 +183,7 @@ export default function ProductDetailClient({
     if (tab !== 'bestselling') {
       prefetchRelatedProductsForPdp(product, 'bestselling');
     }
+    prefetchOutfitSuggestionsForPdp(product.id);
   }, [product]);
 
   useEffect(() => {
@@ -724,6 +726,11 @@ export default function ProductDetailClient({
                 />
               </SectionErrorBoundary>
             </div>
+            </div>
+            <div className="hidden md:block px-4 pb-2">
+              <SectionErrorBoundary>
+                <OutfitSuggestions product={product} />
+              </SectionErrorBoundary>
             </div>
             <div className="border-t">
               <SectionErrorBoundary>

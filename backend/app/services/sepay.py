@@ -1,7 +1,6 @@
 # backend/app/services/sepay.py — VietQR qua SePay + đối soát nội dung CK cọc đơn hàng
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import ipaddress
@@ -20,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.crud import order as crud_order
 from app.crud import payment as crud_payment
+from app.services.sepay_hmac_secret import resolve_secret as resolve_sepay_hmac_secret
 from app.models.order import DepositType, Order, OrderStatus, Payment, PaymentMethod, PaymentStatus
 from app.services import affiliate_wallet as affiliate_svc
 
@@ -295,69 +295,142 @@ def _configured_webhook_api_keys() -> list[str]:
     return keys
 
 
-def verify_webhook(request: Request, raw_body: bytes) -> bool:
-    api_keys = _configured_webhook_api_keys()
-    secret = (getattr(settings, "SEPAY_SECRET_KEY", "") or "").strip()
-    if api_keys:
-        auth_raw = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
-        auth = " ".join(auth_raw.split())
-        raw_header_key = (
-            request.headers.get("x-api-key")
-            or request.headers.get("X-Api-Key")
-            or request.headers.get("x-sepay-api-key")
-            or request.headers.get("X-Sepay-Api-Key")
-            or ""
-        ).strip()
-        query_key = (
-            request.query_params.get("token")
-            or request.query_params.get("api_key")
-            or request.query_params.get("apikey")
-            or ""
-        ).strip()
-        for api_key in api_keys:
-            expected = " ".join(f"Apikey {api_key}".split())
-            bearer_expected = " ".join(f"Bearer {api_key}".split())
-            if (
-                _safe_secret_match(auth, expected)
-                or _safe_secret_match(auth, bearer_expected)
-                or _safe_secret_match(auth, api_key)
-                or _safe_secret_match(raw_header_key, api_key)
-                or _safe_secret_match(query_key, api_key)
-            ):
-                return True
-        logger.warning(
-            "SePay webhook: API key không khớp (authorization=%s, x-api-key=%s, query_token=%s len=%s, configured_keys=%s); sẽ thử phương án xác thực khác nếu bật",
-            bool(auth),
-            bool(raw_header_key),
-            bool(query_key),
-            len(query_key) if query_key else 0,
-            len(api_keys),
-        )
+def _webhook_ip_allowed(request: Request) -> tuple[bool, Optional[str], list[str]]:
+    """IP allowlist — lớp phụ. Trả (ok, ip_khớp, candidates)."""
+    allow = getattr(settings, "SEPAY_WEBHOOK_IP_ALLOWLIST", frozenset())
+    candidates = _webhook_ip_candidates(request)
+    for ip in candidates:
+        if ip in allow:
+            return True, ip, candidates
+    return False, None, candidates
 
-    sig = request.headers.get("x-sepay-signature") or request.headers.get("X-Sepay-Signature")
-    if secret and sig and raw_body:
-        mac = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
-        hex_d = mac.hex()
-        b64_d = base64.b64encode(mac).decode("ascii")
-        if hmac.compare_digest(sig, hex_d) or hmac.compare_digest(sig, b64_d):
+
+def _sepay_signature_hex(signature: str) -> str:
+    """Lấy hex từ ``X-SePay-Signature: sha256=<hex>``."""
+    raw = (signature or "").strip()
+    if not raw:
+        return ""
+    prefix = "sha256="
+    if raw[: len(prefix)].lower() != prefix:
+        return ""
+    return raw[len(prefix) :].strip().lower()
+
+
+def _verify_sepay_hmac(secret: str, timestamp: str, raw_body: bytes, signature: str) -> bool:
+    """
+    SePay HMAC-SHA256: ký ``{timestamp}.{raw_body}``, header ``sha256=<hex>``.
+    """
+    ts = (timestamp or "").strip()
+    sig_hex = _sepay_signature_hex(signature)
+    if not secret or not ts or not sig_hex:
+        return False
+    message = f"{ts}.".encode("utf-8") + (raw_body or b"")
+    expected_hex = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+    if len(sig_hex) != len(expected_hex):
+        return False
+    return hmac.compare_digest(sig_hex, expected_hex)
+
+
+def _request_has_api_key(request: Request, api_keys: list[str]) -> bool:
+    if not api_keys:
+        return False
+    auth_raw = (request.headers.get("authorization") or request.headers.get("Authorization") or "").strip()
+    auth = " ".join(auth_raw.split())
+    raw_header_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("X-Api-Key")
+        or request.headers.get("x-sepay-api-key")
+        or request.headers.get("X-Sepay-Api-Key")
+        or ""
+    ).strip()
+    query_key = (
+        request.query_params.get("token")
+        or request.query_params.get("api_key")
+        or request.query_params.get("apikey")
+        or ""
+    ).strip()
+    for api_key in api_keys:
+        expected = " ".join(f"Apikey {api_key}".split())
+        bearer_expected = " ".join(f"Bearer {api_key}".split())
+        if (
+            _safe_secret_match(auth, expected)
+            or _safe_secret_match(auth, bearer_expected)
+            or _safe_secret_match(auth, api_key)
+            or _safe_secret_match(raw_header_key, api_key)
+            or _safe_secret_match(query_key, api_key)
+        ):
             return True
-    elif secret and not sig:
+    logger.warning(
+        "SePay webhook: API key không khớp (authorization=%s, x-api-key=%s, query_token=%s len=%s, configured_keys=%s); sẽ thử phương án xác thực khác nếu bật",
+        bool(auth),
+        bool(raw_header_key),
+        bool(query_key),
+        len(query_key) if query_key else 0,
+        len(api_keys),
+    )
+    return False
+
+
+def verify_webhook(request: Request, raw_body: bytes) -> bool:
+    """
+    Xác thực webhook SePay.
+
+    1. HMAC-SHA256 (lớp chính khi dashboard bật chữ ký): ``{timestamp}.{raw_body}``
+       + header ``X-SePay-Signature: sha256=<hex>``, ``X-SePay-Timestamp``.
+       Chữ ký sai → từ chối ngay (không fallback Apikey/IP).
+    2. Apikey / ?token= — tương thích webhook chưa bật HMAC.
+    3. IP allowlist — lớp phụ khi chưa có chữ ký (``SEPAY_WEBHOOK_TRUST_NO_AUTH_IP``).
+    """
+    secret = resolve_sepay_hmac_secret()
+    sig = (
+        request.headers.get("x-sepay-signature")
+        or request.headers.get("X-SePay-Signature")
+        or request.headers.get("X-Sepay-Signature")
+        or ""
+    ).strip()
+    timestamp = (
+        request.headers.get("x-sepay-timestamp")
+        or request.headers.get("X-SePay-Timestamp")
+        or request.headers.get("X-Sepay-Timestamp")
+        or ""
+    ).strip()
+
+    if secret and (sig or timestamp):
+        if _verify_sepay_hmac(secret, timestamp, raw_body, sig):
+            ip_ok, matched_ip, candidates = _webhook_ip_allowed(request)
+            if ip_ok:
+                logger.info("SePay webhook: HMAC-SHA256 OK, IP allowlist khớp ip=%s", matched_ip)
+            else:
+                logger.info(
+                    "SePay webhook: HMAC-SHA256 OK (IP allowlist lớp phụ không khớp trong %s)",
+                    candidates or ["(không xác định)"],
+                )
+            return True
+        logger.warning(
+            "SePay webhook: HMAC-SHA256 không khớp (có signature=%s timestamp=%s)",
+            bool(sig),
+            bool(timestamp),
+        )
+        return False
+
+    if secret and not sig:
         logger.debug(
             "SePay webhook: có SEPAY_SECRET_KEY nhưng request không có x-sepay-signature "
-            "(webhook my.sepay.vn thường dùng Apikey hoặc Không chứng thực, không ký body bằng secret này)"
+            "(dashboard chưa bật HMAC — vẫn nhận Apikey / IP allowlist)"
         )
+
+    if _request_has_api_key(request, _configured_webhook_api_keys()):
+        return True
 
     if getattr(settings, "SEPAY_ALLOW_INSECURE_DEV", False):
         logger.warning("SePay webhook: bỏ qua xác thực (SEPAY_ALLOW_INSECURE_DEV) — chỉ dùng khi test")
         return True
-    # TRUST_NO_AUTH_IP trước REQUIRE_SIGNATURE: webhook "Không chứng thực" vẫn chấp nhận theo IP SePay.
+
     if getattr(settings, "SEPAY_WEBHOOK_TRUST_NO_AUTH_IP", False):
-        allow = getattr(settings, "SEPAY_WEBHOOK_IP_ALLOWLIST", frozenset())
-        candidates = _webhook_ip_candidates(request)
-        for ip in candidates:
-            if ip in allow:
-                logger.info("SePay webhook: chấp nhận theo IP allowlist (TRUST_NO_AUTH_IP), ip=%s", ip)
-                return True
+        ip_ok, matched_ip, candidates = _webhook_ip_allowed(request)
+        if ip_ok:
+            logger.info("SePay webhook: chấp nhận theo IP allowlist (lớp phụ), ip=%s", matched_ip)
+            return True
         logger.warning(
             "SePay webhook: TRUST_NO_AUTH_IP bật nhưng không có IP khớp allowlist trong %s",
             candidates or ["(không xác định)"],

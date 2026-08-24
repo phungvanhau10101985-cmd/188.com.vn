@@ -17,6 +17,7 @@ import {
   AddressCreateInput,
   AddressUpdateInput,
   NanoaiSearchResponse,
+  PdpOutfitResponse,
   SameAgeGenderCohortMode,
   HomeRecommendationBlockResponse,
   HomeRecommendationSnapshotResponse,
@@ -474,6 +475,20 @@ class ApiClient {
         sidebar_products: res?.sidebar_products ?? [],
       }))
       .catch(() => empty);
+  }
+
+  /** Gợi ý món phối (khác loại) cho SP đang xem. */
+  async getPdpOutfitSuggestions(
+    productId: number,
+    opts?: { limit?: number; slot?: string }
+  ): Promise<PdpOutfitResponse> {
+    const params = new URLSearchParams({
+      product_id: String(productId),
+      limit: String(opts?.limit ?? 6),
+    });
+    if (opts?.slot) params.set('slot', opts.slot);
+    const empty: PdpOutfitResponse = { applicable: false, reason: 'error', anchor: null, slots: [] };
+    return this.fetch<PdpOutfitResponse>(`/products/pdp-outfit?${params}`, { quiet: true }).catch(() => empty);
   }
 
   async getProductByProductId(productId: string): Promise<Product> {

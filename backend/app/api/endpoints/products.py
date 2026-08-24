@@ -1506,6 +1506,40 @@ def read_products_by_ids(
     return {"products": products}
 
 
+@router.get("/pdp-outfit", response_model=dict)
+def read_pdp_outfit_suggestions(
+    product_id: int = Query(..., gt=0, description="products.id của SP đang xem"),
+    limit: int = Query(6, ge=1, le=12),
+    slot: Optional[Literal["top", "bottom", "dress", "shoes", "bag", "accessory"]] = Query(
+        None,
+        description="Chỉ một nhóm phối; bỏ trống = mọi nhóm còn hàng",
+    ),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Gợi ý món khác loại để phối với SP đang xem — luật danh mục + điểm style/dịp."""
+    from app.services.pdp_outfit_suggestions import assemble_outfit_response, build_outfit_slot_picks
+
+    db_product = crud.product.get_product(db, product_id)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    db_product = _apply_storefront_image_gate(db, db_product)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    picks = build_outfit_slot_picks(db, db_product, limit=limit, only_slot=slot)
+
+    def _serialize(rows: List):
+        return _serialize_products_for_api(
+            db,
+            rows,
+            user=current_user,
+            include_warehouse_clearance=True,
+        )
+
+    return assemble_outfit_response(db, picks, serialize_rows=_serialize)
+
+
 @router.get("/pdp-related", response_model=dict)
 def read_pdp_related_products(
     product_id: int = Query(..., gt=0, description="products.id của SP đang xem"),

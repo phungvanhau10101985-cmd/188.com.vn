@@ -1375,6 +1375,15 @@ def _integration_secret_configured(val: Optional[str], min_len: int = 8) -> bool
     return len((val or "").strip()) >= min_len
 
 
+def _sepay_hmac_configured() -> bool:
+    try:
+        from app.services.sepay_hmac_secret import resolve_secret
+
+        return _integration_secret_configured(resolve_secret(), min_len=6)
+    except Exception:
+        return _integration_secret_configured(settings.SEPAY_SECRET_KEY, min_len=6)
+
+
 def _shipping_lookup_configured() -> bool:
     try:
         from app.services.shipping_lookup import api_configured
@@ -1465,9 +1474,9 @@ def admin_integrations_api_keys_overview(
                 ),
                 AdminIntegrationKeyRow(
                     env_var="SEPAY_SECRET_KEY",
-                    label="Secret merchant / ký API",
-                    configured=_integration_secret_configured(settings.SEPAY_SECRET_KEY, min_len=6),
-                    hint="backend/.env",
+                    label="Secret merchant / HMAC webhook",
+                    configured=_sepay_hmac_configured(),
+                    hint="Dán Secret Key trên Admin → Nạp tiền / QR (Cấu hình HMAC-SHA256). Có hiệu lực ngay. Chuỗi ký {timestamp}.{raw_body}.",
                 ),
             ],
         ),
@@ -1536,9 +1545,50 @@ def admin_integrations_api_keys_overview(
     )
 
 
+class SepayHmacSecretUpdate(BaseModel):
+    secret_key: str
+
+
 class ShippingLookupKeyCreate(BaseModel):
     label: str
     token: Optional[str] = None
+
+
+@router.get("/sepay-hmac-secret")
+def admin_get_sepay_hmac_secret(
+    _: models.AdminUser = Depends(require_module_permission("bank_accounts")),
+):
+    """Trạng thái Secret Key HMAC (không trả giá trị đầy đủ)."""
+    from app.services import sepay_hmac_secret as hmac_svc
+
+    return hmac_svc.status_for_admin()
+
+
+@router.put("/sepay-hmac-secret")
+def admin_put_sepay_hmac_secret(
+    payload: SepayHmacSecretUpdate,
+    _: models.AdminUser = Depends(require_module_permission("bank_accounts")),
+):
+    """Lưu Secret Key HMAC từ dashboard SePay — có hiệu lực ngay, không restart."""
+    from app.services import sepay_hmac_secret as hmac_svc
+
+    try:
+        return hmac_svc.save_secret(payload.secret_key)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.delete("/sepay-hmac-secret")
+def admin_delete_sepay_hmac_secret(
+    _: models.AdminUser = Depends(require_module_permission("bank_accounts")),
+):
+    """Xóa Secret Key đã dán trên admin (key trong .env vẫn dùng nếu có)."""
+    from app.services import sepay_hmac_secret as hmac_svc
+
+    try:
+        return hmac_svc.clear_secret()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/shipping-lookup-keys")

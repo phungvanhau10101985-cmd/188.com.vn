@@ -157,7 +157,7 @@ class ManualProductGenerateBody(BaseModel):
     kind: str = Field(..., description="color | main | gallery | detail | material")
     name: str = Field("", description="Tên màu (tuỳ chọn — để trống thì AI đọc từ ảnh mẫu)")
     prompt: str = Field("", description="Prompt tùy chỉnh (để trống dùng gợi ý)")
-    ref_urls: List[str] = Field(default_factory=list, description="Ảnh tham khảo đã chọn (≤3)")
+    ref_urls: List[str] = Field(default_factory=list, description="Ảnh tham khảo đã chọn (chất liệu: đúng 1; khác: ≤3)")
     attach_url: str = Field("", description="Ảnh kèm upload thêm cho lần tạo này")
     image_model: str = Field("", description="pro | flash | flash3 — model Gemini tạo ảnh")
     aspect_ratio: str = Field("", description="1:1 | 3:4 | 4:3 | 9:16 | 16:9 …")

@@ -418,6 +418,9 @@ def _product_image_dict(p: Product) -> Optional[Dict[str, Any]]:
             (p.description or "").strip(),
             code_tokens=_product_code_tokens(p),
         ),
+        "gender": (getattr(p, "gender", None) or "").strip() or None,
+        "category": (getattr(p, "category", None) or "").strip() or None,
+        "subcategory": (getattr(p, "subcategory", None) or "").strip() or None,
     }
 
 
@@ -1017,19 +1020,35 @@ def generate_material_image(
     candidate_urls = pick_usable_product_image_urls(single_product) if single_product else []
 
     def _material_prompt() -> str:
-        from app.services.manual_product_create_service import _simple_material_prompt
-
         pname = ""
+        extra_kind = ""
+        gender = ""
         if isinstance(single_product, dict):
             pname = str(
                 single_product.get("name")
                 or single_product.get("product_name")
                 or ""
             ).strip()
+            extra_kind = str(
+                single_product.get("category")
+                or single_product.get("subcategory")
+                or ""
+            ).strip()
+            gender = str(single_product.get("gender") or "").strip()
+        from app.services.manual_product_create_service import (
+            _normalize_studio_product_kind,
+            _simple_material_prompt,
+        )
+
+        ptype = _normalize_studio_product_kind(pname, extra_kind, category_name)
+        if ptype == "generic":
+            ptype = "apparel"
         text = _simple_material_prompt(
             material_name=material,
             material_callouts=callouts,
             product_name=pname,
+            product_type=ptype,
+            gender=gender,
         )
         if category_hint:
             return (

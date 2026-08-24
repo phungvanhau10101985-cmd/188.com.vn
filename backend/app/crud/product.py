@@ -40,6 +40,7 @@ from app.utils.vietnamese import (
     VIETNAMESE_ACCENT_MAP,
     COMMON_WORD_MAPPING,
     remove_vietnamese_accents,
+    strip_search_chat_filler,
 )
 from app.db.session import is_sqlite
 from difflib import SequenceMatcher
@@ -359,7 +360,8 @@ def _normalize_category_url_slug(segment: Optional[str]) -> Optional[str]:
 
 def _normalize_search_key(raw_query: str) -> str:
     try:
-        normalized = (raw_query or "").strip().lower()
+        cleaned = strip_search_chat_filler(raw_query or "")
+        normalized = (cleaned or raw_query or "").strip().lower()
         return re.sub(r"\s+", " ", normalized).strip()
     except Exception:
         return ""
@@ -1844,12 +1846,12 @@ def listing_parser_ids_with_done_drafts(db: Session, candidate_external_ids: Lis
 
 def normalize_search_query(q: str) -> str:
     """
-    Chuẩn tắc cụm từ tìm kiếm: trim, fix case (Cao lông nam đế).
-    Ví dụ: " Cao Lông nam Đế" -> "Cao lông nam đế" (chữ đầu câu viết hoa, còn lại thường)
+    Chuẩn tắc cụm từ tìm kiếm: bỏ đuôi hội thoại, trim, fix case (Cao lông nam đế).
+    Ví dụ: " Váy hoa nhí có không bạn" -> "Váy hoa nhí"
     """
     if not q or not isinstance(q, str):
         return ""
-    s = q.strip().lower()
+    s = strip_search_chat_filler(q)
     if not s:
         return ""
     words = s.split()

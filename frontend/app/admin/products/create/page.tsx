@@ -123,6 +123,10 @@ function Thumb({ url, onRemove }: { url: string; onRemove?: () => void }) {
 
 const REF_PICKER_MAX = 3;
 
+function studioRefMax(kind?: string): number {
+  return kind === 'material' ? 1 : REF_PICKER_MAX;
+}
+
 type StudioImageModel = 'pro' | 'flash' | 'flash3';
 type StudioAspectRatio = '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
 
@@ -285,7 +289,7 @@ function studioLastRefUrls(
 ): string[] {
   const raw = kind === 'color' ? undefined : studio?.last_ref_urls?.[kind];
   if (!Array.isArray(raw)) return [];
-  return raw.map((u) => String(u || '').trim()).filter(Boolean).slice(0, REF_PICKER_MAX);
+  return raw.map((u) => String(u || '').trim()).filter(Boolean).slice(0, studioRefMax(kind));
 }
 
 function publishSelectionUrls(
@@ -375,7 +379,7 @@ function syncStudioFormFromJob(job: ManualProductJob) {
         ? syncRefUrlsFromJob(job)
         : studioLastRefUrls(job.studio, formKindResolved).length
           ? studioLastRefUrls(job.studio, formKindResolved)
-          : studioDefaultRefUrls(pool, formKindResolved, colorIdx),
+          : studioDefaultRefUrls(pool, formKindResolved, colorIdx, job.studio),
     formColorName,
     formPrompt:
       formKindResolved === 'color'
@@ -391,11 +395,18 @@ function studioDefaultRefUrls(
   pool: ManualProductRefPoolItem[],
   kind: 'color' | 'gallery' | 'detail' | 'material',
   colorIndex = 0,
+  studio?: ManualProductJob['studio'] | null,
 ): string[] {
   if (kind === 'color') {
     return [];
   }
-  // Gallery / chi tiết / chất liệu: ưu tiên ảnh màu đã tạo làm ref
+  if (kind === 'material') {
+    const color1 =
+      firstApprovedColorUrl(studio) ||
+      (pool.find((p) => p.kind === 'color' && (p.url || '').trim())?.url || '').trim();
+    return color1 ? [color1] : [];
+  }
+  // Gallery / chi tiết: ưu tiên ảnh màu đã tạo làm ref
   const approved = pool
     .filter(
       (p) =>
@@ -407,7 +418,7 @@ function studioDefaultRefUrls(
     )
     .map((p) => p.url)
     .filter(Boolean) as string[];
-  return approved.slice(0, REF_PICKER_MAX);
+  return approved.slice(0, studioRefMax(kind));
 }
 
 function firstApprovedColorRow(studio: ManualProductJob['studio']): { url: string; name: string } {
@@ -451,7 +462,7 @@ function sanitizeFormRefUrls(
   if (kind === 'color' && colorIndex === 0) {
     return filtered.slice(0, REF_PICKER_MAX);
   }
-  if (filtered.length) return filtered.slice(0, REF_PICKER_MAX);
+  if (filtered.length) return filtered.slice(0, studioRefMax(kind));
   if (attach) return [attach];
   return [];
 }
@@ -575,7 +586,7 @@ function StudioAiImageSettings({
         <span className="font-medium text-slate-800">Tỷ lệ khung hình</span>
         <select
           className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white"
-          value={materialLocked ? '4:3' : aspectRatio}
+          value={materialLocked ? '1:1' : aspectRatio}
           disabled={disabled || materialLocked}
           onChange={(e) => {
             const v = e.target.value as StudioAspectRatio;
@@ -592,7 +603,7 @@ function StudioAiImageSettings({
       </label>
       <p className={`text-[11px] text-slate-500 ${compact ? 'sm:col-span-2' : 'sm:col-span-2'}`}>
         {materialLocked
-          ? 'Ảnh chất liệu cố định 4:3 ngang — poster: tiêu đề, kính lúp zoom vải, 4 ô 2 tầng chữ, banner cam kết.'
+          ? 'Ảnh chất liệu cố định 1:1 — poster: header kem, kính lúp zoom đúng vải, 4 ô cận cảnh, banner cam kết. Chỉ 1 ảnh SP, không gửi ảnh mẫu layout.'
           : 'Lưu tự động trên trình duyệt — áp dụng mọi lần tạo / tạo lại cho đến khi bạn đổi lại.'}
       </p>
     </div>
@@ -666,6 +677,7 @@ function StudioRefPicker({
   compact = false,
   lockedUrls = [],
   selectionMode = 'multi',
+  maxSelected = REF_PICKER_MAX,
 }: {
   items: ManualProductRefPoolItem[];
   selectedUrls: string[];
@@ -674,6 +686,7 @@ function StudioRefPicker({
   compact?: boolean;
   lockedUrls?: string[];
   selectionMode?: 'multi' | 'replace';
+  maxSelected?: number;
 }) {
   const lockedSet = new Set(lockedUrls.filter(Boolean));
   const visibleSelected = selectedUrls.filter(
@@ -697,8 +710,8 @@ function StudioRefPicker({
         }`}
       >
         {visibleSelected.length
-          ? `Đã chọn ${visibleSelected.length}/${REF_PICKER_MAX} ảnh`
-          : `Chưa chọn — bấm ảnh để chọn (tối đa ${REF_PICKER_MAX})`}
+          ? `Đã chọn ${visibleSelected.length}/${maxSelected} ảnh`
+          : `Chưa chọn — bấm ảnh để chọn (tối đa ${maxSelected})`}
       </div>
       <div className={`flex flex-wrap ${compact ? 'gap-2' : 'gap-3'}`}>
         {items.map((item) => {
@@ -717,15 +730,21 @@ function StudioRefPicker({
                 if (isLocked) return;
                 const userNext =
                   selectionMode === 'replace'
-                    ? selectRefUrlReplace(selectedUrls, item.url, lockedUrls.filter(Boolean))
+                    ? selectRefUrlReplace(
+                        selectedUrls,
+                        item.url,
+                        lockedUrls.filter(Boolean),
+                        maxSelected,
+                      )
                     : toggleRefUrl(
                         selectedUrls.filter((u) => !lockedSet.has(u)),
                         item.url,
+                        maxSelected,
                       );
                 onChange(
                   [...lockedUrls.filter(Boolean), ...userNext.filter((u) => !lockedSet.has(u))].slice(
                     0,
-                    REF_PICKER_MAX,
+                    maxSelected,
                   ),
                 );
               }}
@@ -1405,10 +1424,10 @@ export default function AdminManualProductCreatePage() {
           colorIndex: activeColorIndex,
           lockedFaceUrl: firstColorRef.url,
         }).filter((u) => u !== next);
-        return [next, ...kept].slice(0, REF_PICKER_MAX);
+        return [next, ...kept].slice(0, studioRefMax(formKind));
       });
     },
-    [activeColorIndex, firstColorRef.url],
+    [activeColorIndex, firstColorRef.url, formKind],
   );
 
   const clearStudioAttach = useCallback(() => {
@@ -1727,10 +1746,10 @@ export default function AdminManualProductCreatePage() {
         kind,
         name: kind === 'color' ? name : '',
         prompt,
-        ref_urls: refs.slice(0, 3),
+        ref_urls: refs.slice(0, studioRefMax(kind)),
         attach_url: attach || '',
         image_model: studioImageModelForKind(kind, imageModel),
-        aspect_ratio: aspectRatio,
+        aspect_ratio: kind === 'material' ? '1:1' : aspectRatio,
       });
       setJob(fresh);
       startPolling(job.job_id, { stopOnInteractive: true });
@@ -1776,14 +1795,14 @@ export default function AdminManualProductCreatePage() {
         setFormRefUrls(
           refsJustUsed.length
             ? sanitizeFormRefUrls(refsJustUsed, freshPool, approvedKind, 0, fresh.studio)
-            : studioDefaultRefUrls(freshPool, approvedKind, 0),
+            : studioDefaultRefUrls(freshPool, approvedKind, 0, fresh.studio),
         );
       } else {
         setFormPrompt('');
         setFormRefUrls(
           refsJustUsed.length
             ? sanitizeFormRefUrls(refsJustUsed, freshPool, approvedKind, nextColorIdx, fresh.studio)
-            : studioDefaultRefUrls(freshPool, approvedKind, nextColorIdx),
+            : studioDefaultRefUrls(freshPool, approvedKind, nextColorIdx, fresh.studio),
         );
       }
       setStudioBusy(false);
@@ -1835,10 +1854,10 @@ export default function AdminManualProductCreatePage() {
     try {
       const fresh = await manualProductCreateAPI.regenerateImage(job.job_id, {
         prompt: formPrompt.trim() || null,
-        ref_urls: refs,
+        ref_urls: refs.slice(0, studioRefMax(slotKind)),
         attach_url: formAttachUrl || null,
         image_model: studioImageModelForKind(slotKind, imageModel),
-        aspect_ratio: aspectRatio,
+        aspect_ratio: slotKind === 'material' ? '1:1' : aspectRatio,
       });
       setJob(fresh);
       startPolling(job.job_id, { stopOnInteractive: true });
@@ -2700,7 +2719,7 @@ export default function AdminManualProductCreatePage() {
                       setFormRefUrls(
                         lastRefs.length
                           ? lastRefs
-                          : studioDefaultRefUrls(studio?.ref_pool || [], k, nextColorIdx),
+                          : studioDefaultRefUrls(studio?.ref_pool || [], k, nextColorIdx, studio),
                       );
                     }}
                     className={`text-xs px-3 py-1.5 rounded-full border ${
@@ -2754,7 +2773,7 @@ export default function AdminManualProductCreatePage() {
 
               {formKind === 'material' ? (
                 <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                  Collage chi tiết chất liệu — AI đọc chất liệu đã nhập ở bước 1
+                  Poster infographic 1:1 — AI đọc chất liệu đã nhập ở bước 1
                   {material.trim() ? (
                     <>
                       : <strong>{material.trim()}</strong>
@@ -2763,9 +2782,7 @@ export default function AdminManualProductCreatePage() {
                     ' (chưa có — quay lại bước Thuộc tính để nhập)'
                   )}
                   , tự soạn 3 ưu điểm riêng của đúng chất liệu đó (DeepSeek — vd lụa thì nói óng ảnh/mát, da thì nói vân da/bền) rồi in chú thích tiếng Việt dưới 4 ô cận cảnh.{' '}
-                  <strong>Chỉ cần chọn ảnh tham khảo rồi Tạo mới</strong> — AI ghép poster:
-                  tiêu đề + 3 lợi ích, ảnh SP giữa có kính lúp zoom đúng vải, 4 ô cận cảnh (tiêu đề + mô tả + icon),
-                  banner «Cam kết: bao đổi trả 7 ngày — cho kiểm tra hàng».
+                  <strong>Mặc định lấy ảnh màu #1 đã duyệt</strong> rồi Tạo mới — không gửi ảnh mẫu layout. Có thể chọn ảnh khác trên lưới. AI giữ khung: header kem, kính lúp zoom đúng vải, 4 ô cận cảnh, banner cam kết 7 ngày.
                   Sau khi duyệt, ảnh + nội dung dùng cho section «Chất liệu» trên Ladipage.
                 </p>
               ) : null}
@@ -2786,7 +2803,9 @@ export default function AdminManualProductCreatePage() {
                       ? pendingColorIndex >= 1
                         ? 'Ảnh mẫu sản phẩm mới *'
                         : 'Ảnh mẫu sản phẩm *'
-                      : 'Chọn ảnh tham khảo (tối đa 3) *'}
+                      : formKind === 'material'
+                        ? 'Chọn đúng 1 ảnh sản phẩm *'
+                        : 'Chọn ảnh tham khảo (tối đa 3) *'}
                   </div>
                   <p className="text-xs text-slate-500 mb-2">
                     {formKind === 'color' && pendingColorIndex === 0
@@ -2795,6 +2814,8 @@ export default function AdminManualProductCreatePage() {
                         ? 'Upload ảnh mẫu SP khách cho màu này — AI thay sản phẩm theo ảnh mới; chỉ giữ khuôn mặt từ ảnh màu #1.'
                         : formKind === 'gallery' || formKind === 'detail'
                           ? 'Gồm ảnh màu và ảnh đã tạo. Chọn làm tham khảo rồi Tạo mới — gallery/chi tiết để đăng chọn ở bước trước khi đăng.'
+                        : formKind === 'material'
+                          ? 'Mặc định dùng ảnh màu #1 đã duyệt. Có thể chọn ảnh khác. Không gửi ảnh mẫu layout.'
                           : 'Gồm ảnh đã tạo. Chọn màu nào → tạo theo ảnh màu đó.'}
                   </p>
                   {formKind === 'color' ? (
@@ -2826,6 +2847,8 @@ export default function AdminManualProductCreatePage() {
                     selectedUrls={sanitizedFormRefUrls}
                     onChange={handleStudioRefPickerChange}
                     disabled={studioBusy}
+                    selectionMode={formKind === 'material' ? 'replace' : 'multi'}
+                    maxSelected={studioRefMax(formKind)}
                   />
                 ) : null}
               </div>
@@ -2912,7 +2935,9 @@ export default function AdminManualProductCreatePage() {
                     {currentSlot.attempt ? ` · lần ${currentSlot.attempt}` : ''}
                   </div>
                   <div
-                    className={`relative w-full max-w-md ${studioAspectClass(aspectRatio)} rounded-xl overflow-hidden border border-slate-200 bg-slate-50`}
+                    className={`relative w-full max-w-md ${studioAspectClass(
+                      currentSlot.kind === 'material' ? '1:1' : aspectRatio,
+                    )} rounded-xl overflow-hidden border border-slate-200 bg-slate-50`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={currentSlot.url} alt="" className="h-full w-full object-contain" />
@@ -2997,10 +3022,18 @@ export default function AdminManualProductCreatePage() {
                 <div className="space-y-3">
                   <div>
                     <div className="text-sm font-medium text-slate-800 mb-1">
-                      Ảnh tham khảo (tối đa 3) — chọn lại trước Tạo lại
+                      {currentSlot?.kind === 'material'
+                        ? 'Ảnh sản phẩm (đúng 1 ảnh) — chọn lại trước Tạo lại'
+                        : 'Ảnh tham khảo (tối đa 3) — chọn lại trước Tạo lại'}
                     </div>
                     <p className="text-xs text-slate-500 mb-2">
-                      Bấm ảnh khác → <strong>thay thế</strong> ảnh cũ (không ghép ref lần trước).
+                      {currentSlot?.kind === 'material'
+                        ? 'Mặc định ảnh màu #1 — bấm ảnh khác để thay. Không gửi ảnh mẫu layout.'
+                        : (
+                          <>
+                            Bấm ảnh khác → <strong>thay thế</strong> ảnh cũ (không ghép ref lần trước).
+                          </>
+                        )}
                     </p>
                     <StudioRefPicker
                       items={refPickerItems}
@@ -3009,6 +3042,7 @@ export default function AdminManualProductCreatePage() {
                       disabled={studioBusy || uploading}
                       compact
                       selectionMode="replace"
+                      maxSelected={studioRefMax(currentSlot?.kind)}
                     />
                   </div>
 

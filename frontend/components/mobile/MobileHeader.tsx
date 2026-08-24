@@ -489,26 +489,28 @@ export default function MobileHeader({
                 zClass="z-[70]"
                 ignoreRefs={[mobileSearchFormRef]}
               />
-              <div className="flex shrink-0 self-stretch divide-x divide-gray-200/90 border-l border-gray-100">
+              <div className="flex h-full shrink-0 self-stretch">
                 <label
                   htmlFor={mobileImageInputId}
-                  className={`flex items-center justify-center text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${tightToolbar ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
+                  className={`flex h-full items-center justify-center border-l border-gray-100 text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
                   aria-label="Tìm bằng ảnh"
                   title="Tìm theo ảnh (NanoAI)"
                 >
-                  <svg className="w-[18px] h-[18px] pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <svg className="block size-[18px] shrink-0 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" aria-hidden>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                   </svg>
                 </label>
                 <button
                   type="submit"
-                  className={`flex items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10 min-h-[40px]' : 'w-11 min-h-[44px]'}`}
+                  className={`flex h-full shrink-0 items-center justify-center rounded-r-xl bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
                   aria-label="Tìm trên 188"
                 >
-                  <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                  <span className="flex size-[18px] shrink-0 items-center justify-center" aria-hidden>
+                    <svg className="block size-full" fill="none" stroke="currentColor" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </span>
                 </button>
               </div>
             </form>

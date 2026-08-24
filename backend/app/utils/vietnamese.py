@@ -66,6 +66,76 @@ COMMON_WORD_MAPPING = {
 }
 
 
+# Đuôi / đầu câu hội thoại — bỏ trước khi AND-match.
+# Không xóa "không"/"có" đứng giữa (vd. "áo không tay").
+_SEARCH_CHAT_TAILS = (
+    "có không bạn",
+    "còn không bạn",
+    "có hàng không",
+    "có không ạ",
+    "được không",
+    "còn không",
+    "có không",
+    "không bạn",
+    "có bạn",
+    "bạn ơi",
+    "shop ơi",
+    "không ạ",
+    "có ko",
+    "ko bạn",
+    "ạ",
+    "nhé",
+    "nhỉ",
+    "hả",
+    "đi",
+    "không",
+    "có",
+    "bạn",
+    "ko",
+)
+_SEARCH_CHAT_HEADS = (
+    "bạn ơi",
+    "shop ơi",
+    "cho mình hỏi",
+    "mình muốn tìm",
+    "tìm giúp",
+    "xem hộ",
+    "có",
+)
+
+
+def strip_search_chat_filler(query: str) -> str:
+    """Bỏ cụm nói chuyện ('có không bạn') — giữ từ khóa sản phẩm."""
+    if not query or not isinstance(query, str):
+        return ""
+    s = re.sub(r"\s+", " ", query.strip().lower()).strip()
+    if not s:
+        return ""
+    original = s
+    changed = True
+    while changed and s:
+        changed = False
+        for tail in _SEARCH_CHAT_TAILS:
+            if s == tail:
+                s = ""
+                changed = True
+                break
+            suffix = f" {tail}"
+            if s.endswith(suffix):
+                s = s[: -len(suffix)].strip()
+                changed = True
+                break
+        if not s:
+            break
+        for head in _SEARCH_CHAT_HEADS:
+            prefix = f"{head} "
+            if s.startswith(prefix):
+                s = s[len(prefix) :].strip()
+                changed = True
+                break
+    return s if s else original
+
+
 def apply_word_mapping(words: List[str]) -> List[str]:
     """Áp dụng mapping từ phổ biến cho danh sách từ."""
     result = []

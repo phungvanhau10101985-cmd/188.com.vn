@@ -122,7 +122,7 @@ def post_image_search(
     return _parse_nanoai_http_response(r, kind="image-search")
 
 
-def post_text_search(query: str, limit: int) -> Tuple[int, Any]:
+def post_text_search(query: str, limit: int, timeout: Optional[int] = None) -> Tuple[int, Any]:
     base = (settings.NANOAI_API_BASE or "https://nanoai.vn").rstrip("/")
     partner = settings.NANOAI_PARTNER_ID.strip()
     token = settings.NANOAI_BEARER_TOKEN.strip()
@@ -136,7 +136,7 @@ def post_text_search(query: str, limit: int) -> Tuple[int, Any]:
             url,
             headers=headers,
             json={"q": query, "limit": limit},
-            timeout=DEFAULT_TIMEOUT_TEXT,
+            timeout=timeout if timeout is not None else DEFAULT_TIMEOUT_TEXT,
         )
     except requests.RequestException as e:
         logger.exception("NanoAI text-search request failed: %s", e)

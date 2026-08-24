@@ -120,6 +120,7 @@ _deploy_secret_files=(
   backend/pandamall-account.json
   backend/1688-cookies.json
   backend/shipping-lookup-keys.json
+  backend/sepay-hmac-secret.json
 )
 
 deploy_preserve_untracked_secrets() {

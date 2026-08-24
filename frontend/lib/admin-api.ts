@@ -3296,7 +3296,24 @@ export const manualProductCreateAPI = {
     }),
 };
 
+export interface AdminSepayHmacSecretStatus {
+  configured: boolean;
+  source: 'admin' | 'env' | null;
+  last4: string;
+  updated_at: string;
+  admin_configured: boolean;
+  env_configured: boolean;
+}
+
 export const adminBankAPI = {
+  getSepayHmacSecret: () => fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret'),
+  saveSepayHmacSecret: (secret_key: string) =>
+    fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret', {
+      method: 'PUT',
+      body: JSON.stringify({ secret_key }),
+    }),
+  clearSepayHmacSecret: () =>
+    fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret', { method: 'DELETE' }),
   getAll: () => fetchAdmin<BankAccountAdmin[]>('/admin/bank-accounts/all'),
   create: (data: {
     bank_name: string;

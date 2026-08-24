@@ -12,6 +12,7 @@ import { ProductReviewsProvider } from '@/lib/product-reviews-context';
 import ProductGallery from '@/app/products/[slug]/components/ProductGallery/ProductGallery';
 import ProductInfo from '@/app/products/[slug]/components/ProductInfo/ProductInfo';
 import ProductTabs from '@/components/product-detail/ProductTabs';
+import OutfitSuggestions from '@/components/product-detail/OutfitSuggestions';
 import ProductQASection from '@/app/products/[slug]/components/ProductQASection/ProductQASection';
 import ProductReviewSection from '@/app/products/[slug]/components/ProductReviewSection/ProductReviewSection';
 import AgeGenderRecommendationSection from '@/components/AgeGenderRecommendationSection';
@@ -363,6 +364,10 @@ export default function SingleProductLadipageView({
           </div>
           {renderProductInfo()}
         </div>
+
+        <SectionErrorBoundary>
+          <OutfitSuggestions product={product} />
+        </SectionErrorBoundary>
 
         {renderLadipageSections()}
       </div>
