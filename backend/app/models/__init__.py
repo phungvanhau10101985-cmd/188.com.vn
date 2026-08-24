@@ -20,6 +20,10 @@ print("[OK] Category model loaded")
 # 2. Import Product (phụ thuộc Category)
 from app.models.product import Product
 print("[OK] Product model loaded")
+from app.models.product_outfit_visual import ProductOutfitVisual
+print("[OK] ProductOutfitVisual model loaded")
+from app.models.product_outfit_pick import ProductOutfitPick
+print("[OK] ProductOutfitPick model loaded")
 from app.models.product_deletion import ProductDeletion
 print("[OK] ProductDeletion model loaded")
 
@@ -259,6 +263,8 @@ __all__ = [
     "CategoryFinalMapping",
     "SearchQueryMapping",
     "ProductSearchCache",
+    "ProductOutfitVisual",
+    "ProductOutfitPick",
     "ListingFacetCache",
     "CategoryMenuCache",
     "SearchMapping",

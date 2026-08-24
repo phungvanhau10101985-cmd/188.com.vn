@@ -3,6 +3,8 @@ from app.services.pdp_outfit_roles import (
     infer_gender,
     infer_outfit_role,
     is_fashion_category,
+    is_mixed_apparel_set,
+    row_matches_slot_keywords,
     slots_for_anchor,
     target_cat1_names,
 )
@@ -41,6 +43,29 @@ def test_classify_anchor_hides_non_fashion():
 
 def test_slots_shoes_nam():
     assert slots_for_anchor("shoes", "Nam") == ["top", "bottom", "bag", "accessory"]
+
+
+def test_slots_shoes_nu_includes_dress_and_bottom():
+    assert slots_for_anchor("shoes", "Nữ") == ["top", "dress", "bottom", "bag", "accessory"]
+
+
+def test_vay_tab_accepts_chan_vay():
+    assert row_matches_slot_keywords(
+        "dress", "Thời trang Nữ", "Chân váy", "Chân váy chữ A", "Chân váy nữ"
+    )
+    assert infer_outfit_role("Thời trang Nữ", "Chân váy", "Chân váy chữ A") == "bottom"
+
+
+def test_golf_set_is_not_a_dress_slot_item():
+    name = "Bộ trang phục golf nữ PGM áo dài tay phối váy ngắn ôm eo — YF697"
+    assert is_mixed_apparel_set("Thời trang Nữ", "Đồ yoga fitness & tập Nữ", None, name)
+    assert not row_matches_slot_keywords(
+        "dress",
+        "Thời trang Nữ",
+        "Đồ yoga fitness & tập Nữ",
+        "áo crop tập yoga nữ lưng hở",
+        name,
+    )
 
 
 def test_slots_dress():
@@ -84,8 +109,8 @@ def test_formal_shoe_rejects_sport_hoodie():
     anchor = _P(name="Giày tây nam da đen công sở", style="công sở", price=800000)
     hoodie = _P(name="Áo hoodie nam thể thao", style="casual", price=350000, purchases=500)
     shirt = _P(name="Áo sơ mi nam công sở trắng", style="công sở", price=420000, purchases=20)
-    sh, _ph, rh = score_outfit_candidate(anchor, hoodie)
-    ss, _ps, rs = score_outfit_candidate(anchor, shirt)
+    sh, _ph, rh = score_outfit_candidate(anchor, hoodie, slot="top")
+    ss, _ps, rs = score_outfit_candidate(anchor, shirt, slot="top")
     assert sh == 0
     assert ss >= 2
     assert rs

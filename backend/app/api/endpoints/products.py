@@ -1517,7 +1517,7 @@ def read_pdp_outfit_suggestions(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """Gợi ý món khác loại để phối với SP đang xem — luật danh mục + điểm style/dịp."""
+    """Gợi ý món khác loại: cửa họ phối cấp 3 + xếp hạng vector ảnh trong từng slot."""
     from app.services.pdp_outfit_suggestions import assemble_outfit_response, build_outfit_slot_picks
 
     db_product = crud.product.get_product(db, product_id)

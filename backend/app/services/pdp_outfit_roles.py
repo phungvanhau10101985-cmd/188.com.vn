@@ -116,6 +116,25 @@ def _contains_any(blob: str, keys: Sequence[str]) -> bool:
     return any(k in blob for k in keys)
 
 
+def is_mixed_apparel_set(
+    category: object = None,
+    subcategory: object = None,
+    sub_subcategory: object = None,
+    name: object = None,
+) -> bool:
+    """Bộ áo+váy / set golf — không phải một váy để phối."""
+    blob = _join_parts(category, subcategory, sub_subcategory, name)
+    if not blob:
+        return False
+    if any(k in blob for k in ("bộ trang phục", "bo trang phuc", "set đồ", "set do", "bộ đồ", "bo do")):
+        return True
+    has_top = _contains_any(blob, ("áo ", "ao ", "áo dài", "áo croptop", "crop"))
+    has_dress = _contains_any(blob, ("váy", "đầm", "dam "))
+    if has_top and has_dress and any(k in blob for k in ("phối váy", "phoi vay", "phối đầm", " kèm ", "kèm váy")):
+        return True
+    return False
+
+
 def infer_outfit_role(
     category: object,
     subcategory: object = None,
@@ -209,28 +228,44 @@ def slots_for_anchor(role: OutfitRole, gender: OutfitGender) -> List[OutfitRole]
             add("bottom")
         if female:
             add("dress")
+            add("bottom")
         add("bag")
         add("accessory")
     elif role == "bag":
         add("top")
         if female:
             add("dress")
+            add("bottom")
         add("shoes")
         add("accessory")
     elif role == "accessory":
         add("top")
         if female:
             add("dress")
+            add("bottom")
         add("shoes")
         add("bag")
     return ordered
+
+
+def _is_skirt_bottom(category: object, subcategory: object, sub_subcategory: object, name: object) -> bool:
+    """Chân váy đang là bottom — tab Váy vẫn nhận."""
+    if infer_outfit_role(category, subcategory, sub_subcategory, name) != "bottom":
+        return False
+    blob = _join_parts(subcategory, sub_subcategory, name)
+    return "chân váy" in blob or "váy chữ a" in blob or "chan vay" in blob
 
 
 def row_matches_slot_keywords(slot: OutfitRole, category: object, subcategory: object, sub_subcategory: object, name: object) -> bool:
     """Sau khi đã lọc cat1: top/bottom/dress bắt buộc đúng từ khóa; shoes/bag/accessory tin cat1."""
     if slot in ("shoes", "bag", "accessory"):
         return True
-    return infer_outfit_role(category, subcategory, sub_subcategory, name) == slot
+    role = infer_outfit_role(category, subcategory, sub_subcategory, name)
+    if slot == "dress":
+        if is_mixed_apparel_set(category, subcategory, sub_subcategory, name):
+            return False
+        return role == "dress" or _is_skirt_bottom(category, subcategory, sub_subcategory, name)
+    return role == slot
 
 
 def classify_anchor(

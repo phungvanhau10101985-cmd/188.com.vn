@@ -99,6 +99,7 @@ def post_image_search(
     filename: str,
     content_type: Optional[str],
     limit: int,
+    timeout: Optional[float] = None,
 ) -> Tuple[int, Any]:
     base = (settings.NANOAI_API_BASE or "https://nanoai.vn").rstrip("/")
     partner = settings.NANOAI_PARTNER_ID.strip()
@@ -114,7 +115,7 @@ def post_image_search(
             headers=headers,
             files=files,
             data=data,
-            timeout=DEFAULT_TIMEOUT_IMAGE,
+            timeout=timeout if timeout is not None else DEFAULT_TIMEOUT_IMAGE,
         )
     except requests.RequestException as e:
         logger.exception("NanoAI image-search request failed: %s", e)

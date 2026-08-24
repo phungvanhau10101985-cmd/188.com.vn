@@ -24,8 +24,10 @@ function listingHref(params?: Record<string, string>): string | null {
   const p = new URLSearchParams();
   const category = (params.category || '').trim();
   const style = (params.style || '').trim();
+  const q = (params.q || '').trim();
   if (category) p.set('category', category);
   if (style) p.set('style', style);
+  if (q) p.set('q', q);
   if (![...p.keys()].length) return null;
   return `/?${searchParamsToEncodedQueryString(p)}`;
 }

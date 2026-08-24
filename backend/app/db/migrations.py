@@ -1313,6 +1313,21 @@ class MigrationManager:
         )
 
         from app.models.listing_facet_cache import ListingFacetCache
+        from app.models.product_outfit_pick import ProductOutfitPick
+        from app.models.product_outfit_visual import ProductOutfitVisual
+
+        results['product_outfit_visuals_create'] = self._create_table_if_not_exists(
+            "product_outfit_visuals", ProductOutfitVisual
+        )
+        results['product_outfit_visuals_sync'] = self._sync_table_columns(
+            "product_outfit_visuals", ProductOutfitVisual
+        )
+        results['product_outfit_picks_create'] = self._create_table_if_not_exists(
+            "product_outfit_picks", ProductOutfitPick
+        )
+        results['product_outfit_picks_sync'] = self._sync_table_columns(
+            "product_outfit_picks", ProductOutfitPick
+        )
 
         results['listing_facet_cache_create'] = self._create_table_if_not_exists(
             "listing_facet_cache", ListingFacetCache
