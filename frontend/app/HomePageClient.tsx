@@ -64,6 +64,10 @@ import {
   mixShopAndCohortProducts,
 } from '@/lib/home-recommendation-mixed-products';
 import { consumeHomeRecommendationFresh } from '@/lib/home-navigation-mode';
+import {
+  readGuestHomeSnapshot,
+  writeGuestHomeSnapshot,
+} from '@/lib/guest-home-snapshot-cache';
 import { isSaleListingSearchTerm } from '@/lib/navigate-product-text-search';
 import type { HomeRecommendationSnapshotResponse } from '@/types/api';
 import { sameAgeGenderCompactHint } from '@/lib/same-age-gender-hint';
@@ -77,12 +81,9 @@ const HOME_MIX_INITIAL_LIMIT = 12;
 const HOME_MIX_LOAD_MORE_LIMIT = 24;
 
 /**
- * Cache trong bộ nhớ (module-scope, KHÔNG lưu localStorage/sessionStorage) cho block
- * «CÓ THỂ BẠN THÍCH» — sống sót qua các lần remount của trang chủ trong cùng phiên SPA
- * (rời `/` sang trang khác rồi quay lại). Nhờ vậy khi quay lại trang chủ, UI hiển thị
- * NGAY kết quả gợi ý lần trước (không phải chờ/skeleton trắng) trong khi vẫn âm thầm
- * gọi lại API ở nền để cập nhật dữ liệu mới nhất — vừa nhanh vừa vẫn tươi.
- * Cache tự hết hạn sau ít phút và bị bỏ qua nếu quá cũ.
+ * Cache trong bộ nhớ (module-scope) cho block «CÓ THỂ BẠN THÍCH» — sống sót qua remount
+ * SPA trong phiên. Khách chưa login còn cache IndexedDB (7 ngày) khi đóng trình duyệt.
+ * Cache bộ nhớ hết hạn sau ít phút; vẫn refetch nền để tươi.
  */
 type HomeRecommendationCacheEntry = {
   sameShopProducts: Product[];
@@ -715,11 +716,18 @@ export default function HomePageClient({
       const useFresh = consumeHomeRecommendationFresh();
       if (!useFresh) {
         try {
-          const snap = await apiClient.getHomeRecommendationSnapshot();
-          if (!cancelled && snap.found && snap.recommendation) {
-            applyRecommendationSnapshot(snap);
-            setRecommendationSource('snapshot');
-            return;
+          if (isAuthenticated) {
+            const snap = await apiClient.getHomeRecommendationSnapshot();
+            if (!cancelled && snap.found && snap.recommendation) {
+              applyRecommendationSnapshot(snap);
+              setRecommendationSource('snapshot');
+              return;
+            }
+          } else {
+            const local = await readGuestHomeSnapshot();
+            if (!cancelled && local?.found && local.recommendation) {
+              applyRecommendationSnapshot(local);
+            }
           }
         } catch {
           /* fallback tính tươi */
@@ -734,7 +742,7 @@ export default function HomePageClient({
     return () => {
       cancelled = true;
     };
-  }, [shopBehaviorKey, authLoading, hasFilterParams, applyRecommendationSnapshot]);
+  }, [shopBehaviorKey, authLoading, isAuthenticated, hasFilterParams, applyRecommendationSnapshot]);
 
   /**
    * Fetch khối gợi ý «CÓ THỂ BẠN THÍCH» — dùng chung cho effect tự động (đổi shopBehaviorKey)
@@ -820,6 +828,56 @@ export default function HomePageClient({
     sameAgeGenderProducts,
     sameAgeGenderCohortMode,
     displayedRecommendationProducts,
+  ]);
+
+  useEffect(() => {
+    if (authLoading || isAuthenticated || hasFilterParams) return;
+    if (sameShopLoading || loading) return;
+    if (currentPage !== 1 || qFromUrl.trim()) return;
+    if (displayedRecommendationProducts.length === 0 && sameShopProducts.length === 0) return;
+    if (products.length === 0) return;
+    const timer = window.setTimeout(() => {
+      void writeGuestHomeSnapshot({
+        found: true,
+        computed_at: new Date().toISOString(),
+        recommendation: {
+          same_shop_products: sameShopProducts,
+          same_shop_total: sameShopTotal,
+          same_shop_seed: sameShopSeed,
+          same_shop_can_load_more: sameShopCanLoadMore,
+          same_age_gender_products: sameAgeGenderProducts,
+          same_age_gender_cohort_mode: sameAgeGenderCohortMode ?? 'requires_login',
+          mixed_recommendation_products: displayedRecommendationProducts,
+          cohort_badge_product_ids: Array.from(cohortAppendedIdsRef.current),
+        },
+        main_feed: {
+          products,
+          total: totalProducts,
+          personalized: homeFeedPersonalized,
+          page: 1,
+          size: PAGE_SIZE,
+        },
+      });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    authLoading,
+    isAuthenticated,
+    hasFilterParams,
+    sameShopLoading,
+    loading,
+    currentPage,
+    qFromUrl,
+    sameShopProducts,
+    sameShopTotal,
+    sameShopSeed,
+    sameShopCanLoadMore,
+    sameAgeGenderProducts,
+    sameAgeGenderCohortMode,
+    displayedRecommendationProducts,
+    products,
+    totalProducts,
+    homeFeedPersonalized,
   ]);
 
   const cohortProductsForMix = useMemo(() => {

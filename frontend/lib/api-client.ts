@@ -801,8 +801,11 @@ class ApiClient {
     ).catch(() => empty);
   }
 
-  /** Rebuild snapshot nền khi idle ≥2 phút. */
+  /** Rebuild snapshot nền khi idle ≥2 phút — chỉ user đăng nhập (khách lưu IndexedDB). */
   async rebuildHomeRecommendationSnapshot(): Promise<{ queued: boolean; reason?: string }> {
+    if (typeof window !== 'undefined' && !localStorage.getItem('access_token')) {
+      return { queued: false, reason: 'guest_client_cache' };
+    }
     return this.fetch<{ queued: boolean; reason?: string }>(
       '/user-behavior/home/recommendation-snapshot/rebuild',
       { method: 'POST', quiet: true }
@@ -812,8 +815,9 @@ class ApiClient {
   /** Rebuild khi đóng tab / thoát PWA — fetch keepalive để request không bị hủy. */
   rebuildHomeRecommendationSnapshotOnUnload(): void {
     if (typeof window === 'undefined') return;
-    const url = `${getApiBaseUrl()}/user-behavior/home/recommendation-snapshot/rebuild`;
     const token = localStorage.getItem('access_token');
+    if (!token) return;
+    const url = `${getApiBaseUrl()}/user-behavior/home/recommendation-snapshot/rebuild`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...ngrokFetchHeaders(),

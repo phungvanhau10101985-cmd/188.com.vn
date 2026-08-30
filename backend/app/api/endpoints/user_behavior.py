@@ -29,9 +29,7 @@ from app.crud.home_recommendation_block import (
 )
 from app.crud.home_recommendation_snapshot import (
     build_and_save_home_snapshot,
-    get_guest_home_snapshot,
     get_user_home_snapshot,
-    guest_home_snapshot_version_key,
     home_snapshot_version_key,
 )
 from app.crud.user import (
@@ -265,10 +263,13 @@ def _background_rebuild_home_recommendation_snapshot(
                 return
         elif not (guest_session_id or "").strip():
             return
+        # Khách: snapshot nằm IndexedDB trên máy họ — không ghi DB.
+        if user is None:
+            return
         build_and_save_home_snapshot(
             db,
             user=user,
-            guest_session_id=guest_session_id,
+            guest_session_id=None,
             serialize_products=_serialize_product_rows_for_api,
         )
     except Exception:
@@ -283,24 +284,17 @@ def get_home_recommendation_snapshot_endpoint(
     response: Response,
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
-    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+    _x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
-    Snapshot trang chủ đã tính sẵn (away ≥2 phút rebuild).
-    Trả về ngay nếu version_key còn khớp (user: id+gender+dob; guest: session id).
+    Snapshot trang chủ đã tính sẵn (user: DB; khách: IndexedDB trên máy — API luôn found=false).
     """
     response.headers["Cache-Control"] = "private, no-store"
-    sid = (x_guest_session_id or "").strip() or None
     snap: Optional[dict] = None
 
     if current_user:
         expected_key = home_snapshot_version_key(current_user)
         snap = get_user_home_snapshot(db, current_user.id)
-        if not snap or snap.get("version_key") != expected_key:
-            return {"found": False}
-    elif sid:
-        expected_key = guest_home_snapshot_version_key(sid)
-        snap = get_guest_home_snapshot(db, sid)
         if not snap or snap.get("version_key") != expected_key:
             return {"found": False}
     else:
@@ -319,14 +313,13 @@ def get_home_recommendation_snapshot_endpoint(
 def rebuild_home_recommendation_snapshot_endpoint(
     background_tasks: BackgroundTasks,
     current_user: Optional[User] = Depends(get_current_user_optional),
-    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+    _x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
-    """Tính lại snapshot nền — gọi khi tab ẩn ≥2 phút hoặc rời trang."""
-    sid = (x_guest_session_id or "").strip() or None
+    """Tính lại snapshot nền (chỉ user đăng nhập). Khách lưu trên trình duyệt."""
     uid = current_user.id if current_user else None
-    if uid is None and not sid:
-        return {"queued": False, "reason": "no_identity"}
-    background_tasks.add_task(_background_rebuild_home_recommendation_snapshot, uid, sid)
+    if uid is None:
+        return {"queued": False, "reason": "guest_client_cache"}
+    background_tasks.add_task(_background_rebuild_home_recommendation_snapshot, uid, None)
     return {"queued": True}
 
 

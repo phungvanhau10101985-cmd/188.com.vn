@@ -1,4 +1,8 @@
-"""Snapshot gợi ý trang chủ (phiên khách) — đọc nhanh sau khi away rebuild."""
+"""Snapshot gợi ý trang chủ (phiên khách) — bảng cũ, không còn ghi từ API.
+
+Khách lưu cache trên IndexedDB trình duyệt (`guest-home-snapshot-cache.ts`).
+Hàng cũ có thể TRUNCATE khi deploy xong.
+"""
 
 from sqlalchemy import Column, DateTime, String, JSON, func
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 /** Không tương tác / không chuyển trang ≥ 2 phút → rebuild snapshot nền. */
 const IDLE_MS = 2 * 60 * 1000;
@@ -12,6 +13,7 @@ const REBUILD_DEBOUNCE_MS = 30 * 1000;
 const ACTIVITY_EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll', 'click'] as const;
 
 export default function HomeRecommendationSnapshotManager() {
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const pathname = usePathname();
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRebuildAtRef = useRef(0);
@@ -19,6 +21,8 @@ export default function HomeRecommendationSnapshotManager() {
   const prevPathnameRef = useRef(pathname);
 
   useEffect(() => {
+    if (authLoading || !isAuthenticated) return;
+
     function clearIdleTimer() {
       if (idleTimerRef.current != null) {
         clearTimeout(idleTimerRef.current);
@@ -70,7 +74,7 @@ export default function HomeRecommendationSnapshotManager() {
       }
       window.removeEventListener('pagehide', onPageHide);
     };
-  }, []);
+  }, [authLoading, isAuthenticated]);
 
   useEffect(() => {
     if (prevPathnameRef.current === pathname) return;
