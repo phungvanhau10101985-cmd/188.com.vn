@@ -1100,6 +1100,11 @@ class Settings:
         )
         self.NANOAI_PARTNER_ID: str = os.getenv("NANOAI_PARTNER_ID", "").strip()
         self.NANOAI_BEARER_TOKEN: str = os.getenv("NANOAI_BEARER_TOKEN", "").strip()
+        # PDP phối đồ: warm nền (fetch ảnh + NanoAI image-search). 0 = tắt warm;
+        # khối /pdp-outfit vẫn đọc picks đã lưu. 1 = chỉ warm khi chưa có row visual.
+        self.OUTFIT_VISUAL_WARM: bool = os.getenv(
+            "OUTFIT_VISUAL_WARM", "0"
+        ).strip().lower() in ("1", "true", "yes", "on")
 
         # ========================
         # EMS — theo dõi vận đơn (public: api.myems.vn; legacy merchant: ws.ems.com.vn)

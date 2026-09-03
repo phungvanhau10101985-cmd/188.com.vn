@@ -58,6 +58,8 @@ module.exports = {
         EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: 'false',
         LEGACY_OOS_DEEPSEEK_ENABLED: 'false',
         GROUP_LISTING_SKIP_SLOW_SLUG_POOL: 'true',
+        // Tắt warm nền phối đồ (NanoAI/ảnh). Khối /pdp-outfit vẫn đọc picks đã lưu.
+        OUTFIT_VISUAL_WARM: '0',
       },
       autorestart: true,
       max_restarts: 50,

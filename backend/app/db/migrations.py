@@ -882,6 +882,8 @@ class MigrationManager:
                 # (Product.is_warehouse_clearance == True) để Postgres nhận diện được partial index.
                 with engine.connect() as conn:
                     conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(text("SET lock_timeout = '0'"))
+                    conn.execute(text("SET statement_timeout = '0'"))
                     conn.execute(
                         text(
                             "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
@@ -903,6 +905,69 @@ class MigrationManager:
             return True
         except Exception as e:
             logger.warning("migrate_product_warehouse_clearance_lookup_index: %s", e)
+            return True
+
+    def migrate_product_storefront_count_indexes(self) -> bool:
+        """
+        Index COUNT listing / kho-sale / danh mục: planner đang Seq Scan cả bảng + EXISTS
+        kho thanh lý (ix_products_wh_clearance_base_sku_lookup idx_scan=0 vì OR + LIKE
+        product_id và thiếu predicate available > 0). Partial index nhỏ hơn, khớp SQL
+        storefront_sellable_expr — không đổi số SP / giá / tồn.
+        """
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            statements = (
+                (
+                    "ix_products_wh_clearance_sellable_base_sku",
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                    "ix_products_wh_clearance_sellable_base_sku "
+                    "ON products (base_sku) "
+                    "WHERE is_warehouse_clearance = true AND is_active = true "
+                    "AND COALESCE(available, 0) > 0",
+                    "CREATE INDEX IF NOT EXISTS ix_products_wh_clearance_sellable_base_sku "
+                    "ON products (base_sku)",
+                ),
+                (
+                    "ix_products_wh_clearance_sellable_product_id",
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                    "ix_products_wh_clearance_sellable_product_id "
+                    "ON products (product_id varchar_pattern_ops) "
+                    "WHERE is_warehouse_clearance = true AND is_active = true "
+                    "AND COALESCE(available, 0) > 0",
+                    "CREATE INDEX IF NOT EXISTS ix_products_wh_clearance_sellable_product_id "
+                    "ON products (product_id)",
+                ),
+                (
+                    "ix_products_storefront_cat_path_eq",
+                    "CREATE INDEX CONCURRENTLY IF NOT EXISTS "
+                    "ix_products_storefront_cat_path_eq "
+                    "ON products ("
+                    "lower(trim(category)), lower(trim(subcategory)), "
+                    "lower(trim(sub_subcategory)), id) "
+                    "WHERE is_active = true "
+                    "AND (is_warehouse_clearance = false OR is_warehouse_clearance IS NULL)",
+                    "CREATE INDEX IF NOT EXISTS ix_products_storefront_cat_path_eq "
+                    "ON products (category, subcategory, sub_subcategory, id)",
+                ),
+            )
+            if IS_POSTGRESQL:
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    conn.execute(text("SET lock_timeout = '0'"))
+                    conn.execute(text("SET statement_timeout = '0'"))
+                    for _name, pg_sql, _sqlite_sql in statements:
+                        conn.execute(text(pg_sql))
+            else:
+                with engine.connect() as conn:
+                    for _name, _pg_sql, sqlite_sql in statements:
+                        conn.execute(text(sqlite_sql))
+                    conn.commit()
+            logger.info("✅ storefront COUNT indexes ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_storefront_count_indexes: %s", e)
             return True
 
     def migrate_product_incremental_sync_index(self) -> bool:
@@ -1343,6 +1408,9 @@ class MigrationManager:
         results['product_price_filter_index'] = self.migrate_product_price_filter_index()
         results['product_warehouse_clearance_lookup_index'] = (
             self.migrate_product_warehouse_clearance_lookup_index()
+        )
+        results['product_storefront_count_indexes'] = (
+            self.migrate_product_storefront_count_indexes()
         )
         results['order_items_product_id_index'] = self.migrate_order_items_product_id_index()
         results['product_search_document_trgm'] = self.migrate_product_search_document_trgm()

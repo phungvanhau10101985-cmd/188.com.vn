@@ -31,12 +31,20 @@ fi
 install -m 644 "${tmp}" "${DEST}"
 rm -f "${tmp}"
 
-echo "==> Đã cài ${DEST} (giữ ${KEEP_DAYS} ngày, xoay daily)"
+echo "==> Đã cài ${DEST} (giữ ${KEEP_DAYS} bản, xoay daily hoặc khi > 8MB)"
 if ! /usr/sbin/logrotate -d "${DEST}" >/tmp/188-logrotate-debug.txt 2>&1; then
   echo "⚠️  logrotate -d exit ≠ 0 — xem /tmp/188-logrotate-debug.txt"
   tail -n 30 /tmp/188-logrotate-debug.txt
   exit 1
 fi
 echo "✓ Cú pháp logrotate OK"
-echo "    Cron hệ thống: /etc/cron.daily/logrotate"
-echo "    File xoay: *.log-YYYYMMDD rồi .gz; quá ${KEEP_DAYS} ngày thì xóa"
+
+HOURLY="/etc/cron.hourly/188-logrotate"
+cat >"${HOURLY}" <<'EOF'
+#!/bin/sh
+# Chỉ xoay log 188.com.vn — không đụng thu-do-online / nanoai.
+/usr/sbin/logrotate -s /var/lib/logrotate/188.com.vn.status /etc/logrotate.d/188.com.vn
+EOF
+chmod 755 "${HOURLY}"
+echo "✓ Hourly: ${HOURLY} (maxsize 8M có hiệu lực trong ngày)"
+echo "    File xoay: *.log-YYYYMMDD-<epoch> rồi .gz"

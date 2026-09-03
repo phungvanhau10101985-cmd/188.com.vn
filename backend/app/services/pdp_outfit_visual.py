@@ -499,10 +499,49 @@ def _warm_outfit_visual(product_id: int) -> None:
             sess.close()
 
 
+def _outfit_visual_warm_enabled() -> bool:
+    return bool(getattr(settings, "OUTFIT_VISUAL_WARM", False))
+
+
+def _has_outfit_visual_row(product_id: int) -> bool:
+    """True khi đã có cache visual — không warm lại."""
+    if not product_id:
+        return False
+    sess = None
+    try:
+        from app.models.product_outfit_visual import ProductOutfitVisual
+
+        _ensure_table()
+        sess = _own_session()
+        return (
+            sess.query(ProductOutfitVisual.product_id)
+            .filter(ProductOutfitVisual.product_id == product_id)
+            .first()
+            is not None
+        )
+    except Exception:
+        if sess is not None:
+            try:
+                sess.rollback()
+            except Exception:
+                pass
+        logger.debug("outfit visual row probe failed id=%s", product_id, exc_info=True)
+        return False
+    finally:
+        if sess is not None:
+            sess.close()
+
+
 def schedule_outfit_visual_warm(product_id: int) -> None:
-    """NanoAI / fetch ảnh chạy nền — không chặn PDP."""
+    """NanoAI / fetch ảnh chạy nền — không chặn PDP.
+
+    Tắt mặc định (OUTFIT_VISUAL_WARM=0). Khi bật, chỉ warm sản phẩm chưa có row DB.
+    /pdp-outfit + persist picks không phụ thuộc hàm này.
+    """
+    if not _outfit_visual_warm_enabled():
+        return
     pid = int(product_id or 0)
-    if not pid or _nano_cache_ready(pid):
+    if not pid or _nano_cache_ready(pid) or _has_outfit_visual_row(pid):
         return
     with _WARM_LOCK:
         if pid in _WARM_INFLIGHT:

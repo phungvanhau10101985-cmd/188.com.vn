@@ -200,6 +200,32 @@ def test_build_reads_persisted_picks_without_compute():
         assert out["slots"][0]["items"][0]["id"] == 501
 
 
+def test_schedule_outfit_visual_warm_disabled_by_default():
+    from app.services.pdp_outfit_visual import schedule_outfit_visual_warm
+
+    with patch("app.services.pdp_outfit_visual.settings") as s, patch(
+        "app.services.pdp_outfit_visual.threading.Thread"
+    ) as th:
+        s.OUTFIT_VISUAL_WARM = False
+        schedule_outfit_visual_warm(123)
+        th.assert_not_called()
+
+
+def test_schedule_outfit_visual_warm_skips_when_row_exists():
+    from app.services.pdp_outfit_visual import schedule_outfit_visual_warm
+
+    with patch("app.services.pdp_outfit_visual.settings") as s, patch(
+        "app.services.pdp_outfit_visual._nano_cache_ready", return_value=False
+    ), patch(
+        "app.services.pdp_outfit_visual._has_outfit_visual_row", return_value=True
+    ), patch(
+        "app.services.pdp_outfit_visual.threading.Thread"
+    ) as th:
+        s.OUTFIT_VISUAL_WARM = True
+        schedule_outfit_visual_warm(123)
+        th.assert_not_called()
+
+
 def test_color_harmony_neutral_and_contrast():
     assert color_harmony({"brown"}, {"white"}) >= 0.7
     assert color_harmony({"blue"}, {"brown"}) >= 0.8
