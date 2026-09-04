@@ -14,6 +14,7 @@ import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
+import { hasClientAuthUser } from '@/lib/client-auth-session';
 
 const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
   width: 320,
@@ -37,19 +38,25 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   const [accountOpen, setAccountOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
-  const [mounted, setMounted] = useState(false);
+  const [hasStoredUser, setHasStoredUser] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const loginHref = useLoginRedirectHref();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
-  const authReady = mounted && !isLoading;
-  const showAuthenticatedActions = authReady && isAuthenticated;
+  const showAuthenticatedActions = isAuthenticated || hasStoredUser;
   const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
 
   useEffect(() => {
-    setMounted(true);
+    const syncStoredUser = () => setHasStoredUser(hasClientAuthUser());
+    syncStoredUser();
+    window.addEventListener('188-auth-session-changed', syncStoredUser);
+    return () => window.removeEventListener('188-auth-session-changed', syncStoredUser);
   }, []);
+
+  useEffect(() => {
+    setHasStoredUser(hasClientAuthUser());
+  }, [isAuthenticated, isLoading]);
 
   useEffect(() => {
     if (showAuthenticatedActions) {

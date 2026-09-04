@@ -355,6 +355,7 @@ export default function MobileHeader({
   return (
     <div
       ref={panelRef}
+      data-188-mobile-header
       className={`md:hidden sticky top-0 ${
         categoryPanelOpen ? 'z-[110]' : 'z-50'
       } bg-[#f97316] pt-[env(safe-area-inset-top,0px)]`}

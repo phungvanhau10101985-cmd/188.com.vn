@@ -413,15 +413,18 @@ export default function ProductTabs({ product, layout = 'mobile' }: ProductTabsP
                   <div className="hidden lg:block h-fit self-start mt-[26px] lg:sticky lg:top-[26px] lg:max-h-screen lg:overflow-y-auto scrollbar-on-hover lg:pl-5">
                     <ShopSidebarProducts currentProduct={product} />
                   </div>
-                  <div className="space-y-4">
-                    {visibleDetailImages.map((image, index) => (
-                      <HideOnImageError
-                        key={image}
-                        src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
-                        alt={`${product.name} chi tiết ${index + 1}`}
-                        onBroken={() => markDetailImageBroken(image)}
-                      />
-                    ))}
+                  <div>
+                    <div className="w-1/2 mx-auto space-y-4">
+                      {visibleDetailImages.map((image, index) => (
+                        <HideOnImageError
+                          key={image}
+                          src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
+                          alt={`${product.name} chi tiết ${index + 1}`}
+                          className="w-full h-auto block"
+                          onBroken={() => markDetailImageBroken(image)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>

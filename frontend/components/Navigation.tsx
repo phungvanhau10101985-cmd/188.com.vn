@@ -28,6 +28,7 @@ import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { useClientMounted } from '@/lib/use-client-mounted';
+import { hasClientAuthUser } from '@/lib/client-auth-session';
 import {
   isNavCategoryTreeCacheStale,
   readNavCategoryTreeCache,
@@ -109,9 +110,8 @@ export default function Navigation({
   const clientMounted = useClientMounted();
   const stickyMenuCloseTimerRef = useRef<number | null>(null);
   const catalogMenuCloseTimerRef = useRef<number | null>(null);
-  const { isAuthenticated, isLoading, user } = useAuth();
-  const authReady = clientMounted && !isLoading;
-  const showAuthenticatedActions = authReady && isAuthenticated;
+  const { isAuthenticated, user } = useAuth();
+  const showAuthenticatedActions = isAuthenticated || (clientMounted && hasClientAuthUser());
   const loginHref = useLoginRedirectHref();
   const { favoriteCount } = useFavorites();
   const { getCartItemCount } = useCart();

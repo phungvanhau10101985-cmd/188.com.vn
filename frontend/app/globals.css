@@ -27,6 +27,53 @@ body {
   color: #1f2937;
 }
 
+/*
+ * iOS Safari (bản live): khi kéo lên, thanh chrome hiện lại → sticky/fixed nhảy,
+ * để khe trắng giữa mép màn và thanh điều hướng. Chỉ mobile; desktop không đổi.
+ */
+@media (max-width: 767px) {
+  /* Che khe trắng phía trên header cam khi overscroll / chrome iOS */
+  [data-188-mobile-header]::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(env(safe-area-inset-top, 0px) + 3rem);
+    background: #f97316;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  [data-188-mobile-bottom-nav] {
+    /* Safari browser tự chừa chỗ cho toolbar — env() đổi theo scroll sẽ nhảy + khe trắng */
+    padding-bottom: 0;
+  }
+
+  [data-188-mobile-bottom-nav]::after,
+  [data-188-pdp-sticky-mobile]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 5rem;
+    background: #fff;
+    pointer-events: none;
+  }
+
+  [data-188-pdp-sticky-mobile]::after {
+    background: #f3f4f6;
+  }
+}
+
+@media (max-width: 767px) and (display-mode: standalone),
+  (max-width: 767px) and (display-mode: fullscreen) {
+  [data-188-mobile-bottom-nav] {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
 /* Utility classes bổ sung - ĐẢM BẢO KHÔNG DÙNG TAILWIND CLASSES TRONG ĐÂY */
 .line-clamp-1 {
   overflow: hidden;

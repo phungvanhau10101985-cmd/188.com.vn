@@ -378,7 +378,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   return (
     <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>
     <div
-      className={`min-h-screen flex flex-col ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
+      className={`min-h-[100dvh] flex flex-col ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
       style={
         {
           '--listing-chrome-height': keepDesktopHeaderPinned ? `${listingChromeHeight}px` : '0px',
