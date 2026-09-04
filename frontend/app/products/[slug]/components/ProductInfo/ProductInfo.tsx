@@ -252,7 +252,7 @@ export default function ProductInfo({
         className="pointer-events-auto fixed bottom-0 left-0 right-0 z-[100] hidden border-t border-gray-200 bg-gray-100 md:block"
       >
         <div className="mx-auto max-w-7xl px-4">
-          <div className="flex h-14 items-center justify-center gap-2">
+          <div className="pdp-desktop-cartbar-width flex h-14 items-center justify-between gap-2">
             <div className="flex items-center gap-3">
               <Link href="/" className="flex w-14 flex-shrink-0 flex-col items-center justify-center text-gray-600">
                 <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>

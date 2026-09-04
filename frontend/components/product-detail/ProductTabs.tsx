@@ -409,23 +409,30 @@ export default function ProductTabs({ product, layout = 'mobile' }: ProductTabsP
                 <h2 className="text-base font-bold text-gray-900 mb-3 pb-2 border-b border-gray-200">
                   📸 Hình ảnh chi tiết sản phẩm
                 </h2>
-                <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] gap-4">
-                  <div className="hidden lg:block h-fit self-start mt-[26px] lg:sticky lg:top-[26px] lg:max-h-screen lg:overflow-y-auto scrollbar-on-hover lg:pl-5">
-                    <ShopSidebarProducts currentProduct={product} />
-                  </div>
-                  <div>
-                    <div className="w-1/2 mx-auto space-y-4">
-                      {visibleDetailImages.map((image, index) => (
-                        <HideOnImageError
-                          key={image}
-                          src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
-                          alt={`${product.name} chi tiết ${index + 1}`}
-                          className="w-full h-auto block"
-                          onBroken={() => markDetailImageBroken(image)}
-                        />
-                      ))}
+                <div
+                  className={
+                    layout === 'desktop'
+                      ? 'grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,33rem)_minmax(0,1fr)] gap-4'
+                      : 'grid grid-cols-1 gap-4'
+                  }
+                >
+                  {layout === 'desktop' ? (
+                    <div className="hidden lg:block h-fit self-start mt-[26px] lg:sticky lg:top-[26px] lg:max-h-screen lg:overflow-y-auto scrollbar-on-hover lg:pl-5">
+                      <ShopSidebarProducts currentProduct={product} />
                     </div>
+                  ) : null}
+                  <div className={layout === 'desktop' ? 'pdp-desktop-cartbar-width space-y-4' : 'w-1/2 mx-auto space-y-4'}>
+                    {visibleDetailImages.map((image, index) => (
+                      <HideOnImageError
+                        key={image}
+                        src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
+                        alt={`${product.name} chi tiết ${index + 1}`}
+                        className="w-full h-auto block"
+                        onBroken={() => markDetailImageBroken(image)}
+                      />
+                    ))}
                   </div>
+                  {layout === 'desktop' ? <div className="hidden lg:block" aria-hidden /> : null}
                 </div>
               </div>
             )}

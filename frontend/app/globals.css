@@ -593,3 +593,18 @@ button[data-loading='true'],
     display: none !important;
   }
 }
+
+/*
+ * Cụm Trang chủ / Thử đồ / Thích + THÊM GIỎ / MUA HÀNG ≈ 33rem
+ * (3×3.5rem + gap + 2×10rem). Ảnh chi tiết desktop dùng cùng max-width để khớp mép.
+ */
+:root {
+  --pdp-desktop-cartbar-width: 33rem;
+}
+
+.pdp-desktop-cartbar-width {
+  width: 100%;
+  max-width: var(--pdp-desktop-cartbar-width);
+  margin-left: auto;
+  margin-right: auto;
+}
