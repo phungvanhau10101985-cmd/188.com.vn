@@ -40,36 +40,40 @@ http_ok() {
   [[ "${code}" == "200" || "${code}" == "301" || "${code}" == "302" || "${code}" == "307" || "${code}" == "308" ]]
 }
 
+# Cổng còn listen = process sống. Không restart chỉ vì HTTP chậm
+# (trang chủ Next / shop HTML > 8s → SIGKILL → 502). Chỉ cứu khi mất cổng.
 ensure_app() {
   local name="$1"
   local port="$2"
   local health_url="$3"
   local ecosystem="$4"
   local only="$5"
-  local changed=0
 
-  if port_ok "${port}" && http_ok "${health_url}"; then
-    echo "${LOG_PREFIX} OK ${name} :${port}"
+  if port_ok "${port}"; then
+    if http_ok "${health_url}"; then
+      echo "${LOG_PREFIX} OK ${name} :${port}"
+    else
+      echo "${LOG_PREFIX} SLOW ${name} :${port} — cổng còn listen, không restart"
+    fi
     return 0
   fi
 
-  echo "${LOG_PREFIX} RECOVER ${name} (port/health fail) → pm2 start ${ecosystem} --only ${only}"
+  echo "${LOG_PREFIX} RECOVER ${name} (port down) → pm2 start ${ecosystem} --only ${only}"
   if pm2 describe "${name}" &>/dev/null; then
     pm2 restart "${name}" --update-env 2>/dev/null || pm2 start "${name}" --update-env 2>/dev/null || true
   else
     pm2 start "${ecosystem}" --only "${only}" 2>/dev/null || true
   fi
-  changed=1
 
   local i
-  for i in $(seq 1 20); do
-    if port_ok "${port}" && http_ok "${health_url}"; then
+  for i in $(seq 1 30); do
+    if port_ok "${port}"; then
       echo "${LOG_PREFIX} recovered ${name}"
       return 0
     fi
     sleep 1
   done
-  echo "${LOG_PREFIX} FAIL ${name} vẫn chưa healthy sau recover"
+  echo "${LOG_PREFIX} FAIL ${name} vẫn chưa listen sau recover"
   return 1
 }
 
@@ -85,7 +89,7 @@ if [[ -f "${NANOAI_DIR}/ecosystem.config.cjs" ]]; then
   ensure_app \
     "${NANOAI_NAME}" \
     "${NANOAI_PORT}" \
-    "http://127.0.0.1:${NANOAI_PORT}/" \
+    "http://127.0.0.1:${NANOAI_PORT}/api/health" \
     "${NANOAI_DIR}/ecosystem.config.cjs" \
     "${NANOAI_NAME}" && ok=$((ok + 1)) || true
 else
