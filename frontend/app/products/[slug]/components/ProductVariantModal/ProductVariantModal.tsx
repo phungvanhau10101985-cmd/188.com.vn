@@ -276,14 +276,12 @@ export default function ProductVariantModal({
 
   const warehouseClearanceSection =
     warehouseInStock.length > 0 ? (
-      <div className="mt-3 border-t border-amber-100 pt-3">
+      <div className="mb-4">
         {product.source_oos ? (
           <p className="mb-2 text-[10px] text-amber-800 leading-snug">
             Hàng order nguồn tạm hết — chọn <strong>Thanh lý trong kho</strong> bên dưới.
           </p>
-        ) : (
-          <p className="mb-2 text-[10px] font-semibold text-amber-900">Thanh lý trong kho</p>
-        )}
+        ) : null}
         <WarehouseClearanceBlock
           product={product}
           onAddToCart={handleClearanceAddToCart}
@@ -393,6 +391,11 @@ export default function ProductVariantModal({
           <h2 id="variant-modal-title" className="sr-only">
             Chọn biến thể sản phẩm
           </h2>
+
+          {warehouseClearanceSection}
+          {warehouseInStock.length > 0 ? (
+            <p className="mb-2 text-[11px] font-semibold text-gray-700">Hoặc chọn hàng order</p>
+          ) : null}
 
           {/* Ảnh xác nhận to + mã sp, tên, giá, kho (desktop) */}
           <div className="hidden md:flex gap-4 mb-3 items-start">
@@ -518,8 +521,6 @@ export default function ProductVariantModal({
                   </div>
                 </div>
               )}
-
-              {warehouseClearanceSection}
 
               {/* Số lượng: - disabled khi =1; + disabled khi đã = maxQty (tồn ảo còn 1 thì maxQty=1, không cộng thêm được nhưng vẫn mua được 1; chỉ tồn ảo=0 mới không mua được). */}
               <div className="mt-2">
@@ -689,8 +690,6 @@ export default function ProductVariantModal({
                 </div>
               )}
 
-              {warehouseClearanceSection}
-
               {/* Số lượng */}
               <div className={orderingWarehouse ? 'opacity-50 pointer-events-none' : ''}>
                 <p className="text-[11px] font-semibold text-gray-900 mb-1.5">Số lượng (hàng order)</p>
@@ -762,8 +761,8 @@ export default function ProductVariantModal({
 
           {orderingWarehouse ? (
             <p className="mb-2 text-center text-[11px] text-amber-800">
-              Bạn đang chọn hàng thanh lý — dùng nút <strong>Thêm giỏ (thanh lý)</strong> /{' '}
-              <strong>Mua ngay (thanh lý)</strong> phía trên.
+              Bạn đang chọn hàng thanh lý — dùng nút <strong>Thêm giỏ</strong> /{' '}
+              <strong>Mua thanh lý</strong> phía trên.
             </p>
           ) : null}
           <div className="flex flex-row gap-2">

@@ -694,7 +694,7 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
           <p className="text-xs text-gray-500 mt-1">
             Áp dụng cho sản phẩm import id có dấu «/» (vd. HN256/XL). Một mức % chung — hiển thị trên block
             «Thanh lý trong kho» ở trang sản phẩm (hoặc giá trực tiếp nếu chưa có SP gốc). Không cộng sale ngày trùng tháng.
-            Nhập %: chưa có ảnh thì bấm Tạo banner sale (ảnh hiện luôn ở mục Banner AI bên dưới); đã có ảnh thì bấm Áp dụng.
+            Nhập %: chưa có ảnh thì bấm Tạo banner sale (ảnh hiện luôn ở mục Banner AI bên dưới); đã có ảnh thì bấm Áp dụng hoặc Tạo lại.
             Slider trang chủ hiện banner đang áp dụng, trừ khi 0% hoặc tắt.
           </p>
         </div>
@@ -732,14 +732,24 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
           </button>
           {typedWarehousePct > 0 && typedWarehousePct <= 80 ? (
             typedWarehouseReady ? (
-              <button
-                type="button"
-                disabled={saving || warehouseBannerWorking}
-                onClick={() => void applyWarehouseBanner()}
-                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
-              >
-                Áp dụng
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={saving || warehouseBannerWorking}
+                  onClick={() => void applyWarehouseBanner()}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  Áp dụng
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || warehouseBannerWorking}
+                  onClick={() => void createWarehouseBanner()}
+                  className="px-4 py-2 rounded-lg border border-orange-300 bg-white text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-60"
+                >
+                  {warehouseBannerWorking ? 'Đang tạo lại…' : 'Tạo lại'}
+                </button>
+              </>
             ) : (
               <button
                 type="button"

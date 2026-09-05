@@ -285,16 +285,16 @@ export default function WarehouseClearanceBlock({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex flex-row items-stretch gap-2">
         <Button
           type="button"
           variant="secondary"
           disabled={!selected || uiCartLoading}
           loading={uiCartLoading}
           onClick={handleAdd}
-          className="flex-1 rounded-xl border-2 border-gray-600 bg-gray-700 py-3 text-sm font-bold text-white shadow-sm hover:bg-gray-800 sm:text-base"
+          className="min-w-0 flex-1 rounded-xl border-2 border-gray-600 bg-gray-700 px-2 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-gray-800 sm:px-3 sm:py-3 sm:text-sm"
         >
-          Thêm giỏ (thanh lý)
+          Thêm giỏ
         </Button>
         <Button
           type="button"
@@ -302,9 +302,9 @@ export default function WarehouseClearanceBlock({
           disabled={!selected || uiCartLoading}
           loading={uiCartLoading}
           onClick={handleBuy}
-          className="flex-1 rounded-xl bg-gradient-to-r from-[#ea580c] to-orange-600 py-3 text-sm font-bold text-white shadow-md hover:from-[#c2410c] hover:to-orange-700 sm:text-base border-transparent"
+          className="min-w-0 flex-1 rounded-xl border-transparent bg-gradient-to-r from-[#ea580c] to-orange-600 px-2 py-2.5 text-xs font-bold text-white shadow-md hover:from-[#c2410c] hover:to-orange-700 sm:px-3 sm:py-3 sm:text-sm"
         >
-          Mua ngay (thanh lý)
+          Mua thanh lý
         </Button>
       </div>
     </section>
