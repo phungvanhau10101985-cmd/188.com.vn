@@ -608,3 +608,13 @@ button[data-loading='true'],
   margin-left: auto;
   margin-right: auto;
 }
+
+/* Mobile: không thu ảnh chi tiết — kể cả khi class desktop còn trong DOM. */
+@media (max-width: 767px) {
+  .pdp-desktop-cartbar-width {
+    max-width: none;
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+}

@@ -58,14 +58,14 @@ export default function FloatingShopVideoFeedButton() {
 
   const hidden =
     norm === SHOP_VIDEO_FEED_PATH || pathname?.startsWith('/auth/') || pathname?.startsWith('/admin');
-  const rightPx = isMd ? fab.right_desktop_px : fab.right_mobile_px;
+  const rightPx = isMd ? fab.right_desktop_px + 50 : fab.right_mobile_px;
   /** Mobile luôn ưu tiên offset "with_nav" để không tụt xuống dưới thanh đáy. */
   const bottomPx = isMd
     ? fab.bottom_desktop_px
     : fab.bottom_mobile_px_with_nav;
 
   useEffect(() => {
-    if (hidden || isMd) return;
+    if (hidden) return;
     window.dispatchEvent(new Event('resize'));
   }, [hidden, bottomPx, rightPx, isMd]);
 
