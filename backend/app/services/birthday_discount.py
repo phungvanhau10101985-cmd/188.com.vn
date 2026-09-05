@@ -63,27 +63,28 @@ def is_birthday_promo_test_enabled(db, user) -> bool:
     if not user_id and not user_email:
         return False
     try:
-        from sqlalchemy import func, or_
-
         from app.models.admin import AdminUser
         from app.models.admin_feature_test import AdminFeatureTestSetting
+        from app.services.admin_feature_test_target import matches_feature_test_target
 
-        row = (
-            db.query(AdminFeatureTestSetting)
+        rows = (
+            db.query(AdminFeatureTestSetting, AdminUser)
             .join(AdminUser, AdminUser.id == AdminFeatureTestSetting.admin_id)
-            .filter(
-                or_(
-                    func.lower(AdminFeatureTestSetting.test_email) == user_email,
-                    AdminUser.linked_user_id == user_id,
-                )
-            )
             .filter(AdminUser.is_active == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.birthday_promo_enabled == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.birthday_promo_expires_at.isnot(None))
             .filter(AdminFeatureTestSetting.birthday_promo_expires_at > datetime.now(timezone.utc))
-            .first()
+            .all()
         )
-        return row is not None
+        return any(
+            matches_feature_test_target(
+                configured_test_email=row.test_email,
+                linked_user_id=getattr(admin, "linked_user_id", None),
+                current_user_email=user_email,
+                current_user_id=user_id,
+            )
+            for row, admin in rows
+        )
     except Exception:
         return False
 

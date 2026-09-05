@@ -260,26 +260,28 @@ def _site_sale_test_row_for_user(db: Session, user) -> Optional[Any]:
     if not user_id and not user_email:
         return None
     try:
-        from sqlalchemy import func, or_
-
         from app.models.admin import AdminUser
         from app.models.admin_feature_test import AdminFeatureTestSetting
+        from app.services.admin_feature_test_target import matches_feature_test_target
 
-        return (
-            db.query(AdminFeatureTestSetting)
+        rows = (
+            db.query(AdminFeatureTestSetting, AdminUser)
             .join(AdminUser, AdminUser.id == AdminFeatureTestSetting.admin_id)
-            .filter(
-                or_(
-                    func.lower(AdminFeatureTestSetting.test_email) == user_email,
-                    AdminUser.linked_user_id == user_id,
-                )
-            )
             .filter(AdminUser.is_active == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.site_sale_test_enabled == True)  # noqa: E712
             .filter(AdminFeatureTestSetting.site_sale_test_expires_at.isnot(None))
             .filter(AdminFeatureTestSetting.site_sale_test_expires_at > datetime.now(timezone.utc))
-            .first()
+            .all()
         )
+        for row, admin in rows:
+            if matches_feature_test_target(
+                configured_test_email=row.test_email,
+                linked_user_id=admin.linked_user_id,
+                current_user_email=user_email,
+                current_user_id=user_id,
+            ):
+                return row
+        return None
     except Exception:
         return None
 
