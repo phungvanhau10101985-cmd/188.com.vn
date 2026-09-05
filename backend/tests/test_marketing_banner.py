@@ -31,12 +31,23 @@ def test_campaign_key_reuses_month_day_and_changes_with_real_discount():
 
 
 def test_prompts_lock_date_percent_and_single_21_9_image():
-    sale = svc.build_banner_prompt(kind="sale", day=9, month=9, discount_percent=6)
+    sale = svc.build_banner_prompt(
+        kind="sale",
+        day=9,
+        month=9,
+        discount_percent=6,
+        copy={
+            "verse": "Deal vui đúng hẹn - chọn liền hôm nay",
+            "cta": "SĂN DEAL NGAY",
+            "art_direction": "editorial tối giản",
+        },
+    )
     birthday = svc.build_banner_prompt(
         kind="birthday", day=5, month=9, discount_percent=10
     )
     assert "21:9" in sale
     assert "SALE 9.9 - GIẢM 6%" in sale
+    assert "Deal vui đúng hẹn - chọn liền hôm nay" in sale
     assert "MỪNG SINH NHẬT 05/09 - TẶNG 10%" in birthday
     assert "Không ghi tên khách" in birthday
 
@@ -45,6 +56,15 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
     db = _session()
     raw = _png_bytes()
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": f"Câu sáng tạo phiên bản {kwargs['version']}",
+            "cta": "MUA NGAY",
+            "art_direction": f"phong cách {kwargs['version']}",
+        },
+    )
     monkeypatch.setattr(
         svc,
         "_upload_banner",
@@ -77,6 +97,8 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
 
     assert reused.id == first.id
     assert replacement.version == 2
+    assert first.prompt != replacement.prompt
+    assert "Câu sáng tạo phiên bản 2" in replacement.prompt
     assert replacement.is_active is True
     db.refresh(first)
     assert first.is_active is False
@@ -112,3 +134,28 @@ def test_february_29_customer_uses_february_28_in_non_leap_year():
 
     targets = svc._birthday_dates_with_customers(db, date(2026, 2, 21))
     assert targets == [date(2026, 2, 28)]
+
+
+def test_birthday_test_prefers_existing_asset_inside_next_seven_days():
+    db = _session()
+    row = MarketingBannerAsset(
+        kind="birthday",
+        campaign_key=svc.campaign_key("birthday", 9, 9, 10),
+        date_key="09-09",
+        discount_percent=10,
+        image_url="https://cdn.test/birthday-09-09.png",
+        aspect_ratio="21:9",
+        prompt="test",
+        provider="gemini",
+        model="gemini-test",
+        status="ready",
+        version=1,
+        is_active=True,
+    )
+    db.add(row)
+    db.commit()
+
+    found, event_date = svc.find_test_birthday_asset(db, today=date(2026, 9, 5))
+    assert found is not None
+    assert found.id == row.id
+    assert event_date == date(2026, 9, 9)

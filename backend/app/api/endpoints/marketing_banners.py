@@ -21,7 +21,9 @@ from app.services import marketing_banner as banner_svc
 from app.services import sale_calendar as sale_svc
 from app.services.birthday_discount import (
     BIRTHDAY_DISCOUNT_PERCENT,
+    get_birthday_discount,
     get_birthday_discount_for_user,
+    is_birthday_promo_test_enabled,
 )
 
 router = APIRouter()
@@ -55,8 +57,27 @@ def current_marketing_banners(
     items: list[MarketingBannerItem] = []
 
     if current_user is not None:
+        real_birthday = get_birthday_discount(current_user.date_of_birth)
+        test_enabled = is_birthday_promo_test_enabled(db, current_user)
         birthday = get_birthday_discount_for_user(db, current_user)
-        if birthday.active and birthday.next_birthday:
+        birthday_asset = None
+        birthday_event_date = birthday.next_birthday
+        if real_birthday.active and real_birthday.next_birthday:
+            birthday_asset = banner_svc.find_active_asset(
+                db,
+                kind="birthday",
+                day=real_birthday.next_birthday.day,
+                month=real_birthday.next_birthday.month,
+                discount_percent=real_birthday.percent,
+            )
+            birthday_event_date = real_birthday.next_birthday
+        elif test_enabled:
+            birthday_asset, birthday_event_date = banner_svc.find_test_birthday_asset(
+                db,
+                today=date.today(),
+                discount_percent=BIRTHDAY_DISCOUNT_PERCENT,
+            )
+        elif birthday.active and birthday.next_birthday:
             birthday_asset = banner_svc.find_active_asset(
                 db,
                 kind="birthday",
@@ -64,16 +85,17 @@ def current_marketing_banners(
                 month=birthday.next_birthday.month,
                 discount_percent=birthday.percent,
             )
-            if birthday_asset and birthday_asset.image_url:
-                display_name = (current_user.full_name or "Quý khách").strip()
-                greeting = f"Món quà sinh nhật dành riêng cho {display_name}"
-                items.append(
-                    _public_item(
-                        birthday_asset,
-                        event_date=birthday.next_birthday.isoformat(),
-                        greeting=greeting,
-                    )
+
+        if birthday_asset and birthday_asset.image_url and birthday_event_date:
+            display_name = (current_user.full_name or "Quý khách").strip()
+            greeting = f"Món quà sinh nhật dành riêng cho {display_name}"
+            items.append(
+                _public_item(
+                    birthday_asset,
+                    event_date=birthday_event_date.isoformat(),
+                    greeting=greeting,
                 )
+            )
 
     sale = sale_svc.resolve_sale_calendar_state(db, user=current_user)
     if sale.phase and sale.event_date and sale.event_date.day == sale.event_date.month:

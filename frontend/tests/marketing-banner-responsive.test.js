@@ -21,6 +21,12 @@ describe('marketing banner responsive contract', () => {
     );
   });
 
+  test('routes both campaigns to the age and gender recommendation group', () => {
+    expect(component).toContain("const destination = '/#san-pham-cung-shop'");
+    expect(component).not.toContain('/?category=deal');
+    expect(component).not.toContain("const destination = '/kho-sale'");
+  });
+
   test('provides loading, error, empty and image failure behavior', () => {
     expect(component).toContain('if (loading)');
     expect(component).toContain('if (error)');

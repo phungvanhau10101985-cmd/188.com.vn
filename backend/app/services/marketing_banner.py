@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import html
 import io
+import json
 import logging
 import re
 import time
@@ -12,6 +13,7 @@ from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from PIL import Image
+import requests
 from sqlalchemy import extract, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -44,15 +46,113 @@ def _display_pct(value: float | Decimal) -> str:
     return f"{float(value):g}%"
 
 
+def _fallback_dynamic_copy(
+    *, kind: str, day: int, month: int, version: int
+) -> Dict[str, str]:
+    sale_options = [
+        ("Ngày đôi ưu đãi - chốt ngay kẻo lỡ", "SĂN DEAL NGAY", "năng lượng tốc độ, ánh sáng chuyển động"),
+        ("Giá hời đúng hẹn - mua liền hôm nay", "CHỐT DEAL 9.9", "sân khấu thời trang hiện đại, tương phản mạnh"),
+        ("Một ngày giá tốt - bỏ lỡ tiếc lâu", "MUA NGAY HÔM NAY", "premium editorial, sản phẩm nổi bật"),
+    ]
+    birthday_options = [
+        ("Tuổi mới an vui - quà riêng trao tay", "NHẬN QUÀ CỦA TÔI", "ấm áp sang trọng, quà tặng tinh tế"),
+        ("Ngày vui rạng rỡ - quà chờ bạn mở", "MỞ QUÀ SINH NHẬT", "lễ hội thanh lịch, confetti tối giản"),
+        ("Thêm tuổi thêm duyên - nhận liền quà riêng", "NHẬN QUÀ NGAY", "mềm mại cao cấp, ánh sáng studio"),
+    ]
+    options = birthday_options if kind == "birthday" else sale_options
+    verse, cta, art_direction = options[(day + month + version) % len(options)]
+    if kind == "sale" and "9.9" in cta:
+        cta = f"CHỐT DEAL {day}.{month}"
+    return {"verse": verse, "cta": cta, "art_direction": art_direction}
+
+
+def generate_dynamic_copy(
+    *,
+    kind: str,
+    day: int,
+    month: int,
+    discount_percent: float,
+    version: int,
+) -> Dict[str, str]:
+    """Gemini text sáng tác copy mới; ngày và % vẫn do hệ thống khóa ở headline."""
+    fallback = _fallback_dynamic_copy(
+        kind=kind, day=day, month=month, version=version
+    )
+    api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
+    if not api_key:
+        return fallback
+    model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
+    label = f"{day:02d}/{month:02d}"
+    pct = _display_pct(discount_percent)
+    campaign = (
+        f"sale ngày trùng tháng {day}.{month}, giảm thật {pct}"
+        if kind == "sale"
+        else f"sinh nhật khách ngày {label}, quà giảm giá {pct}"
+    )
+    prompt = (
+        "Bạn là copywriter thương mại điện tử Việt Nam. "
+        f"Sáng tác nội dung mới cho banner {campaign}. Đây là lần tạo phiên bản {version}. "
+        "Trả về đúng JSON gồm verse, cta, art_direction. "
+        "verse là một câu có nhịp/vần tự nhiên, 7-12 từ, không sáo rỗng, không lặp lại ngày hoặc %. "
+        "cta 2-5 từ, thúc đẩy hành động nhưng không gây hiểu nhầm. "
+        "art_direction mô tả phong cách hình ảnh độc đáo trong tối đa 12 từ. "
+        "Không thêm mức giảm, thời hạn hay điều kiện không được cung cấp. "
+        f"Mã biến thể sáng tạo: {kind}-{day:02d}{month:02d}-v{version}-{time.time_ns()}."
+    )
+    try:
+        response = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            params={"key": api_key},
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "temperature": 1.1,
+                },
+            },
+            timeout=45,
+        )
+        response.raise_for_status()
+        text = (
+            response.json().get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
+        parsed = json.loads(text)
+        verse = re.sub(r"\s+", " ", str(parsed.get("verse") or "")).strip()
+        cta = re.sub(r"\s+", " ", str(parsed.get("cta") or "")).strip()
+        art_direction = re.sub(
+            r"\s+", " ", str(parsed.get("art_direction") or "")
+        ).strip()
+        if not (8 <= len(verse) <= 100 and 3 <= len(cta) <= 40):
+            return fallback
+        return {
+            "verse": verse,
+            "cta": cta.upper(),
+            "art_direction": art_direction[:120] or fallback["art_direction"],
+        }
+    except Exception as exc:
+        logger.warning("Gemini text không tạo được copy banner, dùng fallback: %s", exc)
+        return fallback
+
+
 def build_banner_prompt(
     *,
     kind: str,
     day: int,
     month: int,
     discount_percent: float,
+    copy: Optional[Dict[str, str]] = None,
 ) -> str:
     label = f"{day:02d}/{month:02d}"
     pct = _display_pct(discount_percent)
+    dynamic = copy or _fallback_dynamic_copy(
+        kind=kind, day=day, month=month, version=1
+    )
+    verse = dynamic["verse"]
+    cta = dynamic["cta"]
+    art_direction = dynamic["art_direction"]
     shared = (
         "Tạo đúng MỘT banner thương mại điện tử siêu rộng 21:9, chất lượng 2K, "
         "dùng nguyên ảnh trên desktop lẫn mobile, không crop. Phong cách cao cấp, "
@@ -63,15 +163,17 @@ def build_banner_prompt(
     if kind == "sale":
         return shared + (
             f'Bắt buộc ghi nguyên văn: "SALE {day}.{month} - GIẢM {pct}". '
-            'Một câu vần ngắn: "Ngày tháng trùng nhau - deal xịn trao tay". '
-            'CTA dạng nút: "MUA NGAY HÔM NAY". '
+            f'Ghi nguyên văn câu sáng tác mới: "{verse}". '
+            f'CTA dạng nút ghi nguyên văn: "{cta}". '
+            f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
             "Dùng hình sản phẩm thời trang, giày dép, phụ kiện hiện đại; tạo cảm giác khẩn cấp. "
             "Đặt toàn bộ chữ quan trọng ở giữa ảnh và đủ lớn để đọc trên màn hình điện thoại."
         )
     return shared + (
         f'Bắt buộc ghi nguyên văn: "MỪNG SINH NHẬT {label} - TẶNG {pct}". '
-        'Một câu thơ ngắn: "Thêm tuổi thêm vui - quà xinh đang đợi". '
-        'CTA dạng nút: "NHẬN QUÀ SINH NHẬT". '
+        f'Ghi nguyên văn câu thơ mới: "{verse}". '
+        f'CTA dạng nút ghi nguyên văn: "{cta}". '
+        f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
         "Không ghi tên khách và không ghi năm sinh. Trang trí quà tặng, bánh sinh nhật, "
         "confetti vừa đủ, sang trọng và ấm áp. Đặt toàn bộ chữ quan trọng ở giữa ảnh "
         "và đủ lớn để đọc trên màn hình điện thoại."
@@ -158,6 +260,51 @@ def find_active_asset(
     )
 
 
+def find_test_birthday_asset(
+    db: Session,
+    *,
+    today: date,
+    discount_percent: float = BIRTHDAY_DISCOUNT_PERCENT,
+) -> tuple[Optional[MarketingBannerAsset], Optional[date]]:
+    """Test CMSN ưu tiên ảnh thật trong 7 ngày tới; fallback ảnh active mới nhất."""
+    for offset in range(8):
+        target = today + timedelta(days=offset)
+        row = find_active_asset(
+            db,
+            kind="birthday",
+            day=target.day,
+            month=target.month,
+            discount_percent=discount_percent,
+        )
+        if row:
+            return row, target
+
+    row = (
+        db.query(MarketingBannerAsset)
+        .filter(
+            MarketingBannerAsset.kind == "birthday",
+            MarketingBannerAsset.status == "ready",
+            MarketingBannerAsset.is_active.is_(True),
+            MarketingBannerAsset.discount_percent == discount_percent,
+        )
+        .order_by(
+            MarketingBannerAsset.generated_at.desc(),
+            MarketingBannerAsset.id.desc(),
+        )
+        .first()
+    )
+    if not row:
+        return None, None
+    try:
+        month, day = (int(part) for part in row.date_key.split("-", 1))
+        target = date(today.year, month, day)
+        if target < today:
+            target = date(today.year + 1, month, day)
+    except (TypeError, ValueError):
+        target = today
+    return row, target
+
+
 def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
     recipients = [
         email
@@ -234,11 +381,19 @@ def generate_banner(
         getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
         or "gemini-3-pro-image-preview"
     ).strip()
+    dynamic_copy = generate_dynamic_copy(
+        kind=kind,
+        day=day,
+        month=month,
+        discount_percent=discount_percent,
+        version=version,
+    )
     prompt = build_banner_prompt(
         kind=kind,
         day=day,
         month=month,
         discount_percent=discount_percent,
+        copy=dynamic_copy,
     )
     row = MarketingBannerAsset(
         kind=kind,

@@ -85,6 +85,7 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
   const move = (direction: number) => {
     setActiveIndex((index) => (index + direction + items.length) % items.length);
   };
+  const destination = '/#san-pham-cung-shop';
 
   return (
     <section
@@ -96,7 +97,7 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
       onBlurCapture={() => setPaused(false)}
     >
       <Link
-        href="/?category=deal"
+        href={destination}
         className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
         onClick={() =>
           trackEvent('marketing_banner_click', {
