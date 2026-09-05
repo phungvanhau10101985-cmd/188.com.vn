@@ -108,6 +108,7 @@ class AdminGrantSegmentResponse(BaseModel):
 class AdminDailyPromotionCronResponse(BaseModel):
     voucher_grants: dict
     birthday_emails: Optional[dict] = None
+    marketing_banners: Optional[dict] = None
 
 
 class AdminUserGrantOut(BaseModel):

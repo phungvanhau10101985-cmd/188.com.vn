@@ -23,6 +23,23 @@ export interface SiteSaleCalendarState {
   countdown_to?: string | null;
 }
 
+export interface MarketingBannerItem {
+  id: number;
+  kind: 'sale' | 'birthday';
+  campaign_key: string;
+  date_key: string;
+  discount_percent: number;
+  image_url: string;
+  aspect_ratio: string;
+  event_date?: string | null;
+  greeting?: string | null;
+  version: number;
+}
+
+export interface MarketingBannerCurrentResponse {
+  items: MarketingBannerItem[];
+}
+
 export interface ProductColor {
   name: string;
   img?: string;

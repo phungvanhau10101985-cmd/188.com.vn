@@ -140,6 +140,7 @@ def gemini_generate_image_from_text(
     *,
     image_model: Optional[str] = None,
     image_size: Optional[str] = None,
+    aspect_ratio: Optional[str] = None,
     timeout_sec: Optional[int] = None,
 ) -> bytes:
     """
@@ -163,6 +164,8 @@ def gemini_generate_image_from_text(
         "responseModalities": ["TEXT", "IMAGE"],
         "imageConfig": {"imageSize": eff_size},
     }
+    if aspect_ratio:
+        gen_cfg["imageConfig"]["aspectRatio"] = aspect_ratio
     payload: Dict[str, Any] = {
         "contents": [{"role": "user", "parts": [{"text": prompt.strip()}]}],
         "generationConfig": gen_cfg,

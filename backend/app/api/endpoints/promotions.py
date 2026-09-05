@@ -362,6 +362,7 @@ def cron_daily_all_promotions(
         abandon_hours=abandon_hours,
         include_welcome_backfill=True,
         include_birthday_emails=True,
+        include_marketing_banners=True,
     )
     return AdminDailyPromotionCronResponse(**result)
 

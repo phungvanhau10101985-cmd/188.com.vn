@@ -1290,6 +1290,10 @@ class ApiClient {
     return this.fetch('/sale-calendar/current');
   }
 
+  async getCurrentMarketingBanners(): Promise<import('@/types/api').MarketingBannerCurrentResponse> {
+    return this.fetch('/marketing-banners/current', { quiet: true });
+  }
+
   async getWelcomePromoEligibility(): Promise<WelcomePromoStatus> {
     return this.fetch('/promotions/welcome-eligibility');
   }

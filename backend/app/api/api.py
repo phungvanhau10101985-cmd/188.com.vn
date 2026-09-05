@@ -7,7 +7,7 @@ from app.api.endpoints import (
     orders, category_seo, loyalty,
     notifications, push, nanoai_search, image_localization, birthday_promo,
     promotions,
-    sale_calendar, newsletter, google_merchant,
+    sale_calendar, marketing_banners, newsletter, google_merchant,
     email_preferences,
     manual_product_create,
     shipping_lookup,
@@ -20,6 +20,7 @@ api_router.include_router(loyalty.router, prefix="/loyalty", tags=["loyalty"])
 api_router.include_router(birthday_promo.router, prefix="/birthday-promo", tags=["birthday-promo"])
 api_router.include_router(promotions.router, prefix="/promotions", tags=["promotions"])
 api_router.include_router(sale_calendar.router, prefix="/sale-calendar", tags=["sale-calendar"])
+api_router.include_router(marketing_banners.router, prefix="/marketing-banners", tags=["marketing-banners"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(newsletter.router, prefix="/newsletter", tags=["newsletter"])
 api_router.include_router(email_preferences.router, prefix="/email", tags=["email"])

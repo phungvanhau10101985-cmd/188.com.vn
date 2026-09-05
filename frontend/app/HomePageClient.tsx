@@ -17,6 +17,7 @@ const CategoryProductFilters = dynamic(() => import('@/components/CategoryProduc
   ),
 });
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
+import MarketingBannerCarousel from '@/components/home/MarketingBannerCarousel';
 import HomeSectionErrorBoundary from '@/components/home/HomeSectionErrorBoundary';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
@@ -1444,17 +1445,22 @@ export default function HomePageClient({
         )}
 
         {!hasFilterParams && (
-          <PersonalizedHeroBanner
-            apiStatus={apiStatus}
-            sameShopTotal={sameShopTotal}
-            sameShopLoading={sameShopLoading}
-            shopName={heroShopName}
-            previewProducts={heroPreviewProducts}
-            behaviorKey={recommendationKey}
-            isAuthenticated={isAuthenticated}
-            userGender={heroUserGender}
-            initialHeroCategories={initialHeroCategories}
-          />
+          <>
+            <MarketingBannerCarousel
+              refreshKey={`${isAuthenticated ? 'user' : 'guest'}:${user?.id ?? ''}`}
+            />
+            <PersonalizedHeroBanner
+              apiStatus={apiStatus}
+              sameShopTotal={sameShopTotal}
+              sameShopLoading={sameShopLoading}
+              shopName={heroShopName}
+              previewProducts={heroPreviewProducts}
+              behaviorKey={recommendationKey}
+              isAuthenticated={isAuthenticated}
+              userGender={heroUserGender}
+              initialHeroCategories={initialHeroCategories}
+            />
+          </>
         )}
 
         {hasFilterParams && (

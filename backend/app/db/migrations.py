@@ -57,6 +57,7 @@ from app.models.admin import AdminUser
 from app.models.source_stock_worker_state import SourceStockWorkerState
 from app.models.newsletter_subscriber import NewsletterSubscriber
 from app.models.marketing_email_suppression import MarketingEmailSuppression
+from app.models.marketing_banner import MarketingBannerAsset
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -1375,6 +1376,12 @@ class MigrationManager:
         )
         results['marketing_email_suppressions_sync'] = self._sync_table_columns(
             "marketing_email_suppressions", MarketingEmailSuppression
+        )
+        results['marketing_banner_assets_create'] = self._create_table_if_not_exists(
+            "marketing_banner_assets", MarketingBannerAsset
+        )
+        results['marketing_banner_assets_sync'] = self._sync_table_columns(
+            "marketing_banner_assets", MarketingBannerAsset
         )
 
         from app.models.listing_facet_cache import ListingFacetCache

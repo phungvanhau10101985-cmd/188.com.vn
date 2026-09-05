@@ -2,6 +2,7 @@
 
 import PromoCodesManager from '@/components/admin/PromoCodesManager';
 import SaleCalendarSettingsPanel from '@/components/admin/SaleCalendarSettingsPanel';
+import MarketingBannerManager from '@/components/admin/MarketingBannerManager';
 import { useEffect, useState } from 'react';
 import { adminPromotionsAPI, AdminPromotionCode } from '@/lib/admin-api';
 
@@ -25,6 +26,7 @@ export default function AdminPromotionsPage() {
       <PromoCodesManager />
 
       <SaleCalendarSettingsPanel embedded />
+      <MarketingBannerManager />
 
       <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6 space-y-3">
         <h2 className="text-lg font-bold text-gray-900">Cron tự động (VPS)</h2>

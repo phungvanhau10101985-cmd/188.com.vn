@@ -4087,6 +4087,44 @@ export const adminSaleCalendarAPI = {
     }),
 };
 
+export type AdminMarketingBannerAsset = {
+  id: number;
+  kind: 'sale' | 'birthday';
+  campaign_key: string;
+  date_key: string;
+  discount_percent: number;
+  image_url?: string | null;
+  aspect_ratio: string;
+  image_width?: number | null;
+  image_height?: number | null;
+  prompt: string;
+  provider: string;
+  model: string;
+  status: 'generating' | 'ready' | 'failed';
+  error_message?: string | null;
+  version: number;
+  is_active: boolean;
+  generated_at?: string | null;
+  created_at?: string | null;
+};
+
+export const adminMarketingBannerAPI = {
+  list: (kind?: 'sale' | 'birthday') =>
+    fetchAdmin<{ items: AdminMarketingBannerAsset[] }>(
+      `/marketing-banners/admin/assets${kind ? `?kind=${kind}` : ''}`,
+    ),
+  regenerate: (data: { kind: 'sale' | 'birthday'; day: number; month: number }) =>
+    fetchAdmin<{ accepted: boolean; message: string }>('/marketing-banners/admin/regenerate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  activate: (assetId: number) =>
+    fetchAdmin<AdminMarketingBannerAsset>(
+      `/marketing-banners/admin/assets/${assetId}/activate`,
+      { method: 'POST' },
+    ),
+};
+
 export interface AdminUserGrantRow {
   id: number;
   user_id: number;
