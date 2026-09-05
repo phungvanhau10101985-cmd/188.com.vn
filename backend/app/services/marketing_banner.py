@@ -31,6 +31,8 @@ from app.services.sale_calendar import list_upcoming_events
 logger = logging.getLogger(__name__)
 VN_TZ = timezone(timedelta(hours=7))
 ASPECT_RATIO = "21:9"
+BANNER_KINDS = ("sale", "birthday", "warehouse")
+WAREHOUSE_DATE_KEY = "kho"
 
 
 def _pct_key(value: float | Decimal) -> str:
@@ -39,6 +41,8 @@ def _pct_key(value: float | Decimal) -> str:
 
 
 def campaign_key(kind: str, day: int, month: int, discount_percent: float) -> str:
+    if kind == "warehouse":
+        return f"warehouse-p{_pct_key(discount_percent)}"
     return f"{kind}-{month:02d}-{day:02d}-p{_pct_key(discount_percent)}"
 
 
@@ -59,7 +63,17 @@ def _fallback_dynamic_copy(
         ("Ngày vui rạng rỡ - quà chờ bạn mở", "MỞ QUÀ SINH NHẬT", "lễ hội thanh lịch, confetti tối giản"),
         ("Thêm tuổi thêm duyên - nhận liền quà riêng", "NHẬN QUÀ NGAY", "mềm mại cao cấp, ánh sáng studio"),
     ]
-    options = birthday_options if kind == "birthday" else sale_options
+    warehouse_options = [
+        ("Hàng kho giá sốc - chốt liền hôm nay", "SĂN HÀNG KHO", "lửa nóng cháy hàng, ánh sáng bùng nổ"),
+        ("Thanh lý gấp - deal lớn trao tay", "MUA NGAY HÔM NAY", "kho hàng rực lửa, sản phẩm phát sáng"),
+        ("Kho xả giá mạnh - bỏ lỡ tiếc lâu", "VÀO KHO SALE", "sân khấu cam đỏ, tương phản cực mạnh"),
+    ]
+    if kind == "birthday":
+        options = birthday_options
+    elif kind == "warehouse":
+        options = warehouse_options
+    else:
+        options = sale_options
     verse, cta, art_direction = options[(day + month + version) % len(options)]
     if kind == "sale" and "9.9" in cta:
         cta = f"CHỐT DEAL {day}.{month}"
@@ -84,11 +98,12 @@ def generate_dynamic_copy(
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
     label = f"{day:02d}/{month:02d}"
     pct = _display_pct(discount_percent)
-    campaign = (
-        f"sale ngày trùng tháng {day}.{month}, giảm thật {pct}"
-        if kind == "sale"
-        else f"sinh nhật khách ngày {label}, quà giảm giá {pct}"
-    )
+    if kind == "sale":
+        campaign = f"sale ngày trùng tháng {day}.{month}, giảm thật {pct}"
+    elif kind == "warehouse":
+        campaign = f"sale kho thanh lý, giảm thật {pct}, hàng hoàn trong kho"
+    else:
+        campaign = f"sinh nhật khách ngày {label}, quà giảm giá {pct}"
     prompt = (
         "Bạn là copywriter thương mại điện tử Việt Nam. "
         f"Sáng tác nội dung mới cho banner {campaign}. Đây là lần tạo phiên bản {version}. "
@@ -168,6 +183,18 @@ def build_banner_prompt(
             f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
             "Dùng hình sản phẩm thời trang, giày dép, phụ kiện hiện đại; tạo cảm giác khẩn cấp. "
             "Đặt toàn bộ chữ quan trọng ở giữa ảnh và đủ lớn để đọc trên màn hình điện thoại."
+        )
+    if kind == "warehouse":
+        return shared + (
+            f'Bắt buộc ghi nguyên văn: "SALE KHO - GIẢM {pct}". '
+            f'Ghi nguyên văn câu sáng tác mới: "{verse}". '
+            f'CTA dạng nút ghi nguyên văn: "{cta}". '
+            f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
+            "Banner sale kho phải cực ấn tượng, chuyển đổi cao: nền đỏ-cam rực, tia lửa, "
+            "ánh sáng xuyên tâm, cảm giác cháy hàng và khẩn cấp. Xếp túi xách, giày, "
+            "đồng hồ, áo vest quanh chữ lớn, mỗi món có viền lửa/phát sáng. "
+            "Không ghi ngày tháng. Đặt toàn bộ chữ quan trọng ở giữa ảnh và đủ lớn "
+            "để đọc trên màn hình điện thoại."
         )
     return shared + (
         f'Bắt buộc ghi nguyên văn: "MỪNG SINH NHẬT {label} - TẶNG {pct}". '
@@ -260,6 +287,73 @@ def find_active_asset(
     )
 
 
+def find_active_warehouse_asset(
+    db: Session,
+    discount_percent: float,
+) -> Optional[MarketingBannerAsset]:
+    return find_active_asset(
+        db,
+        kind="warehouse",
+        day=0,
+        month=0,
+        discount_percent=discount_percent,
+    )
+
+
+def ensure_warehouse_banner(
+    db: Session,
+    *,
+    discount_percent: float,
+    force: bool = False,
+    notify_admin: bool = True,
+) -> Optional[MarketingBannerAsset]:
+    """Tái sử dụng ảnh sale kho theo %, chỉ tạo mới khi chưa có hoặc force."""
+    pct = float(discount_percent)
+    if pct <= 0:
+        return None
+    if not force:
+        existing = find_active_warehouse_asset(db, pct)
+        if existing:
+            return existing
+        generating = (
+            db.query(MarketingBannerAsset)
+            .filter(
+                MarketingBannerAsset.kind == "warehouse",
+                MarketingBannerAsset.campaign_key == campaign_key("warehouse", 0, 0, pct),
+                MarketingBannerAsset.status == "generating",
+            )
+            .first()
+        )
+        if generating:
+            return generating
+    return generate_banner(
+        db,
+        kind="warehouse",
+        day=0,
+        month=0,
+        discount_percent=pct,
+        force=force,
+        notify_admin=notify_admin,
+    )
+
+
+def generate_warehouse_banner_job(discount_percent: float, *, force: bool = False) -> None:
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        ensure_warehouse_banner(
+            db,
+            discount_percent=discount_percent,
+            force=force,
+            notify_admin=True,
+        )
+    except Exception:
+        logger.exception("Tạo banner sale kho %s%% thất bại", discount_percent)
+    finally:
+        db.close()
+
+
 def find_test_birthday_asset(
     db: Session,
     *,
@@ -320,7 +414,7 @@ def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
     if not recipients:
         return
     admin_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/admin/promotions#ai-banners"
-    title = "sinh nhật" if row.kind == "birthday" else "sale"
+    title = {"birthday": "sinh nhật", "warehouse": "sale kho"}.get(row.kind, "sale")
     subject = f"[188.com.vn] Banner {title} {row.date_key} vừa được tạo"
     safe_url = html.escape(row.image_url or "", quote=True)
     body = (
@@ -353,8 +447,10 @@ def generate_banner(
     force: bool = False,
     notify_admin: bool = True,
 ) -> MarketingBannerAsset:
-    if kind not in ("sale", "birthday"):
-        raise ValueError("kind phải là sale hoặc birthday")
+    if kind not in BANNER_KINDS:
+        raise ValueError("kind phải là sale, birthday hoặc warehouse")
+    if kind == "warehouse" and float(discount_percent) <= 0:
+        raise ValueError("Banner sale kho chỉ tạo khi giảm giá lớn hơn 0%.")
     key = campaign_key(kind, day, month, discount_percent)
     if not force:
         existing = find_active_asset(
@@ -398,7 +494,7 @@ def generate_banner(
     row = MarketingBannerAsset(
         kind=kind,
         campaign_key=key,
-        date_key=f"{month:02d}-{day:02d}",
+        date_key=WAREHOUSE_DATE_KEY if kind == "warehouse" else f"{month:02d}-{day:02d}",
         discount_percent=discount_percent,
         prompt=prompt,
         model=model,
@@ -507,6 +603,7 @@ def ensure_daily_banners(db: Session, *, today: Optional[date] = None) -> Dict[s
     result: Dict[str, Any] = {
         "birthday": {"created": 0, "reused": 0, "failed": 0},
         "sale": {"created": 0, "reused": 0, "failed": 0},
+        "warehouse": {"created": 0, "reused": 0, "failed": 0, "skipped": 0},
     }
 
     for target in _birthday_dates_with_customers(db, current):
@@ -563,4 +660,26 @@ def ensure_daily_banners(db: Session, *, today: Optional[date] = None) -> Dict[s
                 result["sale"]["created"] += 1
             except Exception:
                 result["sale"]["failed"] += 1
+
+    from app.services.warehouse_clearance import get_warehouse_clearance_settings
+
+    warehouse_enabled, warehouse_pct = get_warehouse_clearance_settings(db)
+    if not warehouse_enabled or warehouse_pct <= 0:
+        result["warehouse"]["skipped"] += 1
+    else:
+        existing = find_active_warehouse_asset(db, warehouse_pct)
+        if existing:
+            result["warehouse"]["reused"] += 1
+        else:
+            try:
+                generate_banner(
+                    db,
+                    kind="warehouse",
+                    day=0,
+                    month=0,
+                    discount_percent=warehouse_pct,
+                )
+                result["warehouse"]["created"] += 1
+            except Exception:
+                result["warehouse"]["failed"] += 1
     return result

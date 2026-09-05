@@ -4087,9 +4087,11 @@ export const adminSaleCalendarAPI = {
     }),
 };
 
+export type AdminMarketingBannerKind = 'sale' | 'birthday' | 'warehouse';
+
 export type AdminMarketingBannerAsset = {
   id: number;
-  kind: 'sale' | 'birthday';
+  kind: AdminMarketingBannerKind;
   campaign_key: string;
   date_key: string;
   discount_percent: number;
@@ -4109,11 +4111,16 @@ export type AdminMarketingBannerAsset = {
 };
 
 export const adminMarketingBannerAPI = {
-  list: (kind?: 'sale' | 'birthday') =>
+  list: (kind?: AdminMarketingBannerKind) =>
     fetchAdmin<{ items: AdminMarketingBannerAsset[] }>(
       `/marketing-banners/admin/assets${kind ? `?kind=${kind}` : ''}`,
     ),
-  regenerate: (data: { kind: 'sale' | 'birthday'; day: number; month: number }) =>
+  regenerate: (data: {
+    kind: AdminMarketingBannerKind;
+    day?: number;
+    month?: number;
+    discount_percent?: number;
+  }) =>
     fetchAdmin<{ accepted: boolean; message: string }>('/marketing-banners/admin/regenerate', {
       method: 'POST',
       body: JSON.stringify(data),

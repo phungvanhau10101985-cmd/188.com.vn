@@ -5,17 +5,26 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   adminMarketingBannerAPI,
   type AdminMarketingBannerAsset,
+  type AdminMarketingBannerKind,
 } from '@/lib/admin-api';
+import { notifyWarehouseBannersChanged, WAREHOUSE_BANNER_SYNC_EVENT } from '@/lib/warehouse-banner-sync';
 
 function defaultDateKey() {
   const now = new Date();
   return `${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
+function kindLabel(kind: AdminMarketingBannerKind | string) {
+  if (kind === 'birthday') return 'Sinh nhật';
+  if (kind === 'warehouse') return 'Sale kho';
+  return 'Sale';
+}
+
 export default function MarketingBannerManager() {
   const [items, setItems] = useState<AdminMarketingBannerAsset[]>([]);
-  const [kind, setKind] = useState<'sale' | 'birthday'>('birthday');
+  const [kind, setKind] = useState<AdminMarketingBannerKind>('birthday');
   const [dateKey, setDateKey] = useState(defaultDateKey);
+  const [warehousePercent, setWarehousePercent] = useState('30');
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +45,14 @@ export default function MarketingBannerManager() {
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 15000);
-    return () => window.clearInterval(timer);
+    const onSync = () => {
+      void load();
+    };
+    window.addEventListener(WAREHOUSE_BANNER_SYNC_EVENT, onSync);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener(WAREHOUSE_BANNER_SYNC_EVENT, onSync);
+    };
   }, [load]);
 
   const grouped = useMemo(() => {
@@ -49,24 +65,41 @@ export default function MarketingBannerManager() {
   }, [items]);
 
   const queueRegenerate = async (
-    nextKind: 'sale' | 'birthday',
-    nextDateKey: string,
+    nextKind: AdminMarketingBannerKind,
+    nextDateKey?: string,
+    nextPercent?: number,
   ) => {
-    const [month, day] = nextDateKey.split('-').map(Number);
-    if (!month || !day) {
-      setError('Ngày-tháng không hợp lệ.');
-      return;
-    }
     setWorking(true);
     setError(null);
     setMessage(null);
     try {
-      const response = await adminMarketingBannerAPI.regenerate({
-        kind: nextKind,
-        day,
-        month,
-      });
-      setMessage(response.message);
+      if (nextKind === 'warehouse') {
+        const pct = Number(nextPercent);
+        if (!Number.isFinite(pct) || pct <= 0 || pct > 80) {
+          setError('Giảm giá kho phải từ 0.5–80%.');
+          setWorking(false);
+          return;
+        }
+        const response = await adminMarketingBannerAPI.regenerate({
+          kind: 'warehouse',
+          discount_percent: pct,
+        });
+        setMessage(response.message);
+        notifyWarehouseBannersChanged();
+      } else {
+        const [month, day] = (nextDateKey || '').split('-').map(Number);
+        if (!month || !day) {
+          setError('Ngày-tháng không hợp lệ.');
+          setWorking(false);
+          return;
+        }
+        const response = await adminMarketingBannerAPI.regenerate({
+          kind: nextKind,
+          day,
+          month,
+        });
+        setMessage(response.message);
+      }
       window.setTimeout(() => void load(), 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể tạo lại banner.');
@@ -92,10 +125,11 @@ export default function MarketingBannerManager() {
   return (
     <section id="ai-banners" className="mt-8 space-y-5 rounded-xl border border-orange-200 bg-white p-6">
       <div>
-        <h2 className="text-lg font-bold text-gray-900">Banner AI sale và sinh nhật</h2>
+        <h2 className="text-lg font-bold text-gray-900">Banner AI sale, sinh nhật và kho</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Nano Banana Pro tạo một ảnh 21:9 dùng nguyên vẹn trên desktop và mobile. Ảnh mới tự
-          chạy; nếu chưa đẹp, tạo lại hoặc quay về phiên bản cũ.
+          Nano Banana Pro tạo một ảnh 21:9 dùng nguyên vẹn trên desktop và mobile. Slider trang
+          chủ ưu tiên CMSN, rồi sale ngày trùng tháng, rồi sale kho. Ảnh sale kho được lưu theo
+          từng mức % để dùng lại.
         </p>
       </div>
 
@@ -117,7 +151,7 @@ export default function MarketingBannerManager() {
         <select
           value={kind}
           onChange={(event) => {
-            const nextKind = event.target.value as 'sale' | 'birthday';
+            const nextKind = event.target.value as AdminMarketingBannerKind;
             setKind(nextKind);
             if (nextKind === 'sale') {
               const month = dateKey.slice(0, 2);
@@ -129,24 +163,44 @@ export default function MarketingBannerManager() {
         >
           <option value="birthday">Sinh nhật</option>
           <option value="sale">Sale trùng ngày-tháng</option>
+          <option value="warehouse">Sale kho</option>
         </select>
-        <input
-          type="text"
-          inputMode="numeric"
-          value={dateKey}
-          onChange={(event) => setDateKey(event.target.value)}
-          placeholder="MM-DD"
-          pattern="[0-1][0-9]-[0-3][0-9]"
-          className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm"
-          aria-label="Ngày tháng dạng MM-DD"
-        />
+        {kind === 'warehouse' ? (
+          <input
+            type="number"
+            min={0.5}
+            max={80}
+            step={0.5}
+            value={warehousePercent}
+            onChange={(event) => setWarehousePercent(event.target.value)}
+            className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm"
+            aria-label="Giảm giá kho (%)"
+          />
+        ) : (
+          <input
+            type="text"
+            inputMode="numeric"
+            value={dateKey}
+            onChange={(event) => setDateKey(event.target.value)}
+            placeholder="MM-DD"
+            pattern="[0-1][0-9]-[0-3][0-9]"
+            className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm"
+            aria-label="Ngày tháng dạng MM-DD"
+          />
+        )}
         <button
           type="button"
           disabled={working}
-          onClick={() => void queueRegenerate(kind, dateKey)}
+          onClick={() =>
+            void queueRegenerate(
+              kind,
+              dateKey,
+              kind === 'warehouse' ? Number(warehousePercent) : undefined,
+            )
+          }
           className="rounded-lg bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700 disabled:opacity-50"
         >
-          {working ? 'Đang xử lý…' : 'Tạo ảnh cho ngày này'}
+          {working ? 'Đang xử lý…' : kind === 'warehouse' ? 'Tạo ảnh cho mức % này' : 'Tạo ảnh cho ngày này'}
         </button>
       </div>
 
@@ -154,8 +208,7 @@ export default function MarketingBannerManager() {
         <div className="aspect-[21/9] animate-pulse rounded-lg bg-gray-100" aria-label="Đang tải banner" />
       ) : grouped.length === 0 ? (
         <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500">
-          Chưa có banner. Cron hằng ngày sẽ tạo ảnh khi có khách trong tuần sinh nhật hoặc sắp
-          đến ngày sale.
+          Chưa có banner. Cron hằng ngày tạo ảnh CMSN/sale; lưu % kho sẽ tạo banner sale kho.
         </div>
       ) : (
         <div className="space-y-5">
@@ -166,7 +219,8 @@ export default function MarketingBannerManager() {
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold text-gray-900">
-                      {current.kind === 'birthday' ? 'Sinh nhật' : 'Sale'} {current.date_key} · giảm{' '}
+                      {kindLabel(current.kind)}
+                      {current.kind === 'warehouse' ? '' : ` ${current.date_key}`} · giảm{' '}
                       {current.discount_percent}%
                     </p>
                     <p className="text-xs text-gray-500">
@@ -176,7 +230,13 @@ export default function MarketingBannerManager() {
                   <button
                     type="button"
                     disabled={working}
-                    onClick={() => void queueRegenerate(current.kind, current.date_key)}
+                    onClick={() =>
+                      void queueRegenerate(
+                        current.kind,
+                        current.date_key,
+                        current.kind === 'warehouse' ? current.discount_percent : undefined,
+                      )
+                    }
                     className="rounded-lg border border-orange-300 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50"
                   >
                     Tạo lại

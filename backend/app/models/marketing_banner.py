@@ -34,7 +34,7 @@ class MarketingBannerAsset(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    kind = Column(String(20), nullable=False, index=True)  # sale | birthday
+    kind = Column(String(20), nullable=False, index=True)  # sale | birthday | warehouse
     campaign_key = Column(String(100), nullable=False, index=True)
     date_key = Column(String(5), nullable=False, index=True)  # MM-DD
     discount_percent = Column(Numeric(5, 2), nullable=False)

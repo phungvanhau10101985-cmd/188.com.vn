@@ -87,7 +87,25 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
   const move = (direction: number) => {
     setActiveIndex((index) => (index + direction + items.length) % items.length);
   };
-  const destination = '/#san-pham-cung-shop';
+  const bannerHref = (item: MarketingBannerItem) =>
+    item.href
+    || (item.kind === 'warehouse' ? '/kho-sale' : '/#san-pham-cung-shop');
+
+  const bannerAriaLabel = (item: MarketingBannerItem) => {
+    if (item.kind === 'birthday') return `Nhận quà sinh nhật giảm ${item.discount_percent}%`;
+    if (item.kind === 'warehouse') return `Xem danh sách hàng kho giảm ${item.discount_percent}%`;
+    return `Xem sản phẩm sale giảm ${item.discount_percent}%`;
+  };
+
+  const bannerAlt = (item: MarketingBannerItem) => {
+    if (item.kind === 'birthday') {
+      return `Banner mừng sinh nhật ${item.date_key}, tặng ${item.discount_percent}%`;
+    }
+    if (item.kind === 'warehouse') {
+      return `Banner sale kho, giảm ${item.discount_percent}%`;
+    }
+    return `Banner sale ${item.date_key}, giảm ${item.discount_percent}%`;
+  };
 
   return (
     <section
@@ -118,7 +136,7 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
         {items.map((item, index) => (
           <Link
             key={item.id}
-            href={destination}
+            href={bannerHref(item)}
             tabIndex={index === activeIndex ? 0 : -1}
             aria-hidden={index !== activeIndex}
             className={`absolute inset-0 block transition-opacity duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
@@ -135,16 +153,12 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
                 campaign_key: item.campaign_key,
               });
             }}
-            aria-label={`${item.kind === 'birthday' ? 'Nhận quà sinh nhật' : 'Xem sản phẩm sale'} giảm ${item.discount_percent}%`}
+            aria-label={bannerAriaLabel(item)}
           >
             {/* Render sẵn cả hai ảnh để vuốt/chuyển không giữ nhầm ảnh cũ trong lúc tải. */}
             <img
               src={item.image_url}
-              alt={
-                item.kind === 'birthday'
-                  ? `Banner mừng sinh nhật ${item.date_key}, tặng ${item.discount_percent}%`
-                  : `Banner sale ${item.date_key}, giảm ${item.discount_percent}%`
-              }
+              alt={bannerAlt(item)}
               width={2100}
               height={900}
               className="block h-full w-full object-contain"

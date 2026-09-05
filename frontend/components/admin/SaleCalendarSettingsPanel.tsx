@@ -1,7 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { adminSaleCalendarAPI, type AdminSaleCalendarSettings } from '@/lib/admin-api';
+import {
+  adminMarketingBannerAPI,
+  adminSaleCalendarAPI,
+  type AdminMarketingBannerAsset,
+  type AdminSaleCalendarSettings,
+} from '@/lib/admin-api';
+import { notifyWarehouseBannersChanged, WAREHOUSE_BANNER_SYNC_EVENT } from '@/lib/warehouse-banner-sync';
 
 const MONTH_NAMES = [
   'Tháng 1',
@@ -32,6 +38,25 @@ function addDaysIso(isoDate: string, days: number): string {
   const d = new Date(`${isoDate}T12:00:00`);
   d.setDate(d.getDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+function sameWarehousePct(a: number, b: number) {
+  return Number(a) === Number(b);
+}
+
+function warehouseBannerForPct(items: AdminMarketingBannerAsset[], pct: number) {
+  const matching = items.filter((item) => sameWarehousePct(item.discount_percent, pct));
+  return matching.find((item) => item.is_active) ?? matching[0] ?? null;
+}
+
+function warehouseBannerReady(item: AdminMarketingBannerAsset | null, pct: number) {
+  return Boolean(
+    item
+    && item.is_active
+    && item.status === 'ready'
+    && sameWarehousePct(item.discount_percent, pct)
+    && item.image_url,
+  );
 }
 
 function formatDateVn(isoDate: string): string {
@@ -68,6 +93,9 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
   const [manualDiscount, setManualDiscount] = useState('6');
   const [warehouseEnabled, setWarehouseEnabled] = useState(true);
   const [warehouseDiscount, setWarehouseDiscount] = useState('20');
+  const [warehouseBanners, setWarehouseBanners] = useState<AdminMarketingBannerAsset[]>([]);
+  const [warehouseBannerStatus, setWarehouseBannerStatus] = useState<string | null>(null);
+  const [warehouseBannerWorking, setWarehouseBannerWorking] = useState(false);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -84,6 +112,21 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
       );
       setWarehouseEnabled(res.warehouse_clearance_enabled !== false);
       setWarehouseDiscount(String(res.warehouse_clearance_discount_percent ?? 20));
+      try {
+        const banners = await adminMarketingBannerAPI.list('warehouse');
+        const items = banners.items ?? [];
+        setWarehouseBanners(items);
+        const pct = Number(res.warehouse_clearance_discount_percent ?? 20);
+        const enabled = res.warehouse_clearance_enabled !== false;
+        const match = warehouseBannerForPct(items, pct);
+        if (!enabled || pct <= 0) {
+          setWarehouseBannerStatus(null);
+        } else if (warehouseBannerReady(match, pct)) {
+          setWarehouseBannerStatus(`Đang dùng banner sale kho ${pct}%.`);
+        }
+      } catch {
+        setWarehouseBanners([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không tải được cấu hình sale');
     } finally {
@@ -94,6 +137,16 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const onSync = () => {
+      void adminMarketingBannerAPI.list('warehouse').then((banners) => {
+        setWarehouseBanners(banners.items ?? []);
+      }).catch(() => undefined);
+    };
+    window.addEventListener(WAREHOUSE_BANNER_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(WAREHOUSE_BANNER_SYNC_EVENT, onSync);
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -113,6 +166,29 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
     }
   };
 
+  const refreshWarehouseBanners = async () => {
+    const banners = await adminMarketingBannerAPI.list('warehouse');
+    setWarehouseBanners(banners.items ?? []);
+    notifyWarehouseBannersChanged();
+    return banners.items ?? [];
+  };
+
+  const pollWarehouseBanner = (pct: number, attempt = 0) => {
+    window.setTimeout(() => {
+      void refreshWarehouseBanners()
+        .then((items) => {
+          if (warehouseBannerReady(warehouseBannerForPct(items, pct), pct)) {
+            setWarehouseBannerStatus(`Đã có banner sale kho ${pct}%. Bấm Áp dụng để hiện trên trang chủ.`);
+            return;
+          }
+          if (attempt < 5) pollWarehouseBanner(pct, attempt + 1);
+        })
+        .catch(() => {
+          if (attempt < 5) pollWarehouseBanner(pct, attempt + 1);
+        });
+    }, 8000);
+  };
+
   const saveWarehouseClearance = async () => {
     const pct = Number(warehouseDiscount);
     if (!Number.isFinite(pct) || pct < 0 || pct > 80) {
@@ -129,9 +205,77 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
       setData(res);
       setWarehouseEnabled(res.warehouse_clearance_enabled !== false);
       setWarehouseDiscount(String(res.warehouse_clearance_discount_percent ?? pct));
-      showToast('Đã lưu cài đặt hàng kho thanh lý');
+      const savedEnabled = res.warehouse_clearance_enabled !== false;
+      const savedPct = Number(res.warehouse_clearance_discount_percent ?? pct);
+      if (!savedEnabled || savedPct <= 0) {
+        setWarehouseBannerStatus(null);
+        showToast(savedPct <= 0 ? 'Đã lưu. Banner sale kho ẩn vì giảm 0%.' : 'Đã lưu. Banner sale kho đã ẩn.');
+      } else {
+        const items = await refreshWarehouseBanners().catch(() => warehouseBanners);
+        if (warehouseBannerReady(warehouseBannerForPct(items, savedPct), savedPct)) {
+          setWarehouseBannerStatus(`Đang dùng banner sale kho ${savedPct}%.`);
+          showToast(`Đã lưu cài đặt kho ${savedPct}%.`);
+        } else {
+          setWarehouseBannerStatus(`Đã lưu ${savedPct}%. Chưa có ảnh — bấm Tạo banner sale.`);
+          showToast(`Đã lưu. Chưa có banner ${savedPct}%.`);
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không lưu được cài đặt kho thanh lý');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const createWarehouseBanner = async () => {
+    const pct = Number(warehouseDiscount);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 80) {
+      setError('Tạo banner sale kho cần mức giảm từ 0.5–80%.');
+      return;
+    }
+    setWarehouseBannerWorking(true);
+    setError(null);
+    try {
+      const response = await adminMarketingBannerAPI.regenerate({
+        kind: 'warehouse',
+        discount_percent: pct,
+      });
+      setWarehouseBannerStatus(response.message || `Đang tạo banner sale kho ${pct}%…`);
+      showToast(response.message || `Đang tạo banner sale kho ${pct}%`);
+      notifyWarehouseBannersChanged();
+      pollWarehouseBanner(pct);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không tạo được banner sale kho');
+    } finally {
+      setWarehouseBannerWorking(false);
+    }
+  };
+
+  const applyWarehouseBanner = async () => {
+    const pct = Number(warehouseDiscount);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 80) {
+      setError('Áp dụng banner sale kho cần mức giảm từ 0.5–80%.');
+      return;
+    }
+    const match = warehouseBannerForPct(warehouseBanners, pct);
+    if (!warehouseBannerReady(match, pct)) {
+      setError(`Chưa có ảnh banner sale kho ${pct}%. Hãy tạo banner trước.`);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await adminSaleCalendarAPI.updateSettings({
+        warehouse_clearance_enabled: true,
+        warehouse_clearance_discount_percent: pct,
+      });
+      setData(res);
+      setWarehouseEnabled(true);
+      setWarehouseDiscount(String(res.warehouse_clearance_discount_percent ?? pct));
+      setWarehouseBannerStatus(`Đang dùng banner sale kho ${pct}%.`);
+      showToast(`Đã áp dụng banner sale kho ${pct}%.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không áp dụng được banner sale kho');
     } finally {
       setSaving(false);
     }
@@ -276,6 +420,12 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
 
   if (!data) return null;
 
+  const typedWarehousePct = Number(warehouseDiscount);
+  const typedWarehouseBanner = Number.isFinite(typedWarehousePct)
+    ? warehouseBannerForPct(warehouseBanners, typedWarehousePct)
+    : null;
+  const typedWarehouseReady = warehouseBannerReady(typedWarehouseBanner, typedWarehousePct);
+  const typedWarehouseGenerating = typedWarehouseBanner?.status === 'generating';
   const current = data.current;
   const enabledMonthCount = data.month_rules.filter((r) => r.enabled).length;
   const customTimeline = data.scheduled_sale_date
@@ -544,6 +694,8 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
           <p className="text-xs text-gray-500 mt-1">
             Áp dụng cho sản phẩm import id có dấu «/» (vd. HN256/XL). Một mức % chung — hiển thị trên block
             «Thanh lý trong kho» ở trang sản phẩm (hoặc giá trực tiếp nếu chưa có SP gốc). Không cộng sale ngày trùng tháng.
+            Nhập %: chưa có ảnh thì bấm Tạo banner sale (ảnh hiện luôn ở mục Banner AI bên dưới); đã có ảnh thì bấm Áp dụng.
+            Slider trang chủ hiện banner đang áp dụng, trừ khi 0% hoặc tắt.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -566,7 +718,7 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
               step={0.5}
               className="w-24 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
               value={warehouseDiscount}
-              disabled={saving}
+              disabled={saving || warehouseBannerWorking}
               onChange={(e) => setWarehouseDiscount(e.target.value)}
             />
           </div>
@@ -578,7 +730,90 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
           >
             Lưu cài đặt kho
           </button>
+          {typedWarehousePct > 0 && typedWarehousePct <= 80 ? (
+            typedWarehouseReady ? (
+              <button
+                type="button"
+                disabled={saving || warehouseBannerWorking}
+                onClick={() => void applyWarehouseBanner()}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
+              >
+                Áp dụng
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={saving || warehouseBannerWorking || typedWarehouseGenerating}
+                onClick={() => void createWarehouseBanner()}
+                className="px-4 py-2 rounded-lg bg-orange-600 text-white text-sm font-medium hover:bg-orange-700 disabled:opacity-60"
+              >
+                {warehouseBannerWorking || typedWarehouseGenerating
+                  ? 'Đang tạo banner…'
+                  : 'Tạo banner sale'}
+              </button>
+            )
+          ) : null}
         </div>
+        {warehouseBannerStatus ? (
+          <p className="text-xs text-violet-800">{warehouseBannerStatus}</p>
+        ) : null}
+        {warehouseBanners.filter((item) => item.is_active && item.image_url).length > 0 ? (
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-2">Ảnh banner đã lưu theo mức %</p>
+            <div className="flex flex-wrap gap-3">
+              {warehouseBanners
+                .filter((item) => item.is_active)
+                .map((item) => {
+                  const currentPct = Number(warehouseDiscount);
+                  const isCurrent = Number(item.discount_percent) === currentPct;
+                  return (
+                    <figure
+                      key={item.id}
+                      className={`w-40 overflow-hidden rounded-lg border bg-white ${
+                        isCurrent ? 'border-violet-500 ring-2 ring-violet-200' : 'border-gray-200'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="block w-full text-left"
+                        onClick={() => setWarehouseDiscount(String(item.discount_percent))}
+                      >
+                      {item.image_url ? (
+                        <img
+                          src={item.image_url}
+                          alt={`Banner sale kho giảm ${item.discount_percent}%`}
+                          className="h-16 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-16 items-center justify-center bg-gray-100 px-2 text-center text-[11px] text-gray-500">
+                          {item.status === 'generating' ? 'Đang tạo…' : 'Chưa có ảnh'}
+                        </div>
+                      )}
+                      <figcaption className="px-2 py-1 text-center text-[11px] text-gray-700">
+                        {item.discount_percent}%{isCurrent ? ' · đang chọn' : ''}
+                      </figcaption>
+                      </button>
+                    </figure>
+                  );
+                })}
+            </div>
+            <p className="mt-2 text-xs text-gray-500">
+              Bấm vào banner trên trang chủ sẽ mở{' '}
+              <a href="/kho-sale" className="font-medium text-violet-700 underline">
+                danh sách hàng kho
+              </a>
+              . Tạo lại ảnh tại{' '}
+              <a href="#ai-banners" className="font-medium text-violet-700 underline">
+                Banner AI
+              </a>
+              .
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">
+            Chưa có ảnh sale kho. Nhập % lớn hơn 0 rồi bấm Tạo banner sale — ảnh sẽ hiện ở mục Banner AI bên dưới.
+          </p>
+        )}
       </div>
 
       <div className={`overflow-hidden rounded-xl border border-gray-200 ${embedded ? 'bg-white' : 'bg-white'}`}>

@@ -25,7 +25,7 @@ export interface SiteSaleCalendarState {
 
 export interface MarketingBannerItem {
   id: number;
-  kind: 'sale' | 'birthday';
+  kind: 'sale' | 'birthday' | 'warehouse';
   campaign_key: string;
   date_key: string;
   discount_percent: number;
@@ -33,6 +33,7 @@ export interface MarketingBannerItem {
   aspect_ratio: string;
   event_date?: string | null;
   greeting?: string | null;
+  href?: string;
   version: number;
 }
 

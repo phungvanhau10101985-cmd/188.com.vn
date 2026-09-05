@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class MarketingBannerItem(BaseModel):
     id: int
-    kind: Literal["sale", "birthday"]
+    kind: Literal["sale", "birthday", "warehouse"]
     campaign_key: str
     date_key: str
     discount_percent: float
@@ -13,6 +13,7 @@ class MarketingBannerItem(BaseModel):
     aspect_ratio: str = "21:9"
     event_date: Optional[str] = None
     greeting: Optional[str] = None
+    href: str = "/#san-pham-cung-shop"
     version: int
 
 
@@ -46,6 +47,7 @@ class MarketingBannerAdminListResponse(BaseModel):
 
 
 class MarketingBannerRegenerateRequest(BaseModel):
-    kind: Literal["sale", "birthday"]
-    day: int = Field(..., ge=1, le=31)
-    month: int = Field(..., ge=1, le=12)
+    kind: Literal["sale", "birthday", "warehouse"]
+    day: Optional[int] = Field(None, ge=1, le=31)
+    month: Optional[int] = Field(None, ge=1, le=12)
+    discount_percent: Optional[float] = Field(None, ge=0.5, le=80)

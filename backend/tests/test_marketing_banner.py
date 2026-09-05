@@ -28,6 +28,9 @@ def test_campaign_key_reuses_month_day_and_changes_with_real_discount():
     assert svc.campaign_key("sale", 9, 9, 6) == "sale-09-09-p6"
     assert svc.campaign_key("sale", 9, 9, 8) == "sale-09-09-p8"
     assert svc.campaign_key("birthday", 1, 2, 10) == "birthday-02-01-p10"
+    assert svc.campaign_key("warehouse", 0, 0, 30) == "warehouse-p30"
+    assert svc.campaign_key("warehouse", 0, 0, 30.0) == "warehouse-p30"
+    assert svc.campaign_key("warehouse", 0, 0, 60) == "warehouse-p60"
 
 
 def test_prompts_lock_date_percent_and_single_21_9_image():
@@ -50,6 +53,20 @@ def test_prompts_lock_date_percent_and_single_21_9_image():
     assert "Deal vui đúng hẹn - chọn liền hôm nay" in sale
     assert "MỪNG SINH NHẬT 05/09 - TẶNG 10%" in birthday
     assert "Không ghi tên khách" in birthday
+    warehouse = svc.build_banner_prompt(
+        kind="warehouse",
+        day=0,
+        month=0,
+        discount_percent=30,
+        copy={
+            "verse": "Hàng kho giá sốc - chốt liền hôm nay",
+            "cta": "SĂN HÀNG KHO",
+            "art_direction": "lửa nóng cháy hàng",
+        },
+    )
+    assert "SALE KHO - GIẢM 30%" in warehouse
+    assert "Hàng kho giá sốc - chốt liền hôm nay" in warehouse
+    assert "SĂN HÀNG KHO" in warehouse
 
 
 def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
@@ -159,3 +176,42 @@ def test_birthday_test_prefers_existing_asset_inside_next_seven_days():
     assert found is not None
     assert found.id == row.id
     assert event_date == date(2026, 9, 9)
+
+
+def test_warehouse_banner_reuses_percent_and_creates_new_percent(monkeypatch):
+    db = _session()
+    raw = _png_bytes()
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Hàng kho giá sốc - chốt liền hôm nay",
+            "cta": "SĂN HÀNG KHO",
+            "art_direction": "lửa nóng cháy hàng",
+        },
+    )
+    monkeypatch.setattr(
+        svc,
+        "_upload_banner",
+        lambda data, *, kind, key, version: f"https://cdn.test/{key}/v{version}.png",
+    )
+    monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
+
+    first = svc.ensure_warehouse_banner(db, discount_percent=30)
+    reused = svc.ensure_warehouse_banner(db, discount_percent=30)
+    sixty = svc.ensure_warehouse_banner(db, discount_percent=60)
+    hidden = svc.ensure_warehouse_banner(db, discount_percent=0)
+
+    assert first is not None
+    assert reused is not None
+    assert sixty is not None
+    assert reused.id == first.id
+    assert sixty.id != first.id
+    assert first.campaign_key == "warehouse-p30"
+    assert sixty.campaign_key == "warehouse-p60"
+    assert first.date_key == "kho"
+    assert "SALE KHO - GIẢM 30%" in first.prompt
+    assert "SALE KHO - GIẢM 60%" in sixty.prompt
+    assert hidden is None
+    assert svc.find_active_warehouse_asset(db, 30).id == first.id

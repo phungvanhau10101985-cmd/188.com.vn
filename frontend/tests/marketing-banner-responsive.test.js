@@ -21,8 +21,10 @@ describe('marketing banner responsive contract', () => {
     );
   });
 
-  test('routes both campaigns to the age and gender recommendation group', () => {
-    expect(component).toContain("const destination = '/#san-pham-cung-shop'");
+  test('routes birthday and sale to recommendations, warehouse to kho-sale', () => {
+    expect(component).toContain('/#san-pham-cung-shop');
+    expect(component).toContain('/kho-sale');
+    expect(component).toContain("item.kind === 'warehouse'");
     expect(component).not.toContain('/?category=deal');
     expect(component).not.toContain("const destination = '/kho-sale'");
   });

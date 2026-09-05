@@ -35,6 +35,7 @@ def _public_item(
     event_date: str | None = None,
     greeting: str | None = None,
 ) -> MarketingBannerItem:
+    href = "/kho-sale" if row.kind == "warehouse" else "/#san-pham-cung-shop"
     return MarketingBannerItem(
         id=row.id,
         kind=row.kind,
@@ -45,6 +46,7 @@ def _public_item(
         aspect_ratio=row.aspect_ratio,
         event_date=event_date,
         greeting=greeting,
+        href=href,
         version=row.version,
     )
 
@@ -110,6 +112,14 @@ def current_marketing_banners(
             items.append(
                 _public_item(sale_asset, event_date=sale.event_date.isoformat())
             )
+
+    from app.services.warehouse_clearance import get_warehouse_clearance_settings
+
+    warehouse_enabled, warehouse_pct = get_warehouse_clearance_settings(db)
+    if warehouse_enabled and warehouse_pct > 0:
+        warehouse_asset = banner_svc.find_active_warehouse_asset(db, warehouse_pct)
+        if warehouse_asset and warehouse_asset.image_url:
+            items.append(_public_item(warehouse_asset))
     return MarketingBannerCurrentResponse(items=items)
 
 
@@ -119,7 +129,7 @@ def _admin_item(row: MarketingBannerAsset) -> MarketingBannerAdminItem:
 
 @router.get("/admin/assets", response_model=MarketingBannerAdminListResponse)
 def admin_list_banner_assets(
-    kind: str | None = Query(default=None, pattern="^(sale|birthday)$"),
+    kind: str | None = Query(default=None, pattern="^(sale|birthday|warehouse)$"),
     limit: int = Query(default=80, ge=1, le=300),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("promotions", need="view")),
@@ -172,12 +182,21 @@ def admin_regenerate_banner(
     _: AdminUser = Depends(require_module_permission("promotions", need="update")),
 ):
     try:
-        date(2000, payload.month, payload.day)
-        discount = (
-            float(BIRTHDAY_DISCOUNT_PERCENT)
-            if payload.kind == "birthday"
-            else _sale_percent_for_date(db, payload.day, payload.month)
-        )
+        if payload.kind == "warehouse":
+            discount = float(payload.discount_percent or 0)
+            if discount <= 0:
+                raise ValueError("Cần nhập phần trăm giảm giá kho lớn hơn 0.")
+            day, month = 0, 0
+        else:
+            if payload.day is None or payload.month is None:
+                raise ValueError("Cần chọn ngày-tháng cho banner này.")
+            date(2000, payload.month, payload.day)
+            day, month = payload.day, payload.month
+            discount = (
+                float(BIRTHDAY_DISCOUNT_PERCENT)
+                if payload.kind == "birthday"
+                else _sale_percent_for_date(db, payload.day, payload.month)
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -188,8 +207,8 @@ def admin_regenerate_banner(
             MarketingBannerAsset.campaign_key
             == banner_svc.campaign_key(
                 payload.kind,
-                payload.day,
-                payload.month,
+                day,
+                month,
                 discount,
             ),
             MarketingBannerAsset.status == "generating",
@@ -202,10 +221,15 @@ def admin_regenerate_banner(
     background_tasks.add_task(
         _generate_in_background,
         payload.kind,
-        payload.day,
-        payload.month,
+        day,
+        month,
         discount,
     )
+    if payload.kind == "warehouse":
+        return {
+            "accepted": True,
+            "message": f"Đã bắt đầu tạo banner sale kho giảm {discount:g}%.",
+        }
     return {"accepted": True, "message": "Đã bắt đầu tạo lại banner."}
 
 
