@@ -18,6 +18,8 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
   const [error, setError] = useState(false);
   const [paused, setPaused] = useState(false);
   const viewedCampaign = useRef<string | null>(null);
+  const touchStartX = useRef<number | null>(null);
+  const didSwipe = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -95,34 +97,66 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
       onMouseLeave={() => setPaused(false)}
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
+      onTouchStart={(event) => {
+        touchStartX.current = event.touches[0]?.clientX ?? null;
+        didSwipe.current = false;
+        setPaused(true);
+      }}
+      onTouchEnd={(event) => {
+        const start = touchStartX.current;
+        const end = event.changedTouches[0]?.clientX;
+        touchStartX.current = null;
+        setPaused(false);
+        if (start == null || end == null || items.length < 2) return;
+        const distance = end - start;
+        if (Math.abs(distance) < 40) return;
+        didSwipe.current = true;
+        move(distance < 0 ? 1 : -1);
+      }}
     >
-      <Link
-        href={destination}
-        className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
-        onClick={() =>
-          trackEvent('marketing_banner_click', {
-            kind: active.kind,
-            campaign_key: active.campaign_key,
-          })
-        }
-        aria-label={`${active.kind === 'birthday' ? 'Nhận quà sinh nhật' : 'Xem sản phẩm sale'} giảm ${active.discount_percent}%`}
-      >
-        {/* Ảnh 21:9 dùng nguyên vẹn trên mọi viewport, không crop. */}
-        <img
-          src={active.image_url}
-          alt={
-            active.kind === 'birthday'
-              ? `Banner mừng sinh nhật ${active.date_key}, tặng ${active.discount_percent}%`
-              : `Banner sale ${active.date_key}, giảm ${active.discount_percent}%`
-          }
-          width={2100}
-          height={900}
-          className="block h-auto w-full"
-          loading="eager"
-          decoding="async"
-          onError={() => setItems((current) => current.filter((item) => item.id !== active.id))}
-        />
-      </Link>
+      <div className="relative aspect-[21/9] w-full overflow-hidden">
+        {items.map((item, index) => (
+          <Link
+            key={item.id}
+            href={destination}
+            tabIndex={index === activeIndex ? 0 : -1}
+            aria-hidden={index !== activeIndex}
+            className={`absolute inset-0 block transition-opacity duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${
+              index === activeIndex ? 'z-[1] opacity-100' : 'pointer-events-none opacity-0'
+            }`}
+            onClick={(event) => {
+              if (didSwipe.current) {
+                event.preventDefault();
+                didSwipe.current = false;
+                return;
+              }
+              trackEvent('marketing_banner_click', {
+                kind: item.kind,
+                campaign_key: item.campaign_key,
+              });
+            }}
+            aria-label={`${item.kind === 'birthday' ? 'Nhận quà sinh nhật' : 'Xem sản phẩm sale'} giảm ${item.discount_percent}%`}
+          >
+            {/* Render sẵn cả hai ảnh để vuốt/chuyển không giữ nhầm ảnh cũ trong lúc tải. */}
+            <img
+              src={item.image_url}
+              alt={
+                item.kind === 'birthday'
+                  ? `Banner mừng sinh nhật ${item.date_key}, tặng ${item.discount_percent}%`
+                  : `Banner sale ${item.date_key}, giảm ${item.discount_percent}%`
+              }
+              width={2100}
+              height={900}
+              className="block h-full w-full object-contain"
+              loading="eager"
+              decoding="async"
+              onError={() =>
+                setItems((current) => current.filter((candidate) => candidate.id !== item.id))
+              }
+            />
+          </Link>
+        ))}
+      </div>
 
       {active.greeting ? (
         <p className="border-t border-orange-100 bg-orange-50/80 px-3 py-2 text-center text-sm font-semibold text-orange-900">
@@ -135,7 +169,7 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
           <button
             type="button"
             onClick={() => move(-1)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/90 px-2.5 py-1.5 text-lg text-orange-700 shadow hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+            className="absolute left-2 top-1/2 z-[2] -translate-y-1/2 rounded-full bg-white/90 px-2.5 py-1.5 text-lg text-orange-700 shadow hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
             aria-label="Banner trước"
           >
             ‹
@@ -143,15 +177,19 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
           <button
             type="button"
             onClick={() => move(1)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/90 px-2.5 py-1.5 text-lg text-orange-700 shadow hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+            className="absolute right-2 top-1/2 z-[2] -translate-y-1/2 rounded-full bg-white/90 px-2.5 py-1.5 text-lg text-orange-700 shadow hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
             aria-label="Banner tiếp theo"
           >
             ›
           </button>
-          <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1.5" aria-hidden>
+          <div className="absolute bottom-2 left-1/2 z-[2] flex -translate-x-1/2 gap-1.5">
             {items.map((item, index) => (
-              <span
+              <button
                 key={item.id}
+                type="button"
+                onClick={() => setActiveIndex(index)}
+                aria-label={`Xem banner ${index + 1}`}
+                aria-current={index === activeIndex ? 'true' : undefined}
                 className={`h-1.5 rounded-full shadow-sm transition-all ${
                   index === activeIndex ? 'w-5 bg-orange-600' : 'w-1.5 bg-white/90'
                 }`}

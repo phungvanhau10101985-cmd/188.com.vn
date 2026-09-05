@@ -8,7 +8,7 @@ describe('marketing banner responsive contract', () => {
   );
 
   test('uses one full-width image without cropping on every viewport', () => {
-    expect(component).toContain('className="block h-auto w-full"');
+    expect(component).toContain('className="block h-full w-full object-contain"');
     expect(component).not.toContain('object-cover');
     expect(component).not.toContain('<picture');
     expect(component).not.toContain('srcSet=');
@@ -32,5 +32,13 @@ describe('marketing banner responsive contract', () => {
     expect(component).toContain('if (error)');
     expect(component).toContain('if (!active) return null');
     expect(component).toContain('onError=');
+  });
+
+  test('preloads every slide and supports touch swiping', () => {
+    expect(component).toContain('{items.map((item, index) => (');
+    expect(component).toContain('loading="eager"');
+    expect(component).toContain('onTouchStart=');
+    expect(component).toContain('onTouchEnd=');
+    expect(component).toContain('Math.abs(distance) < 40');
   });
 });
