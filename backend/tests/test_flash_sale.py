@@ -11,13 +11,20 @@ from app.services.flash_sale import (
     flash_percent_for_product,
     pick_even_shop_products,
     resolve_flash_slot,
+    viewed_shop_l3_pairs,
 )
 from app.services.order_discounts import MAX_ORDER_DISCOUNT_PERCENT, apply_grand_discount_cap
 from decimal import Decimal
 
 
-def _p(id_, shop, subcategory="Áo"):
-    return SimpleNamespace(id=id_, shop_name_chinese=shop, subcategory=subcategory)
+def _p(id_, shop, subcategory="Áo", sub_subcategory="Áo thun"):
+    return SimpleNamespace(
+        id=id_,
+        shop_name_chinese=shop,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+        is_warehouse_clearance=False,
+    )
 
 
 def test_flash_percent_stays_in_8_to_12():
@@ -107,6 +114,29 @@ def test_flash_plus_birthday_still_caps_at_15_percent():
         list_subtotal * MAX_ORDER_DISCOUNT_PERCENT / Decimal("100")
     ) + Decimal("1")
     assert birthday <= Decimal("8000")
+
+
+def test_viewed_pairs_use_chinese_shop_and_level3_only():
+    viewed = [
+        _p(1, "Shop A", subcategory="Áo nam", sub_subcategory="Áo thun"),
+        _p(2, "Shop A", subcategory="Áo nam", sub_subcategory="Áo sơ mi"),
+        _p(3, "Shop B", subcategory="Quần", sub_subcategory="Áo thun"),
+        _p(4, "Shop A", subcategory="Áo nam", sub_subcategory="Áo thun"),
+        SimpleNamespace(
+            id=5,
+            shop_name_chinese="Shop C",
+            subcategory="Kho",
+            sub_subcategory="Áo thun",
+            is_warehouse_clearance=True,
+        ),
+        _p(6, "Shop D", subcategory="Áo nam", sub_subcategory=""),
+        _p(7, "", subcategory="Áo nam", sub_subcategory="Áo thun"),
+    ]
+    assert viewed_shop_l3_pairs(viewed) == [
+        ("shop a", "áo thun"),
+        ("shop a", "áo sơ mi"),
+        ("shop b", "áo thun"),
+    ]
 
 
 def test_flash_slot_is_ten_minutes_from_midnight_vn():

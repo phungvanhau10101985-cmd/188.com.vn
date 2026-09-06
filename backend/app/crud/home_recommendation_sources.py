@@ -69,7 +69,7 @@ def _resolve_guest_cohort_or_fallback(
     """
     Guest: ưu tiên cohort theo giới tính/năm sinh tự khai (nếu đã chọn), sau đó rơi về
     fallback "phổ biến" khi không có same-shop products (chưa xem gì, hoặc đã xem nhưng
-    toàn bộ SP thiếu `shop_name_chinese` nên same-shop rỗng). Không rơi về fallback khi đã có
+    thiếu cặp shop TQ + danh mục cấp 3 nên same-shop rỗng). Không rơi về fallback khi đã có
     same-shop products và không có hint — tránh lặp lại nội dung đã hiển thị.
     """
     try:

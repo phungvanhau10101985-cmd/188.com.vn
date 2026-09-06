@@ -1,5 +1,8 @@
 """
-Flash sale cá nhân hóa: shop Trung Quốc của 8 SP vừa xem, mỗi lượt 8–12 SP trộn đều.
+Flash sale cá nhân hóa:
+- Nhóm = SP cùng shop Trung Quốc VÀ cùng danh mục cấp 3 của 8 SP khách xem gần nhất.
+- Mỗi lượt quay tối đa 12 SP trong nhóm đó (trộn đều các cặp shop+cấp 3).
+- Không lấy SP cùng shop nhưng khác danh mục cấp 3.
 % giảm 8–12 (ổn định trong lượt ~10 phút). Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
 """
 from __future__ import annotations
@@ -12,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.product import Product
@@ -23,7 +26,6 @@ _VN_TZ = timezone(timedelta(hours=7))
 FLASH_SALE_EVENT_LABEL = "Flash sale"
 FLASH_SALE_KIND = "flash"
 FLASH_SALE_RECENT_VIEWS = 8
-FLASH_SALE_MIN_COUNT = 8
 FLASH_SALE_MAX_COUNT = 12
 FLASH_SALE_MIN_PERCENT = 8
 FLASH_SALE_MAX_PERCENT = 12
@@ -209,6 +211,37 @@ def _same_shop_key(product: Any) -> str:
     return (getattr(product, "shop_name_chinese", None) or "").strip().lower()
 
 
+def _level3_key(product: Any) -> str:
+    return (getattr(product, "sub_subcategory", None) or "").strip().lower()
+
+
+def _shop_l3_pair(product: Any) -> Optional[Tuple[str, str]]:
+    shop = _same_shop_key(product)
+    level3 = _level3_key(product)
+    if not shop or not level3:
+        return None
+    return shop, level3
+
+
+def _group_queue_key(shop: str, level3: str) -> str:
+    return f"{shop}||{level3}"
+
+
+def viewed_shop_l3_pairs(products_in_view_order: Iterable[Any]) -> List[Tuple[str, str]]:
+    """Cặp (shop TQ, danh mục cấp 3) từ 8 SP vừa xem — giữ thứ tự xem, bỏ trùng."""
+    pairs: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for product in products_in_view_order:
+        if product is None or _is_warehouse_row(product):
+            continue
+        pair = _shop_l3_pair(product)
+        if pair is None or pair in seen:
+            continue
+        seen.add(pair)
+        pairs.append(pair)
+    return pairs
+
+
 def _is_warehouse_row(product: Any) -> bool:
     return bool(getattr(product, "is_warehouse_clearance", False))
 
@@ -237,16 +270,22 @@ def _load_products_by_ids(db: Session, product_ids: Sequence[int]) -> Dict[int, 
     return {int(p.id): p for p in rows}
 
 
-def _candidate_products_for_shops(db: Session, shops_lower: Sequence[str]) -> List[Product]:
-    shops = [s for s in shops_lower if s]
-    if not shops:
+def _candidate_products_for_shop_l3_pairs(
+    db: Session, pairs: Sequence[Tuple[str, str]]
+) -> List[Product]:
+    clean = [(shop, level3) for shop, level3 in pairs if shop and level3]
+    if not clean:
         return []
     from app.services.warehouse_clearance import apply_catalog_visibility_filter
 
     shop_cn_norm = func.lower(func.trim(Product.shop_name_chinese))
+    l3_norm = func.lower(func.trim(Product.sub_subcategory))
+    pair_filters = [
+        and_(shop_cn_norm == shop, l3_norm == level3) for shop, level3 in clean
+    ]
     query = apply_catalog_visibility_filter(
         db.query(Product).filter(
-            shop_cn_norm.in_(list(shops)),
+            or_(*pair_filters),
             Product.is_active == True,  # noqa: E712
         )
     )
@@ -269,49 +308,27 @@ def _build_assignment(
         return FlashSaleAssignment(product_ids=[], percent_by_id={}, slot=slot)
 
     viewed = _load_products_by_ids(db, viewed_ids)
-    shop_order: List[str] = []
-    subs_by_shop: Dict[str, set[str]] = {}
-    for pid in viewed_ids:
-        product = viewed.get(pid)
-        if product is None or _is_warehouse_row(product):
-            continue
-        shop = _same_shop_key(product)
-        if not shop:
-            continue
-        if shop not in shop_order:
-            shop_order.append(shop)
-        sub = (getattr(product, "subcategory", None) or "").strip().lower()
-        if sub:
-            subs_by_shop.setdefault(shop, set()).add(sub)
-
-    if not shop_order:
+    pairs = viewed_shop_l3_pairs(viewed.get(pid) for pid in viewed_ids)
+    if not pairs:
         return FlashSaleAssignment(product_ids=[], percent_by_id={}, slot=slot)
 
-    candidates = _candidate_products_for_shops(db, shop_order)
-    shop_queues: Dict[str, List[Product]] = {shop: [] for shop in shop_order}
+    group_order = [_group_queue_key(shop, level3) for shop, level3 in pairs]
+    group_queues: Dict[str, List[Product]] = {key: [] for key in group_order}
+    allowed = set(pairs)
+    candidates = _candidate_products_for_shop_l3_pairs(db, pairs)
     for product in candidates:
         if _is_warehouse_row(product):
             continue
-        shop = _same_shop_key(product)
-        if shop not in shop_queues:
+        pair = _shop_l3_pair(product)
+        if pair is None or pair not in allowed:
             continue
-        shop_queues[shop].append(product)
-
-    for shop, rows in shop_queues.items():
-        preferred = subs_by_shop.get(shop) or set()
-        if not preferred:
-            continue
-        same = [p for p in rows if (p.subcategory or "").strip().lower() in preferred]
-        other = [p for p in rows if (p.subcategory or "").strip().lower() not in preferred]
-        shop_queues[shop] = same + other
+        group_queues[_group_queue_key(*pair)].append(product)
 
     identity = _identity_key(user_id, guest_session_id) or "anon"
     seed = _stable_seed(identity, slot.key)
-    available = sum(len(q) for q in shop_queues.values())
+    available = sum(len(q) for q in group_queues.values())
     target = min(FLASH_SALE_MAX_COUNT, available)
-    if target >= FLASH_SALE_MIN_COUNT:
-        target = min(FLASH_SALE_MAX_COUNT, max(FLASH_SALE_MIN_COUNT, target))
-    picked = pick_even_shop_products(shop_queues, shop_order, target=target, seed=seed)
+    picked = pick_even_shop_products(group_queues, group_order, target=target, seed=seed)
     product_ids = [int(p.id) for p in picked if getattr(p, "id", None) is not None]
     percent_by_id = {pid: flash_percent_for_product(pid, slot.key) for pid in product_ids}
     return FlashSaleAssignment(

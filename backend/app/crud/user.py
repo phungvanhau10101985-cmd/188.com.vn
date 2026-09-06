@@ -9,7 +9,7 @@ import logging
 import random
 from collections import defaultdict
 from sqlalchemy.orm import Session
-from sqlalchemy import extract, func, or_
+from sqlalchemy import and_, extract, func, or_
 from datetime import datetime, date
 from typing import List, Optional, Dict, Any, Tuple
 from app.models.user import (
@@ -556,7 +556,19 @@ SAME_SHOP_DOMINANT_MAX_PER_PAGE = 14
 
 
 def _same_shop_key(product: Product) -> str:
-    return (product.shop_name_chinese or "").strip().lower()
+    return (getattr(product, "shop_name_chinese", None) or "").strip().lower()
+
+
+def _level3_key(product: Product) -> str:
+    return (getattr(product, "sub_subcategory", None) or "").strip().lower()
+
+
+def _shop_l3_pair(product: Product) -> Optional[Tuple[str, str]]:
+    shop = _same_shop_key(product)
+    level3 = _level3_key(product)
+    if not shop or not level3:
+        return None
+    return shop, level3
 
 
 def _fetch_same_shop_view_history(
@@ -685,7 +697,7 @@ def _build_same_shop_weighted_cycle(
 
 def _balance_same_shop_products(
     candidates: List[Product],
-    subs_lower: set[str],
+    allowed_pairs: set[Tuple[str, str]],
     shops_lower: set[str],
     *,
     weighted_cycle: List[str],
@@ -700,22 +712,20 @@ def _balance_same_shop_products(
 ) -> tuple[List[Product], int]:
     """
     Round-robin theo weighted_cycle; mỗi trang: cap SP/shop (có thể override cho shop ưu tiên).
-    Trong từng shop: ưu tiên cùng subcategory rồi trộn ngẫu nhiên.
+    Chỉ giữ SP cùng shop TQ và cùng danh mục cấp 3 với 8 SP vừa xem — không fallback khác cấp 3.
     """
-    if not weighted_cycle:
+    if not weighted_cycle or not allowed_pairs:
         return [], 0
 
     shop_tier_same: Dict[str, List[Product]] = defaultdict(list)
-    shop_tier_only: Dict[str, List[Product]] = defaultdict(list)
     for product in candidates:
-        shop_cn = _same_shop_key(product)
+        pair = _shop_l3_pair(product)
+        if pair is None or pair not in allowed_pairs:
+            continue
+        shop_cn = pair[0]
         if shop_cn not in shops_lower:
             continue
-        sub = (product.subcategory or "").strip().lower()
-        if sub and sub in subs_lower:
-            shop_tier_same[shop_cn].append(product)
-        else:
-            shop_tier_only[shop_cn].append(product)
+        shop_tier_same[shop_cn].append(product)
 
     rng = random.Random(seed)
     shop_queues: Dict[str, List[Product]] = {}
@@ -723,12 +733,9 @@ def _balance_same_shop_products(
         if shop not in shops_lower:
             continue
         same = shop_tier_same[shop]
-        only = shop_tier_only[shop]
         rng.shuffle(same)
-        rng.shuffle(only)
-        combined = same + only
-        if combined:
-            shop_queues[shop] = combined
+        if same:
+            shop_queues[shop] = same
 
     if not shop_queues:
         return [], 0
@@ -796,12 +803,9 @@ def get_products_same_shop_as_recent_views(
     require_video: bool = False,
 ) -> tuple[List[Product], int, Optional[int]]:
     """
-    Sản phẩm cùng `shop_name_chinese` (cột AM) từ các shop trong lịch sử xem (tối đa 40 lượt).
-    8 SP gần nhất: dùng subcategory (AC) + phát hiện xem liên tiếp cùng shop.
-    Nếu 8 SP liên tiếp cùng shop: ưu tiên shop đó (~5/8 vòng round-robin, tối đa 14 SP/trang)
-    nhưng vẫn xen shop khác đã xem trước đó (tối đa 8 SP/shop/trang).
-    Trường hợp thường: round-robin theo tần suất trong toàn bộ lịch sử xem (tối đa 40 lượt),
-    tối đa 8 SP/shop/trang — shop chỉ xem ở lượt 9-40 vẫn được xen vào, không chỉ 8 lượt gần nhất.
+    Sản phẩm cùng shop Trung Quốc VÀ cùng danh mục cấp 3 với 8 SP khách xem gần nhất.
+    Không lấy cùng shop nhưng khác cấp 3. Trọng số round-robin vẫn xem lịch sử tối đa 40 lượt
+    cho các shop đã có trong 8 SP gần nhất (streak 8 cùng shop vẫn ưu tiên shop đó).
     """
     history_product_ids = _fetch_same_shop_view_history(
         db, user_id=user_id, guest_session_id=guest_session_id
@@ -813,24 +817,25 @@ def get_products_same_shop_as_recent_views(
 
     history_products = db.query(Product).filter(Product.id.in_(history_product_ids)).all()
     product_by_id = {p.id: p for p in history_products}
+    allowed_pairs: set[Tuple[str, str]] = set()
     shops_lower: set[str] = set()
-    subs_lower: set[str] = set()
     for pid in recent_product_ids:
         p = product_by_id.get(pid)
         if not p:
             continue
-        shop_cn = _same_shop_key(p)
-        if shop_cn:
-            shops_lower.add(shop_cn)
-        sub = (p.subcategory or "").strip()
-        if sub:
-            subs_lower.add(sub.lower())
+        pair = _shop_l3_pair(p)
+        if pair is None:
+            continue
+        allowed_pairs.add(pair)
+        shops_lower.add(pair[0])
 
-    history_shop_order = _history_shop_order(history_product_ids, product_by_id)
-    for shop in history_shop_order:
-        shops_lower.add(shop)
+    history_shop_order = [
+        shop
+        for shop in _history_shop_order(history_product_ids, product_by_id)
+        if shop in shops_lower
+    ]
 
-    if not shops_lower:
+    if not shops_lower or not allowed_pairs:
         return [], 0, None
 
     weighted_cycle, max_per_shop_overrides = _build_same_shop_weighted_cycle(
@@ -849,13 +854,17 @@ def get_products_same_shop_as_recent_views(
             shop_queue_order.append(shop)
 
     shop_cn_norm = func.lower(func.trim(Product.shop_name_chinese))
+    l3_norm = func.lower(func.trim(Product.sub_subcategory))
+    pair_filters = [
+        and_(shop_cn_norm == shop, l3_norm == level3) for shop, level3 in allowed_pairs
+    ]
     # Một query + LIMIT thay vì COUNT rồi .all() — cùng tập candidate (≤ SAME_SHOP_MAX_POOL).
     from app.services.warehouse_clearance import apply_catalog_visibility_filter
 
     candidates = (
         apply_catalog_visibility_filter(
             db.query(Product).filter(
-                shop_cn_norm.in_(list(shops_lower)),
+                or_(*pair_filters),
                 Product.is_active == True,  # noqa: E712
             )
         )
@@ -887,7 +896,7 @@ def get_products_same_shop_as_recent_views(
     candidate_total = len(candidates)
     page, total = _balance_same_shop_products(
         candidates,
-        subs_lower,
+        allowed_pairs,
         shops_lower,
         weighted_cycle=weighted_cycle,
         shop_queue_order=shop_queue_order,

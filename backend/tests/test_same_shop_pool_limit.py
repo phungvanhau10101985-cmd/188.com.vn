@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from app.crud.user import (
     SAME_SHOP_MAX_POOL,
     SAME_SHOP_STREAK_THRESHOLD,
+    _balance_same_shop_products,
     _build_same_shop_weighted_cycle,
 )
 
@@ -16,8 +17,13 @@ def test_same_shop_max_pool_has_headroom_above_known_max_shop_size():
     assert SAME_SHOP_MAX_POOL >= 1199 * 1.2
 
 
-def _product(id_, shop):
-    return SimpleNamespace(id=id_, shop_name_chinese=shop, subcategory=None)
+def _product(id_, shop, sub_subcategory="áo thun"):
+    return SimpleNamespace(
+        id=id_,
+        shop_name_chinese=shop,
+        subcategory=None,
+        sub_subcategory=sub_subcategory,
+    )
 
 
 def test_weighted_cycle_uses_full_history_not_just_recent_window():
@@ -79,3 +85,24 @@ def test_weighted_cycle_streak_still_uses_recent_window_only():
     )
     assert overrides.get("shop_a") is not None  # streak dominance override áp dụng
     assert "shop_b" in weighted_cycle  # vẫn xen shop khác đã xem trước đó
+
+
+def test_balance_keeps_only_same_shop_and_level3():
+    candidates = [
+        _product(1, "shop_a", "áo thun"),
+        _product(2, "shop_a", "quần short"),
+        _product(3, "shop_b", "áo thun"),
+        _product(4, "shop_a", "áo thun"),
+    ]
+    page, _ = _balance_same_shop_products(
+        candidates,
+        {("shop_a", "áo thun")},
+        {"shop_a"},
+        weighted_cycle=["shop_a"],
+        shop_queue_order=["shop_a"],
+        seed=1,
+        page_size=8,
+        offset=0,
+        limit=8,
+    )
+    assert {p.id for p in page} == {1, 4}
