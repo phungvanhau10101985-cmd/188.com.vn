@@ -35,7 +35,7 @@ export function mergeProductFlashSale(
   if (!flashById || isWarehouseClearanceProduct(product)) return product;
   if (productHasActiveFlash(product)) return product;
   const sale = flashById[product.id];
-  if (!isFlashSalePricing(sale) || (sale.percent ?? 0) <= 0) return product;
+  if (!sale || !isFlashSalePricing(sale) || (sale.percent ?? 0) <= 0) return product;
   const listPrice = Math.max(
     0,
     sale.list_price ?? product.original_price ?? product.price ?? 0,
