@@ -51,7 +51,7 @@ function buildById(products: Product[]): Record<number, SiteSaleProductPricing> 
   const byId: Record<number, SiteSaleProductPricing> = {};
   for (const row of products) {
     const sale = row.flash_sale || row.site_sale;
-    if (!row.id || !isFlashSalePricing(sale)) continue;
+    if (!row.id || !sale || !isFlashSalePricing(sale)) continue;
     byId[row.id] = sale;
   }
   return Object.keys(byId).length ? byId : EMPTY_FLASH_BY_ID;

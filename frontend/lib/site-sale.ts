@@ -11,7 +11,7 @@ import {
 /** Flash sale cá nhân hóa — không chồng sale lịch / không đụng hàng kho. */
 export function isFlashSalePricing(
   sale?: SiteSaleProductPricing | null,
-): sale is SiteSaleProductPricing {
+): boolean {
   if (!sale) return false;
   if (sale.kind === 'flash') return true;
   return (sale.event_label || '').trim().toLowerCase() === 'flash sale';
