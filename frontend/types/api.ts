@@ -9,6 +9,7 @@ export interface SiteSaleProductPricing {
   event_label?: string | null;
   event_date?: string | null;
   countdown_to?: string | null;
+  kind?: 'flash' | string;
 }
 
 export interface SiteSaleCalendarState {
@@ -82,6 +83,7 @@ export interface Product {
   updated_at?: string;
   original_price?: number;
   site_sale?: SiteSaleProductPricing;
+  flash_sale?: SiteSaleProductPricing;
   shop_name?: string;
   shop_id?: string;
   pro_lower_price?: string;
@@ -386,6 +388,15 @@ export interface HomeRecommendationBlockResponse {
   same_age_gender_cohort_mode: SameAgeGenderCohortMode;
   mixed_recommendation_products: Product[];
   cohort_badge_product_ids: number[];
+}
+
+/** API /user-behavior/products/flash-sale-block */
+export interface FlashSaleBlockResponse {
+  products: Product[];
+  countdown_to?: string | null;
+  slot_start_at?: string | null;
+  slot_end_at?: string | null;
+  slot_key?: string | null;
 }
 
 /** API GET /user-behavior/home/recommendation-snapshot */

@@ -17,10 +17,11 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
 import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
+import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
   NANO_AI_CTX_SOURCE_PRODUCT_PDP,
@@ -103,9 +104,14 @@ export default function ProductInfo({
   const canShowStickyBuy = canOrderAnyVariant(product);
   const birthdayDiscount = useBirthdayDiscount();
   const { state: siteSaleState } = useSiteSale();
+  const { byId: flashById } = useFlashSale();
   const productForPricing = useMemo(
-    () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
-    [product, siteSaleState],
+    () =>
+      mergeProductSiteSaleFromCalendar(
+        mergeProductFlashSale(product, flashById),
+        siteSaleState,
+      ),
+    [product, siteSaleState, flashById],
   );
   const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
     product.product_id,

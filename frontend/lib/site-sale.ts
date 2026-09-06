@@ -8,6 +8,55 @@ import {
   resolveWarehouseCartLineUnitPricing,
 } from '@/lib/warehouse-clearance';
 
+/** Flash sale cá nhân hóa — không chồng sale lịch / không đụng hàng kho. */
+export function isFlashSalePricing(
+  sale?: SiteSaleProductPricing | null,
+): boolean {
+  if (!sale) return false;
+  if (sale.kind === 'flash') return true;
+  return (sale.event_label || '').trim().toLowerCase() === 'flash sale';
+}
+
+function productHasActiveFlash(product: Product): boolean {
+  return (
+    isFlashSalePricing(product.flash_sale) ||
+    isFlashSalePricing(product.site_sale)
+  );
+}
+
+/**
+ * SSR/listing cache không có phiên khách — gắn flash từ block đã tải trên client.
+ * Hàng kho và SP đã có flash từ API giữ nguyên.
+ */
+export function mergeProductFlashSale(
+  product: Product,
+  flashById?: Record<number, SiteSaleProductPricing> | null,
+): Product {
+  if (!flashById || isWarehouseClearanceProduct(product)) return product;
+  if (productHasActiveFlash(product)) return product;
+  const sale = flashById[product.id];
+  if (!isFlashSalePricing(sale) || (sale.percent ?? 0) <= 0) return product;
+  const listPrice = Math.max(
+    0,
+    sale.list_price ?? product.original_price ?? product.price ?? 0,
+  );
+  const displayPrice = Math.max(0, sale.display_price ?? product.price ?? 0);
+  if (listPrice <= 0 || displayPrice <= 0) return product;
+  return {
+    ...product,
+    price: displayPrice,
+    original_price: listPrice,
+    site_sale: sale,
+    flash_sale: sale,
+  };
+}
+
+function cartLineHasActiveFlash(item: CartLinePricingInput): boolean {
+  if (isFlashSalePricing(item.site_sale)) return true;
+  const data = item.product_data as { flash_sale?: SiteSaleProductPricing } | undefined;
+  return isFlashSalePricing(data?.flash_sale);
+}
+
 type CartLinePricingInput = {
   product_price?: number;
   list_price?: number;
@@ -21,6 +70,7 @@ type CartLinePricingInput = {
     product_id?: string;
     is_warehouse_clearance?: boolean;
     warehouse_clearance_percent?: number;
+    flash_sale?: SiteSaleProductPricing;
   };
   quantity: number;
 };
@@ -101,6 +151,7 @@ export function mergeProductSiteSaleFromCalendar(
 ): Product {
   // Hàng kho thanh lý có giá riêng — không chồng Sale site (6/6, …) lên giá đã giảm kho.
   if (isWarehouseClearanceProduct(product)) return product;
+  if (productHasActiveFlash(product)) return product;
   if (!calendar?.enabled || !calendar.phase) return product;
 
   const existing = product.site_sale;
@@ -155,6 +206,7 @@ export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput
 ): T {
   if (isWarehouseCartLine(item)) return item;
   if (isGoogleDiscountCartLine(item)) return item;
+  if (cartLineHasActiveFlash(item)) return item;
   if (!calendar?.enabled || !calendar.phase) return item;
 
   const existing = item.site_sale;
@@ -283,6 +335,10 @@ export function sumCartLineClearanceSavings(items: CartLinePricingInput[]): numb
 export function siteSaleDateBadgeLabel(siteSale: SiteSaleProductPricing): string | null {
   const pct = siteSale.percent ?? 0;
   if (pct <= 0) return null;
+
+  if (isFlashSalePricing(siteSale)) {
+    return `FLASH -${pct}%`;
+  }
 
   if (siteSale.event_date) {
     const parts = siteSale.event_date.slice(0, 10).split('-').map(Number);

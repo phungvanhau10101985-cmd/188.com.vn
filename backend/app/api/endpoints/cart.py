@@ -61,6 +61,9 @@ def _cart_items_with_site_sale_pricing(
 
     sale_state = resolve_sale_calendar_state(db, user=user)
     wh_enabled, wh_pct = wh_clearance_svc.get_warehouse_clearance_settings(db)
+    from app.services.flash_sale import apply_flash_percent_to_price, get_flash_sale_assignment
+
+    flash_assignment = get_flash_sale_assignment(db, user_id=user.id, guest_session_id=None)
     total_price = 0.0
     cart_items_response: List[CartItemResponse] = []
     for item in items:
@@ -70,6 +73,7 @@ def _cart_items_with_site_sale_pricing(
         sellable: Optional[int] = None
         pd_raw = dict(resp.product_data or {})
         google_lock = read_google_discount_lock(pd_raw) if not is_wh else None
+        flash_pct = None
         if is_wh:
             from app.services.warehouse_stock import warehouse_sellable_qty
 
@@ -89,17 +93,27 @@ def _cart_items_with_site_sale_pricing(
             resp.original_price = list_for_compare if list_for_compare > line_unit else None
             resp.site_sale = None
         else:
-            pricing = apply_site_sale_to_price(base, sale_state)
+            pid = item.product.id if item.product is not None else None
+            flash_pct = flash_assignment.percent_for(pid)
+            if flash_pct:
+                pricing = apply_flash_percent_to_price(
+                    base, flash_pct, countdown_to=flash_assignment.slot.end_at
+                )
+            else:
+                pricing = apply_site_sale_to_price(base, sale_state)
             line_unit = float(pricing["display_price"])
             resp.product_price = line_unit
             resp.list_price = base if base > 0 else None
-            if sale_state.is_active and pricing.get("savings_amount", 0) > 0:
+            if pricing.get("phase") == "active" and pricing.get("savings_amount", 0) > 0:
+                resp.original_price = base
+            elif sale_state.is_active and pricing.get("savings_amount", 0) > 0:
                 resp.original_price = base
             resp.site_sale = {
                 **pricing,
-                "event_label": sale_state.event_label,
-                "event_date": sale_state.event_date.isoformat() if sale_state.event_date else None,
-                "countdown_to": sale_state.countdown_to.isoformat() if sale_state.countdown_to else None,
+                "event_label": pricing.get("event_label") or sale_state.event_label,
+                "event_date": sale_state.event_date.isoformat() if sale_state.event_date and not flash_pct else None,
+                "countdown_to": pricing.get("countdown_to")
+                or (sale_state.countdown_to.isoformat() if sale_state.countdown_to else None),
             }
         pd = dict(resp.product_data or {})
         if google_lock:
@@ -111,6 +125,9 @@ def _cart_items_with_site_sale_pricing(
         else:
             pd["list_price"] = base
             pd["price"] = line_unit
+        if flash_pct and not is_wh and not google_lock:
+            pd["flash_sale"] = dict(resp.site_sale or {})
+            pd["original_price"] = base
         if is_wh:
             pd["is_warehouse_clearance"] = True
             pd["warehouse_clearance_percent"] = wh_pct

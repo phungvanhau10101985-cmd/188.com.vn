@@ -60,9 +60,14 @@ export default function ProductPromoPriceBlock({
     if (!clientMounted || tickMs == null || !countdownTo) return '';
     const parts = formatCountdownParts(countdownTo, tickMs);
     if (!parts || parts.expired) return '';
-    const hms = `${String(parts.hours).padStart(2, '0')}:${String(parts.minutes).padStart(2, '0')}:${String(parts.seconds).padStart(2, '0')}`;
-    if (parts.days > 0) return `${parts.days} ngày ${hms}`;
-    return hms;
+    const mm = String(parts.minutes).padStart(2, '0');
+    const ss = String(parts.seconds).padStart(2, '0');
+    if (parts.days > 0) {
+      const hms = `${String(parts.hours).padStart(2, '0')}:${mm}:${ss}`;
+      return `${parts.days} ngày ${hms}`;
+    }
+    if (parts.hours <= 0) return `${mm}:${ss}`;
+    return `${String(parts.hours).padStart(2, '0')}:${mm}:${ss}`;
   }, [clientMounted, countdownTo, tickMs]);
 
   const qty = Math.max(1, quantity);

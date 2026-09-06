@@ -15,7 +15,8 @@ import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/component
 import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
-import { productForCatalogCardPricing, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductFlashSale, productForCatalogCardPricing, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import {
   canOrderAnyVariant,
@@ -142,9 +143,10 @@ function ProductCardPricePromo({
 function useProductCardPricing(product: Product) {
   const birthdayDiscount = useBirthdayDiscount();
   const { state: siteSaleState } = useSiteSale();
+  const { byId: flashById } = useFlashSale();
   const productForMainPricing = useMemo(
-    () => productForCatalogCardPricing(product, siteSaleState),
-    [product, siteSaleState],
+    () => productForCatalogCardPricing(mergeProductFlashSale(product, flashById), siteSaleState),
+    [product, siteSaleState, flashById],
   );
   const pricing = resolveProductDisplayPricing(
     productForMainPricing,

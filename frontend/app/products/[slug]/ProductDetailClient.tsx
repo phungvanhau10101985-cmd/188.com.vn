@@ -85,7 +85,6 @@ export default function ProductDetailClient({
   const [stickySearchTerm, setStickySearchTerm] = useState('');
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const menuCloseTimerRef = useRef<number | null>(null);
-  const prevClientAuthKeyRef = useRef<string | null>(null);
   const { addToCart, isLoading: cartLoading, getCartItemCount } = useCart();
   const [uiCartLoading, setUiCartLoading] = useState(false);
   useLayoutEffect(() => {
@@ -132,13 +131,6 @@ export default function ProductDetailClient({
 
   useEffect(() => {
     if (authLoading || !slug) return;
-    const authKey = `${isAuthenticated}:${user?.id ?? ''}`;
-    if (prevClientAuthKeyRef.current === null) {
-      prevClientAuthKeyRef.current = authKey;
-      return;
-    }
-    if (prevClientAuthKeyRef.current === authKey) return;
-    prevClientAuthKeyRef.current = authKey;
     let cancelled = false;
     apiClient
       .getProductBySlug(slug)

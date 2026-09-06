@@ -82,7 +82,7 @@ def _product_row_to_api_dict(product: Any, *, sale_state=None, db: Session | Non
             else:
                 out[col.key] = _json_safe_for_response(val)
         d = out
-    if sale_state is not None:
+    if sale_state is not None and not getattr(product, "is_warehouse_clearance", False):
         from app.services import sale_calendar as sale_calendar_svc
 
         sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
@@ -102,6 +102,9 @@ def _serialize_product_rows_for_api(db: Session, products: list, user: User | No
     for product in products:
         pairs.append((product, _product_row_to_api_dict(product, sale_state=sale_state, db=None)))
     enrich_listing_product_payloads_batched(db, pairs)
+    from app.services.flash_sale import enrich_product_payloads_with_flash_sale
+
+    enrich_product_payloads_with_flash_sale(db, pairs, user=user)
     return [payload for _row, payload in pairs]
 
 
@@ -340,6 +343,9 @@ def get_home_recommendation_block_endpoint(
     response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip() or None
     uid = current_user.id if current_user else None
+    from app.services.flash_sale import set_flash_sale_identity
+
+    set_flash_sale_identity(uid, sid)
     try:
         block = build_home_recommendation_block_rows(
             db,
@@ -366,6 +372,44 @@ def get_home_recommendation_block_endpoint(
             "same_age_gender_cohort_mode": "requires_login" if not uid else "popular_fallback",
             "mixed_recommendation_products": [],
             "cohort_badge_product_ids": [],
+        }
+
+
+@router.get("/products/flash-sale-block", response_model=dict)
+def get_flash_sale_block_endpoint(
+    response: Response,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
+):
+    """
+    Khối Flash sale trang chủ: shop Trung Quốc của 8 SP vừa xem,
+    8–12 SP trộn đều mỗi lượt (không tua hết shop này sang shop kia), giảm 8–12%.
+    Hàng kho thanh lý không vào nhóm và không đổi % kho.
+    """
+    response.headers["Cache-Control"] = "private, no-store"
+    sid = (x_guest_session_id or "").strip() or None
+    uid = current_user.id if current_user else None
+    from app.services.flash_sale import list_flash_sale_products, set_flash_sale_identity
+
+    set_flash_sale_identity(uid, sid)
+    try:
+        return list_flash_sale_products(
+            db,
+            user_id=uid,
+            guest_session_id=sid,
+            serialize_products=_serialize_product_rows_for_api,
+            user=current_user,
+        )
+    except Exception:
+        logger.exception("Failed to build flash sale block")
+        db.rollback()
+        return {
+            "products": [],
+            "countdown_to": None,
+            "slot_start_at": None,
+            "slot_end_at": None,
+            "slot_key": None,
         }
 
 

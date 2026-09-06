@@ -302,6 +302,9 @@ class Product(ProductBase):
 
     original_price: Optional[float] = Field(None, description="Giá gốc khi đang site sale")
     site_sale: Optional[Dict[str, Any]] = Field(None, description="Trạng thái sale ngày trùng tháng")
+    flash_sale: Optional[Dict[str, Any]] = Field(
+        None, description="Flash sale cá nhân hóa (shop 8 SP vừa xem, 8–12%/lượt)"
+    )
     source_oos: Optional[bool] = Field(None, description="Nguồn 1688/Taobao báo hết hàng")
     warehouse_variants: Optional[List[Dict[str, Any]]] = Field(
         None,

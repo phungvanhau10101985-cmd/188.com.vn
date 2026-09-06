@@ -19,6 +19,7 @@ const CategoryProductFilters = dynamic(() => import('@/components/CategoryProduc
 import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import MarketingBannerCarousel from '@/components/home/MarketingBannerCarousel';
 import HomeSectionErrorBoundary from '@/components/home/HomeSectionErrorBoundary';
+import HomeFlashSaleSection from '@/components/home/HomeFlashSaleSection';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
 import Button from '@/components/ui/Button';
@@ -1261,6 +1262,7 @@ export default function HomePageClient({
   const homeGridReveal = useLazyRevealList(filteredProducts, { initial: 12, step: 12 });
 
   const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+  const [flashSaleProducts, setFlashSaleProducts] = useState<Product[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1384,7 +1386,8 @@ export default function HomePageClient({
       products.find((p) => p.id === productId) ??
       sameShopProducts.find((p) => p.id === productId) ??
       displayedRecommendationProducts.find((p) => p.id === productId) ??
-      sameAgeGenderProducts.find((p) => p.id === productId);
+      sameAgeGenderProducts.find((p) => p.id === productId) ??
+      flashSaleProducts.find((p) => p.id === productId);
     const had = favoriteIds.has(productId);
     try {
       if (had) {
@@ -1459,6 +1462,11 @@ export default function HomePageClient({
               isAuthenticated={isAuthenticated}
               userGender={heroUserGender}
               initialHeroCategories={initialHeroCategories}
+            />
+            <HomeFlashSaleSection
+              onFavorite={handleFavorite}
+              favoriteIds={favoriteIds}
+              onProductsChange={setFlashSaleProducts}
             />
           </>
         )}

@@ -16,9 +16,14 @@ function formatLiveCountdown(parts: {
   minutes: number;
   seconds: number;
 }): string {
-  const hms = `${String(parts.hours).padStart(2, '0')}:${String(parts.minutes).padStart(2, '0')}:${String(parts.seconds).padStart(2, '0')}`;
-  if (parts.days > 0) return `${parts.days} ngày ${hms}`;
-  return hms;
+  const mm = String(parts.minutes).padStart(2, '0');
+  const ss = String(parts.seconds).padStart(2, '0');
+  if (parts.days > 0) {
+    const hms = `${String(parts.hours).padStart(2, '0')}:${mm}:${ss}`;
+    return `${parts.days} ngày ${hms}`;
+  }
+  if (parts.hours <= 0) return `${mm}:${ss}`;
+  return `${String(parts.hours).padStart(2, '0')}:${mm}:${ss}`;
 }
 
 function saleEventLabel(siteSale: SiteSaleProductPricing): string {

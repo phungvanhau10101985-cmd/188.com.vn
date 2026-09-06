@@ -32,6 +32,7 @@ from app.crud.product_category_size_guide import enrich_product_payloads_with_ca
 from app.models.admin import AdminUser
 from app.core.security import require_module_permission, require_module_permission_with_destructive_step_up, get_current_user_optional
 from app.models.user import User
+from app.services.flash_sale import set_flash_sale_identity
 from app.core.config import settings
 from app.crud import product_media_purge
 from app.services.source_stock_checker import (
@@ -372,6 +373,39 @@ def _product_to_response(
         raise HTTPException(status_code=404, detail="Product not found") from exc
 
 
+def _overlay_flash_sale_on_dicts(
+    db: Session,
+    products: Optional[List],
+    user: Optional[User],
+) -> None:
+    """Gắn flash sau cache listing — không ghi % cá nhân hóa vào cache dùng chung."""
+    if not products:
+        return
+    from app.services.flash_sale import enrich_product_payloads_with_flash_sale
+
+    pairs = [(None, row) for row in products if isinstance(row, dict)]
+    if pairs:
+        enrich_product_payloads_with_flash_sale(db, pairs, user=user)
+
+
+def _overlay_flash_sale_on_product(
+    db: Session,
+    result: Product,
+    user: Optional[User],
+) -> Product:
+    from app.services.flash_sale import apply_flash_sale_to_payload, get_flash_sale_assignment
+
+    payload = result.model_dump()
+    apply_flash_sale_to_payload(
+        payload,
+        get_flash_sale_assignment(db, user_id=user.id if user else None),
+        product_id=payload.get("id"),
+    )
+    if payload.get("flash_sale"):
+        return Product(**payload)
+    return result
+
+
 def _shuffle_cached_products_response(result: dict) -> dict:
     """
     Trả bản copy response với products đã shuffle để sort=random
@@ -398,11 +432,13 @@ def search_products(
     limit: int = Query(48, ge=1, le=100),
     is_active: Optional[bool] = True,
     redirect: int = Query(0, ge=0, le=1, description="Nếu 1, trả về Redirect 302 khi match danh mục"),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Tìm kiếm sản phẩm theo: tên, mã sản phẩm, danh mục (cấp 1/2/3), vật liệu, kiểu dáng, màu sắc, dịp, tính năng, size.
     Từ khóa rời rạc, không phân biệt hoa thường, tự chuẩn tắc.
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     # ====== ZERO-DEAD-END FLOW ======
     try:
         response.headers["Cache-Control"] = "public, max-age=60"
@@ -452,6 +488,7 @@ def search_products(
                     user=current_user,
                     include_warehouse_clearance=True,
                 )
+                _overlay_flash_sale_on_dicts(db, result.get("products"), current_user)
             return result
 
         # Stage 4: AI Recovery & Normalize
@@ -485,6 +522,7 @@ def search_products(
                         user=current_user,
                         include_warehouse_clearance=True,
                     )
+                    _overlay_flash_sale_on_dicts(db, result2.get("products"), current_user)
                 return result2
 
         # Stage 5: AI Category Suggestions (Safety Net)
@@ -678,9 +716,12 @@ def _read_products_list_impl(
             cached_full, skip, limit
         ):
             shuffle_page = sort_norm == "random"
-            return product_search_cache_crud.paginate_cached_search_response(
+            page = product_search_cache_crud.paginate_cached_search_response(
                 cached_full, skip, limit, shuffle_random=shuffle_page
             )
+            if not admin_list:
+                _overlay_flash_sale_on_dicts(db, page.get("products"), user)
+            return page
 
         beyond_list_cap = skip + limit > product_search_cache_crud.SEARCH_LIST_CACHE_MAX_PRODUCTS
         if not beyond_list_cap:
@@ -822,10 +863,15 @@ def _read_products_list_impl(
 
     if paginate_from_list_cache and not result.get("redirect_path") and not result.get("error"):
         shuffle_page = sort_norm == "random"
-        return product_search_cache_crud.paginate_cached_search_response(
+        page = product_search_cache_crud.paginate_cached_search_response(
             result, skip, limit, shuffle_random=shuffle_page
         )
+        if not admin_list:
+            _overlay_flash_sale_on_dicts(db, page.get("products"), user)
+        return page
 
+    if not admin_list:
+        _overlay_flash_sale_on_dicts(db, result.get("products"), user)
     return result
 
 
@@ -968,6 +1014,7 @@ def read_products(
         False,
         description="Lưới admin: bỏ enrich sale/size-guide, không cache tìm kiếm, mặc định hiện cả SP ẩn.",
     ),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Get products with filtering and search (by name; the product_id filter matches Excel id or SKU code).
@@ -979,6 +1026,7 @@ def read_products(
             page=page,
             limit=limit,
         )
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     try:
         return _read_products_list_impl(
             response,
@@ -1479,6 +1527,7 @@ def read_products_by_ids(
     ids: str = Query(..., description="Danh sách products.id cách nhau bởi dấu phẩy (tối đa 50)"),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """Lấy nhiều SP storefront trong một request — giảm N round-trip từ giỏ / yêu thích / đã xem."""
     parsed: List[int] = []
@@ -1499,10 +1548,12 @@ def read_products_by_ids(
             break
 
     rows = crud.product.get_storefront_products_by_ids(db, parsed, is_active=True)
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     products = [
         _product_to_response(db, row, user=current_user).model_dump(mode="json")
         for row in rows
     ]
+    _overlay_flash_sale_on_dicts(db, products, current_user)
     return {"products": products}
 
 
@@ -1516,8 +1567,10 @@ def read_pdp_outfit_suggestions(
     ),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """Gợi ý món khác loại: cửa họ phối cấp 3 + xếp hạng vector ảnh trong từng slot."""
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     from app.services.pdp_outfit_suggestions import assemble_outfit_response, build_outfit_slot_picks
 
     db_product = crud.product.get_product(db, product_id)
@@ -1530,12 +1583,14 @@ def read_pdp_outfit_suggestions(
     picks = build_outfit_slot_picks(db, db_product, limit=limit, only_slot=slot)
 
     def _serialize(rows: List):
-        return _serialize_products_for_api(
+        payload = _serialize_products_for_api(
             db,
             rows,
             user=current_user,
             include_warehouse_clearance=True,
         )
+        _overlay_flash_sale_on_dicts(db, payload, current_user)
+        return payload
 
     return assemble_outfit_response(db, picks, serialize_rows=_serialize)
 
@@ -1550,10 +1605,12 @@ def read_pdp_related_products(
     limit: int = Query(20, ge=1, le=120),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Gom SP liên quan PDP (main + shop group + sidebar style) — một session DB.
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     from app.services.pdp_related_products import fetch_pdp_related_rows
 
     db_product = crud.product.get_product(db, product_id)
@@ -1582,6 +1639,9 @@ def read_pdp_related_products(
         user=current_user,
         include_warehouse_clearance=True,
     )
+    _overlay_flash_sale_on_dicts(db, related_payload, current_user)
+    _overlay_flash_sale_on_dicts(db, shop_payload, current_user)
+    _overlay_flash_sale_on_dicts(db, sidebar_payload, current_user)
     return {
         "related_products": related_payload,
         "shop_group_products": shop_payload,
@@ -1595,21 +1655,23 @@ def read_product_by_slug(
     slug: str,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Get product by slug (path parameter version)
     - URL: /api/v1/products/by-slug/{slug}
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     cached = _get_cached_pdp_response(slug) if current_user is None else None
     if cached is not None:
-        return cached
+        return _overlay_flash_sale_on_product(db, cached, current_user)
     db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     result = _product_to_response(db, db_product, user=current_user)
     if current_user is None:
         _set_cached_pdp_response(slug, result)
-    return result
+    return _overlay_flash_sale_on_product(db, result, current_user)
 
 
 @router.get("/by-slug", response_model=Product)
@@ -1622,16 +1684,18 @@ def read_product_by_slug_query(
     ),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Get product by slug (query parameter version)
     - URL: /api/v1/products/by-slug?slug={slug}
     - Frontend hiện đang gọi theo cách này
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     cacheable = current_user is None and not attach_group_listing
     cached = _get_cached_pdp_response(slug) if cacheable else None
     if cached is not None:
-        return cached
+        return _overlay_flash_sale_on_product(db, cached, current_user)
     db_product = _lookup_product_by_slug(db, slug=slug)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -1643,7 +1707,7 @@ def read_product_by_slug_query(
     )
     if cacheable:
         _set_cached_pdp_response(slug, result)
-    return result
+    return _overlay_flash_sale_on_product(db, result, current_user)
 
 
 @router.get("/by-code/{product_code}", response_model=Product)
@@ -1651,14 +1715,18 @@ def read_product_by_code(
     product_code: str,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Get product by product_id, slug, or internal code (SKU).
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     db_product = _resolve_storefront_product(db, product_code)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
+    return _overlay_flash_sale_on_product(
+        db, _product_to_response(db, db_product, user=current_user), current_user
+    )
 
 
 @router.get("/by-id/{id}", response_model=Product)
@@ -1667,19 +1735,25 @@ def read_product_by_id(
     attach_group_listing: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Get product by database ID (integer primary key)
     """
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     try:
         db_product = crud.product.get_product(db, product_id=id)
         if db_product is None:
             raise HTTPException(status_code=404, detail="Product not found")
-        return _product_to_response(
+        return _overlay_flash_sale_on_product(
             db,
-            db_product,
-            user=current_user,
-            attach_group_listing=attach_group_listing,
+            _product_to_response(
+                db,
+                db_product,
+                user=current_user,
+                attach_group_listing=attach_group_listing,
+            ),
+            current_user,
         )
     except HTTPException:
         raise
@@ -2186,13 +2260,17 @@ def read_product(
     product_id: str,
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """Get product by product_id, slug, or internal code (SKU)."""
+    set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     pid = _normalize_excel_product_id(product_id)
     db_product = _resolve_storefront_product(db, pid)
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_to_response(db, db_product, user=current_user)
+    return _overlay_flash_sale_on_product(
+        db, _product_to_response(db, db_product, user=current_user), current_user
+    )
 
 
 @router.put("/{product_id:path}", response_model=Product)

@@ -19,7 +19,8 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import Button from '@/components/ui/Button';
-import { mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
 import { warehouseVariantsInStock } from '@/lib/warehouse-clearance';
@@ -202,9 +203,14 @@ export default function ProductVariantModal({
 
   const birthdayDiscount = useBirthdayDiscount();
   const { state: siteSaleState } = useSiteSale();
+  const { byId: flashById } = useFlashSale();
   const productForPricing = useMemo(
-    () => mergeProductSiteSaleFromCalendar(product, siteSaleState),
-    [product, siteSaleState],
+    () =>
+      mergeProductSiteSaleFromCalendar(
+        mergeProductFlashSale(product, flashById),
+        siteSaleState,
+      ),
+    [product, siteSaleState, flashById],
   );
   const pricing = resolveProductDisplayPricing(
     productForPricing,

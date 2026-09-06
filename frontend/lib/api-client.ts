@@ -21,6 +21,7 @@ import {
   SameAgeGenderCohortMode,
   HomeRecommendationBlockResponse,
   HomeRecommendationSnapshotResponse,
+  FlashSaleBlockResponse,
   PopularCategoryForProfile,
   PopularCategoryHeroSource,
   HeroCategoryTilesResponse,
@@ -864,6 +865,27 @@ class ApiClient {
       same_age_gender_cohort_mode: res?.same_age_gender_cohort_mode ?? 'requires_login',
       mixed_recommendation_products: res?.mixed_recommendation_products ?? [],
       cohort_badge_product_ids: res?.cohort_badge_product_ids ?? [],
+    };
+  }
+
+  /** Khối Flash sale trang chủ — shop 8 SP vừa xem, 8–12 SP/lượt, giảm 8–12%. */
+  async getFlashSaleBlock(): Promise<FlashSaleBlockResponse> {
+    const empty: FlashSaleBlockResponse = {
+      products: [],
+      countdown_to: null,
+      slot_start_at: null,
+      slot_end_at: null,
+      slot_key: null,
+    };
+    const res = await this.fetch<Partial<FlashSaleBlockResponse>>(
+      '/user-behavior/products/flash-sale-block'
+    ).catch(() => empty);
+    return {
+      products: res?.products ?? [],
+      countdown_to: res?.countdown_to ?? null,
+      slot_start_at: res?.slot_start_at ?? null,
+      slot_end_at: res?.slot_end_at ?? null,
+      slot_key: res?.slot_key ?? null,
     };
   }
 
