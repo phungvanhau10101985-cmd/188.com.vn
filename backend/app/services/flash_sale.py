@@ -3,7 +3,7 @@ Flash sale cá nhân hóa:
 - Nhóm = SP cùng shop Trung Quốc VÀ cùng danh mục cấp 3 của 8 SP khách xem gần nhất.
 - Mỗi lượt quay tối đa 12 SP trong nhóm đó (trộn đều các cặp shop+cấp 3).
 - Không lấy SP cùng shop nhưng khác danh mục cấp 3.
-% giảm 8–12 (ổn định trong lượt ~10 phút). Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
+% giảm 5–6 (ổn định trong lượt ~10 phút). Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
 """
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ FLASH_SALE_EVENT_LABEL = "Flash sale"
 FLASH_SALE_KIND = "flash"
 FLASH_SALE_RECENT_VIEWS = 8
 FLASH_SALE_MAX_COUNT = 12
-FLASH_SALE_MIN_PERCENT = 8
-FLASH_SALE_MAX_PERCENT = 12
+FLASH_SALE_MIN_PERCENT = 5
+FLASH_SALE_MAX_PERCENT = 6
 FLASH_SALE_SLOT_MINUTES = 10
 FLASH_SALE_CANDIDATE_LIMIT = 240
 FLASH_SALE_MIN_SHOW = 4

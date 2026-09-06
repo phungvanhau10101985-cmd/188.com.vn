@@ -868,7 +868,7 @@ class ApiClient {
     };
   }
 
-  /** Khối Flash sale trang chủ — shop 8 SP vừa xem, 8–12 SP/lượt, giảm 8–12%. */
+  /** Khối Flash sale trang chủ — shop 8 SP vừa xem, 8–12 SP/lượt, giảm 5–6%. */
   async getFlashSaleBlock(): Promise<FlashSaleBlockResponse> {
     const empty: FlashSaleBlockResponse = {
       products: [],

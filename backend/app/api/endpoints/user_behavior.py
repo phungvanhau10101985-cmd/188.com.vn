@@ -384,7 +384,7 @@ def get_flash_sale_block_endpoint(
 ):
     """
     Khối Flash sale trang chủ: shop Trung Quốc của 8 SP vừa xem,
-    8–12 SP trộn đều mỗi lượt (không tua hết shop này sang shop kia), giảm 8–12%.
+    8–12 SP trộn đều mỗi lượt (không tua hết shop này sang shop kia), giảm 5–6%.
     Hàng kho thanh lý không vào nhóm và không đổi % kho.
     """
     response.headers["Cache-Control"] = "private, no-store"

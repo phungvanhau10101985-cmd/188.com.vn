@@ -514,7 +514,7 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
           </div>
         ) : (
           <p className="text-xs text-red-800">
-            Đang chạy: giảm 8–12% trên đúng mã trong lượt. Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
+            Đang chạy: giảm 5–6% trên đúng mã trong lượt. Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
           </p>
         )}
       </div>

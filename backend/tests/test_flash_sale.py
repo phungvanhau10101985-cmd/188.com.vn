@@ -1,4 +1,4 @@
-"""Flash sale: trộn đều shop, % 8–12, không đụng hàng kho, không cộng chồng giá gốc."""
+"""Flash sale: trộn đều shop, % 5–6, không đụng hàng kho, không cộng chồng giá gốc."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -28,10 +28,10 @@ def _p(id_, shop, subcategory="Áo", sub_subcategory="Áo thun"):
     )
 
 
-def test_flash_percent_stays_in_8_to_12():
+def test_flash_percent_stays_in_5_to_6():
     percents = {flash_percent_for_product(i, "2026-09-06:4") for i in range(1, 400)}
     assert percents <= set(range(FLASH_SALE_MIN_PERCENT, FLASH_SALE_MAX_PERCENT + 1))
-    assert len(percents) >= 3
+    assert percents == {5, 6}
 
 
 def test_flash_percent_stable_for_same_slot():
@@ -67,8 +67,8 @@ def test_pick_even_caps_at_twelve():
 def test_apply_flash_replaces_site_sale_not_warehouse():
     assignment = SimpleNamespace(
         product_ids=[10],
-        percent_by_id={10: 11},
-        percent_for=lambda pid: 11 if pid == 10 else None,
+        percent_by_id={10: 6},
+        percent_for=lambda pid: 6 if pid == 10 else None,
         slot=SimpleNamespace(end_at=datetime.now(timezone(timedelta(hours=7)))),
     )
     regular = {
@@ -78,11 +78,11 @@ def test_apply_flash_replaces_site_sale_not_warehouse():
         "site_sale": {"percent": 6, "phase": "teaser"},
     }
     apply_flash_sale_to_payload(regular, assignment, product_id=10)
-    assert regular["flash_sale"]["percent"] == 11
+    assert regular["flash_sale"]["percent"] == 6
     assert regular["site_sale"]["kind"] == "flash"
-    assert regular["site_sale"]["percent"] == 11
+    assert regular["site_sale"]["percent"] == 6
     assert regular["original_price"] == 200_000
-    assert regular["price"] == 178_000
+    assert regular["price"] == 188_000
 
     warehouse = {
         "id": 10,
@@ -102,7 +102,7 @@ def test_apply_flash_replaces_site_sale_not_warehouse():
 
 def test_flash_plus_birthday_still_caps_at_15_percent():
     list_subtotal = Decimal("200000")
-    flash_savings = Decimal("22000")  # 11%
+    flash_savings = Decimal("12000")  # 6%
     welcome, birthday, loyalty, capped = apply_grand_discount_cap(
         list_subtotal=list_subtotal,
         site_sale_savings=flash_savings,
@@ -114,7 +114,7 @@ def test_flash_plus_birthday_still_caps_at_15_percent():
     assert welcome + birthday + loyalty + flash_savings <= (
         list_subtotal * MAX_ORDER_DISCOUNT_PERCENT / Decimal("100")
     ) + Decimal("1")
-    assert birthday <= Decimal("8000")
+    assert birthday <= Decimal("18000")
 
 
 def test_viewed_pairs_use_chinese_shop_and_level3_only():
@@ -152,8 +152,8 @@ def test_flash_slot_is_ten_minutes_from_midnight_vn():
 
 
 def test_apply_flash_percent_rounds_vnd():
-    pricing = apply_flash_percent_to_price(199_000, 9)
-    assert pricing["percent"] == 9
+    pricing = apply_flash_percent_to_price(199_000, 6)
+    assert pricing["percent"] == 6
     assert pricing["display_price"] + pricing["savings_amount"] == 199_000
     assert pricing["event_label"] == "Flash sale"
     assert pricing["phase"] == "active"
