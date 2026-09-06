@@ -437,6 +437,46 @@ def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
             logger.exception("Không gửi được email preview banner tới %s", recipient)
 
 
+STALE_GENERATING_AFTER = timedelta(minutes=20)
+
+
+def _aware_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _is_stale_generating(row: MarketingBannerAsset) -> bool:
+    started = _aware_utc(row.created_at) or _aware_utc(row.updated_at)
+    if started is None:
+        return True
+    return datetime.now(timezone.utc) - started >= STALE_GENERATING_AFTER
+
+
+def _mark_stale_generating(db: Session, row: MarketingBannerAsset) -> None:
+    row.status = "failed"
+    row.is_active = False
+    row.error_message = "Tạo banner bị treo (generating quá hạn)."
+    db.commit()
+
+
+def _find_generating_asset(
+    db: Session, *, kind: str, key: str
+) -> Optional[MarketingBannerAsset]:
+    return (
+        db.query(MarketingBannerAsset)
+        .filter(
+            MarketingBannerAsset.kind == kind,
+            MarketingBannerAsset.campaign_key == key,
+            MarketingBannerAsset.status == "generating",
+        )
+        .order_by(MarketingBannerAsset.version.desc())
+        .first()
+    )
+
+
 def generate_banner(
     db: Session,
     *,
@@ -462,6 +502,11 @@ def generate_banner(
         )
         if existing:
             return existing
+        generating = _find_generating_asset(db, kind=kind, key=key)
+        if generating and not _is_stale_generating(generating):
+            return generating
+        if generating:
+            _mark_stale_generating(db, generating)
 
     latest = (
         db.query(MarketingBannerAsset)
@@ -477,6 +522,8 @@ def generate_banner(
         getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
         or "gemini-3-pro-image-preview"
     ).strip()
+    # Nhả connection trước Gemini text — tránh idle-in-transaction timeout ~35s.
+    db.commit()
     dynamic_copy = generate_dynamic_copy(
         kind=kind,
         day=day,
@@ -519,9 +566,10 @@ def generate_banner(
         if concurrent:
             return concurrent
         raise
-    db.refresh(row)
+    asset_id = int(row.id)
 
     try:
+        # Không refresh/giữ transaction lúc gọi Gemini ảnh (30–120s).
         raw = gemini_generate_image_from_text(
             prompt,
             image_model=model,
@@ -530,6 +578,11 @@ def generate_banner(
         )
         width, height, _ = _image_dimensions(raw)
         image_url = _upload_banner(raw, kind=kind, key=key, version=version)
+        row = (
+            db.query(MarketingBannerAsset)
+            .filter(MarketingBannerAsset.id == asset_id)
+            .one()
+        )
         (
             db.query(MarketingBannerAsset)
             .filter(
@@ -552,10 +605,16 @@ def generate_banner(
             _admin_preview_email(db, row)
         return row
     except Exception as exc:
-        row.status = "failed"
-        row.error_message = str(exc)[:4000]
-        row.is_active = False
-        db.commit()
+        row = (
+            db.query(MarketingBannerAsset)
+            .filter(MarketingBannerAsset.id == asset_id)
+            .first()
+        )
+        if row is not None:
+            row.status = "failed"
+            row.error_message = str(exc)[:4000]
+            row.is_active = False
+            db.commit()
         logger.exception("Tạo banner %s thất bại", key)
         raise
 
@@ -598,36 +657,77 @@ def _birthday_dates_with_customers(db: Session, today: date) -> list[date]:
     ]
 
 
-def ensure_daily_banners(db: Session, *, today: Optional[date] = None) -> Dict[str, Any]:
+def _empty_kind_stats(*, extra: Optional[Dict[str, int]] = None) -> Dict[str, int]:
+    stats = {"created": 0, "reused": 0, "failed": 0, "pending": 0}
+    if extra:
+        stats.update(extra)
+    return stats
+
+
+def ensure_daily_banners(
+    db: Session,
+    *,
+    today: Optional[date] = None,
+    max_create: int = 1,
+    notify_admin: bool = True,
+) -> Dict[str, Any]:
+    """Tạo tối đa `max_create` ảnh mới mỗi lần — cron bắt tiếp các ngày còn thiếu."""
     current = today or datetime.now(VN_TZ).date()
     result: Dict[str, Any] = {
-        "birthday": {"created": 0, "reused": 0, "failed": 0},
-        "sale": {"created": 0, "reused": 0, "failed": 0},
-        "warehouse": {"created": 0, "reused": 0, "failed": 0, "skipped": 0},
+        "birthday": _empty_kind_stats(),
+        "sale": _empty_kind_stats(),
+        "warehouse": _empty_kind_stats(extra={"skipped": 0}),
     }
+    budget = max(0, int(max_create))
 
-    for target in _birthday_dates_with_customers(db, current):
+    def _try_create(kind: str, day: int, month: int, pct: float, bucket: str) -> None:
+        nonlocal budget
         existing = find_active_asset(
             db,
-            kind="birthday",
-            day=target.day,
-            month=target.month,
-            discount_percent=BIRTHDAY_DISCOUNT_PERCENT,
+            kind=kind,
+            day=day,
+            month=month,
+            discount_percent=pct,
         )
         if existing:
-            result["birthday"]["reused"] += 1
-            continue
+            result[bucket]["reused"] += 1
+            return
+        key = campaign_key(kind, day, month, pct)
+        generating = _find_generating_asset(db, kind=kind, key=key)
+        if generating and not _is_stale_generating(generating):
+            result[bucket]["pending"] += 1
+            return
+        if generating:
+            _mark_stale_generating(db, generating)
+        if budget <= 0:
+            result[bucket]["pending"] += 1
+            return
         try:
-            generate_banner(
+            row = generate_banner(
                 db,
-                kind="birthday",
-                day=target.day,
-                month=target.month,
-                discount_percent=BIRTHDAY_DISCOUNT_PERCENT,
+                kind=kind,
+                day=day,
+                month=month,
+                discount_percent=pct,
+                notify_admin=notify_admin,
             )
-            result["birthday"]["created"] += 1
+            if getattr(row, "status", None) == "ready":
+                result[bucket]["created"] += 1
+            else:
+                result[bucket]["pending"] += 1
+                return
         except Exception:
-            result["birthday"]["failed"] += 1
+            result[bucket]["failed"] += 1
+        budget -= 1
+
+    for target in _birthday_dates_with_customers(db, current):
+        _try_create(
+            "birthday",
+            target.day,
+            target.month,
+            float(BIRTHDAY_DISCOUNT_PERCENT),
+            "birthday",
+        )
 
     upcoming = list_upcoming_events(db, limit=12)
     matching_event = None
@@ -638,28 +738,7 @@ def ensure_daily_banners(db: Session, *, today: Optional[date] = None) -> Dict[s
             break
     if matching_event:
         event, event_date = matching_event
-        pct = float(event["discount_percent"])
-        existing = find_active_asset(
-            db,
-            kind="sale",
-            day=event_date.day,
-            month=event_date.month,
-            discount_percent=pct,
-        )
-        if existing:
-            result["sale"]["reused"] += 1
-        else:
-            try:
-                generate_banner(
-                    db,
-                    kind="sale",
-                    day=event_date.day,
-                    month=event_date.month,
-                    discount_percent=pct,
-                )
-                result["sale"]["created"] += 1
-            except Exception:
-                result["sale"]["failed"] += 1
+        _try_create("sale", event_date.day, event_date.month, float(event["discount_percent"]), "sale")
 
     from app.services.warehouse_clearance import get_warehouse_clearance_settings
 
@@ -667,19 +746,5 @@ def ensure_daily_banners(db: Session, *, today: Optional[date] = None) -> Dict[s
     if not warehouse_enabled or warehouse_pct <= 0:
         result["warehouse"]["skipped"] += 1
     else:
-        existing = find_active_warehouse_asset(db, warehouse_pct)
-        if existing:
-            result["warehouse"]["reused"] += 1
-        else:
-            try:
-                generate_banner(
-                    db,
-                    kind="warehouse",
-                    day=0,
-                    month=0,
-                    discount_percent=warehouse_pct,
-                )
-                result["warehouse"]["created"] += 1
-            except Exception:
-                result["warehouse"]["failed"] += 1
+        _try_create("warehouse", 0, 0, float(warehouse_pct), "warehouse")
     return result

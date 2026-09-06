@@ -54,5 +54,6 @@ def run_daily_promotion_cron(
     if include_birthday_emails:
         out["birthday_emails"] = run_birthday_promo_email_batch(db)
     if include_marketing_banners:
-        out["marketing_banners"] = ensure_daily_banners(db)
+        # Mỗi lần cron chỉ tạo tối đa 1 ảnh Gemini — tránh Cloudflare 524 và kẹt worker.
+        out["marketing_banners"] = ensure_daily_banners(db, max_create=1)
     return out

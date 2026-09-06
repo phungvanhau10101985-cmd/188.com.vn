@@ -35,11 +35,14 @@ export default function AdminPromotionsPage() {
           Cần biến <code className="text-xs bg-gray-100 px-1 rounded">CRON_SECRET</code> trong .env backend.
         </p>
         <pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto whitespace-pre-wrap">
-{`0 9 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" \\
-  "https://YOUR_API_HOST/api/v1/promotions/cron/daily-all"`}
+{`0 9 * * * curl -fsS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" \\
+  "http://127.0.0.1:8001/api/v1/promotions/cron/daily-all"
+5-59/10 * * * * curl -fsS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" \\
+  "http://127.0.0.1:8001/api/v1/promotions/cron/daily-banners"`}
         </pre>
         <p className="text-xs text-gray-500">
           Endpoint gộp: CARTSAVE188 + COMEBACK10 + backfill WELCOME + email sinh nhật (7 ngày trước SN).
+          Banner AI gọi localhost mỗi 10 phút, mỗi lần tối đa 1 ảnh — tránh timeout Cloudflare 524.
           WELCOME (đăng ký), THANKYOU (giao hàng lần đầu), CMSN giảm giá — chạy tự động trong app, không cần cron.
         </p>
       </div>

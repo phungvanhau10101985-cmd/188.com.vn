@@ -123,6 +123,75 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
     assert replacement.image_height == 900
 
 
+def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatch):
+    db = _session(with_users=True)
+    db.add_all(
+        [
+            User(email="a@example.com", date_of_birth=date(1990, 9, 7), is_active=True),
+            User(email="b@example.com", date_of_birth=date(1991, 9, 8), is_active=True),
+            User(email="c@example.com", date_of_birth=date(1992, 9, 9), is_active=True),
+        ]
+    )
+    db.commit()
+    raw = _png_bytes()
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Tuổi mới an vui - quà riêng trao tay",
+            "cta": "NHẬN QUÀ CỦA TÔI",
+            "art_direction": "ấm áp sang trọng",
+        },
+    )
+    monkeypatch.setattr(
+        svc,
+        "_upload_banner",
+        lambda data, *, kind, key, version: f"https://cdn.test/{key}/v{version}.png",
+    )
+    monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
+    monkeypatch.setattr(svc, "list_upcoming_events", lambda db, limit=12: [])
+
+    import app.services.warehouse_clearance as warehouse_svc
+
+    monkeypatch.setattr(
+        warehouse_svc,
+        "get_warehouse_clearance_settings",
+        lambda db: (False, 0),
+    )
+
+    first = svc.ensure_daily_banners(
+        db, today=date(2026, 9, 7), max_create=1, notify_admin=False
+    )
+    assert first["birthday"]["created"] == 1
+    assert first["birthday"]["reused"] == 0
+    assert first["birthday"]["pending"] == 2
+    assert first["birthday"]["failed"] == 0
+
+    second = svc.ensure_daily_banners(
+        db, today=date(2026, 9, 7), max_create=1, notify_admin=False
+    )
+    assert second["birthday"]["created"] == 1
+    assert second["birthday"]["reused"] == 1
+    assert second["birthday"]["pending"] == 1
+
+    rest = svc.ensure_daily_banners(
+        db, today=date(2026, 9, 7), max_create=8, notify_admin=False
+    )
+    assert rest["birthday"]["created"] == 1
+    assert rest["birthday"]["reused"] == 2
+    assert rest["birthday"]["pending"] == 0
+    ready = (
+        db.query(MarketingBannerAsset)
+        .filter(
+            MarketingBannerAsset.kind == "birthday",
+            MarketingBannerAsset.status == "ready",
+        )
+        .count()
+    )
+    assert ready == 3
+
+
 def test_birthday_targets_only_dates_with_active_customers():
     db = _session(with_users=True)
     db.add_all(

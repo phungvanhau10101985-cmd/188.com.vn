@@ -367,6 +367,22 @@ def cron_daily_all_promotions(
     return AdminDailyPromotionCronResponse(**result)
 
 
+@router.get("/cron/daily-banners")
+def cron_daily_banners(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """
+    Cron bắt banner AI còn thiếu — mỗi lần tối đa 1 ảnh Gemini.
+    Gọi localhost (không qua Cloudflare), lặp mỗi 10 phút cho tới khi pending=0.
+    Authorization: Bearer CRON_SECRET
+    """
+    _require_cron_secret(authorization)
+    from app.services.marketing_banner import ensure_daily_banners
+
+    return ensure_daily_banners(db, max_create=1)
+
+
 @router.get("/admin/grants", response_model=list[AdminUserGrantOut])
 def admin_list_user_grants(
     user_id: int = Query(..., ge=1),

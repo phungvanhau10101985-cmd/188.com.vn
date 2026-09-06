@@ -25,7 +25,12 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 */2 * * * * cd /var/www/188.com.vn && bash deploy/watchdog-api.sh >> /var/log/188-watchdog.log 2>&1
 
 # Khuyến mãi + voucher + email CMSN (hàng ngày 9:00)
-0 9 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/promotions/cron/daily-all"
+# Gọi thẳng API local — KHÔNG qua Cloudflare (tránh 524 khi job > ~100s).
+0 9 * * * curl -fsS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" "http://127.0.0.1:8001/api/v1/promotions/cron/daily-all" >> /root/logs/188-promotions.log 2>&1
+
+# Banner AI CMSN/sale/kho — mỗi lần tối đa 1 ảnh Gemini, bắt tiếp các ngày còn thiếu.
+# Lệch 5 phút so với daily-all để không đụng Gemini cùng lúc lúc 9:00.
+5-59/10 * * * * curl -fsS -m 300 -H "Authorization: Bearer YOUR_CRON_SECRET" "http://127.0.0.1:8001/api/v1/promotions/cron/daily-banners" >> /root/logs/188-banners.log 2>&1
 
 # Tra EMS vận chuyển (6:00 và 15:00)
 0 6,15 * * * curl -sS -H "Authorization: Bearer YOUR_CRON_SECRET" "https://YOUR_API_HOST/api/v1/orders/cron/refresh-ems-tracking"
