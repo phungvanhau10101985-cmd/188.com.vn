@@ -44,6 +44,7 @@ def update_settings(
     clear_manual: bool = False,
     warehouse_clearance_enabled: Optional[bool] = None,
     warehouse_clearance_discount_percent: Optional[float] = None,
+    flash_sale_enabled: Optional[bool] = None,
 ) -> SaleCalendarSettings:
     row = get_settings(db)
     if enabled is not None:
@@ -72,8 +73,14 @@ def update_settings(
         row.warehouse_clearance_enabled = bool(warehouse_clearance_enabled)
     if warehouse_clearance_discount_percent is not None:
         row.warehouse_clearance_discount_percent = Decimal(str(warehouse_clearance_discount_percent))
+    if flash_sale_enabled is not None:
+        row.flash_sale_enabled = bool(flash_sale_enabled)
     db.commit()
     db.refresh(row)
+    if flash_sale_enabled is not None:
+        from app.services.flash_sale import invalidate_flash_sale_enabled_cache
+
+        invalidate_flash_sale_enabled_cache()
     return row
 
 

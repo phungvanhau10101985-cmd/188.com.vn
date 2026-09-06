@@ -9,6 +9,7 @@ from app.services.flash_sale import (
     apply_flash_percent_to_price,
     apply_flash_sale_to_payload,
     flash_percent_for_product,
+    get_flash_sale_assignment,
     pick_even_shop_products,
     resolve_flash_slot,
     viewed_shop_l3_pairs,
@@ -156,3 +157,10 @@ def test_apply_flash_percent_rounds_vnd():
     assert pricing["display_price"] + pricing["savings_amount"] == 199_000
     assert pricing["event_label"] == "Flash sale"
     assert pricing["phase"] == "active"
+
+
+def test_disabled_flash_returns_empty_assignment(monkeypatch):
+    monkeypatch.setattr("app.services.flash_sale.is_flash_sale_enabled", lambda _db: False)
+    assignment = get_flash_sale_assignment(SimpleNamespace(), user_id=1)
+    assert assignment.product_ids == []
+    assert assignment.percent_by_id == {}

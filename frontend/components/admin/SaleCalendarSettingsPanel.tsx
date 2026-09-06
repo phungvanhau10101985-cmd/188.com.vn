@@ -295,6 +295,21 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
     }
   };
 
+  const toggleFlashSaleEnabled = async () => {
+    if (!data) return;
+    const next = data.flash_sale_enabled === false;
+    setSaving(true);
+    try {
+      const res = await adminSaleCalendarAPI.updateSettings({ flash_sale_enabled: next });
+      setData(res);
+      showToast(res.flash_sale_enabled !== false ? 'Đã bật Flash sale' : 'Đã tắt Flash sale');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Lỗi lưu Flash sale');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const startManualToday = async () => {
     const discount = Number(manualDiscount);
     if (!Number.isFinite(discount) || discount < 0 || discount > 50) {
@@ -432,6 +447,7 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
     ? customSaleTimeline(data.scheduled_sale_date, data.teaser_days)
     : null;
   const manualActiveToday = data.manual_sale_date === todayIsoVn();
+  const flashSaleOn = data.flash_sale_enabled !== false;
 
   return (
     <section className={wrapperClass} aria-label="Sale ngày trùng tháng" id="site-sale">
@@ -466,6 +482,42 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
       {toast ? (
         <div className="bg-green-50 border border-green-200 text-green-800 rounded-lg px-4 py-2 text-sm">{toast}</div>
       ) : null}
+
+      <div
+        id="flash-sale"
+        className="rounded-xl border border-red-100 bg-red-50/40 p-5 space-y-3"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="font-semibold text-gray-900">Flash sale</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Khối FLASH SALE trang chủ: tối đa 12 deal / 10 phút, cùng shop Trung Quốc và danh mục vừa xem. Tắt =
+              ẩn khối và không giảm giá flash trên sản phẩm / giỏ hàng.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void toggleFlashSaleEnabled()}
+            aria-pressed={flashSaleOn}
+            aria-label={flashSaleOn ? 'Tắt Flash sale' : 'Bật Flash sale'}
+            className={`px-4 py-2 rounded-lg text-sm font-medium ${
+              flashSaleOn ? 'bg-red-600 text-white' : 'bg-gray-300 text-gray-800'
+            }`}
+          >
+            {flashSaleOn ? 'Đang bật' : 'Đang tắt'}
+          </button>
+        </div>
+        {!flashSaleOn ? (
+          <div className="rounded-lg bg-gray-100 border border-gray-200 px-4 py-3 text-sm text-gray-700">
+            Flash sale đang tắt trên toàn shop. Bấm <strong>Đang tắt</strong> để bật lại.
+          </div>
+        ) : (
+          <p className="text-xs text-red-800">
+            Đang chạy: giảm 8–12% trên đúng mã trong lượt. Hết lượt mất giảm. Không áp dụng hàng kho thanh lý.
+          </p>
+        )}
+      </div>
 
       <div className={`${embedded ? '' : 'bg-white rounded-xl border border-gray-200 '}p-5 space-y-4`.trim()}>
         {!embedded ? null : <div className="border-t border-gray-100 -mt-2 pt-4" />}

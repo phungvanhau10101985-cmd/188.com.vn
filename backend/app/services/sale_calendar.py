@@ -638,6 +638,7 @@ def ensure_sale_calendar_defaults(db: Session) -> None:
                     schedule_mode="auto",
                     warehouse_clearance_enabled=True,
                     warehouse_clearance_discount_percent=20,
+                    flash_sale_enabled=True,
                 )
             )
         for month in range(1, 13):

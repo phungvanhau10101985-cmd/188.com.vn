@@ -50,6 +50,7 @@ class SaleCalendarSettingsOut(BaseModel):
     manual_discount_percent: Optional[float] = None
     warehouse_clearance_enabled: bool = True
     warehouse_clearance_discount_percent: Optional[float] = 20
+    flash_sale_enabled: bool = True
     month_rules: List[SaleCalendarMonthRuleOut]
     upcoming: List[dict] = Field(default_factory=list)
     current: SaleCalendarPublicResponse
@@ -67,6 +68,7 @@ class SaleCalendarSettingsUpdate(BaseModel):
     clear_manual: bool = False
     warehouse_clearance_enabled: Optional[bool] = None
     warehouse_clearance_discount_percent: Optional[float] = Field(None, ge=0, le=80)
+    flash_sale_enabled: Optional[bool] = None
 
 
 class SaleCalendarMonthRuleUpdate(BaseModel):

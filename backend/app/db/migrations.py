@@ -1358,6 +1358,7 @@ class MigrationManager:
         results['sale_calendar_month_rules_create'] = self._create_table_if_not_exists(
             "sale_calendar_month_rules", SaleCalendarMonthRule
         )
+        results['sale_calendar_flash_sale_enabled'] = self.migrate_sale_calendar_flash_sale_enabled()
         results['sale_calendar_settings_sync'] = self._sync_table_columns(
             "sale_calendar_settings", SaleCalendarSettings
         )
@@ -1513,6 +1514,36 @@ class MigrationManager:
         )
 
         return results
+
+    def migrate_sale_calendar_flash_sale_enabled(self) -> bool:
+        """Thêm flash_sale_enabled mặc định bật — tránh sync BOOLEAN DEFAULT FALSE tắt flash trên shop."""
+        try:
+            inspector = inspect(engine)
+            if "sale_calendar_settings" not in inspector.get_table_names():
+                return True
+            columns = {col["name"] for col in inspector.get_columns("sale_calendar_settings")}
+            if "flash_sale_enabled" in columns:
+                return True
+            with engine.begin() as conn:
+                if IS_POSTGRESQL:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE sale_calendar_settings "
+                            "ADD COLUMN flash_sale_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+                        )
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE sale_calendar_settings "
+                            "ADD COLUMN flash_sale_enabled BOOLEAN NOT NULL DEFAULT 1"
+                        )
+                    )
+            logger.info("✅ sale_calendar_settings.flash_sale_enabled added (default TRUE)")
+            return True
+        except Exception as e:
+            logger.warning("  migrate_sale_calendar_flash_sale_enabled: %s", e)
+            return False
 
     def migrate_sale_calendar_settings_date_columns(self) -> bool:
         """Chuẩn hóa scheduled_sale_date / manual_sale_date sang DATE (cột sync cũ có thể là TEXT)."""

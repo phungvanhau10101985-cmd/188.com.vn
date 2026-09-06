@@ -104,6 +104,7 @@ def _build_admin_settings_out(db: Session) -> SaleCalendarSettingsOut:
             if getattr(settings, "warehouse_clearance_discount_percent", None) is not None
             else 20.0
         ),
+        flash_sale_enabled=bool(getattr(settings, "flash_sale_enabled", True)),
         month_rules=month_out,
         upcoming=sale_calendar_svc.list_upcoming_events(db, limit=8),
         current=SaleCalendarPublicResponse(**state.to_public_dict()),
@@ -190,6 +191,7 @@ def admin_update_sale_calendar_settings(
             if "warehouse_clearance_discount_percent" in fields_set
             else None
         ),
+        flash_sale_enabled=payload.flash_sale_enabled if "flash_sale_enabled" in fields_set else None,
     )
     return _build_admin_settings_out(db)
 

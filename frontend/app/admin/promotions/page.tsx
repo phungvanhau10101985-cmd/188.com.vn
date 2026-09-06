@@ -9,9 +9,9 @@ import { adminPromotionsAPI, AdminPromotionCode } from '@/lib/admin-api';
 export default function AdminPromotionsPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.location.hash === '#site-sale') {
+    if (window.location.hash === '#site-sale' || window.location.hash === '#flash-sale') {
       window.requestAnimationFrame(() => {
-        document.getElementById('site-sale')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
     }
   }, []);
@@ -20,7 +20,7 @@ export default function AdminPromotionsPage() {
     <div className="p-6 max-w-6xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Khuyến mãi</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Quản lý toàn bộ mã khuyến mãi, sale site-wide, tặng mã vào ví khách và chạy chiến dịch tự động.
+        Quản lý toàn bộ mã khuyến mãi, flash sale, sale site-wide, tặng mã vào ví khách và chạy chiến dịch tự động.
       </p>
 
       <PromoCodesManager />

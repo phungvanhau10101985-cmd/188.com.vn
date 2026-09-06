@@ -32,6 +32,8 @@ FLASH_SALE_MAX_PERCENT = 12
 FLASH_SALE_SLOT_MINUTES = 10
 FLASH_SALE_CANDIDATE_LIMIT = 240
 FLASH_SALE_MIN_SHOW = 4
+FLASH_SALE_ENABLED_CACHE_KEY = "flash-sale:enabled"
+FLASH_SALE_ENABLED_TTL_SECONDS = 5.0
 
 _identity_ctx: ContextVar[Tuple[Optional[int], Optional[str]]] = ContextVar(
     "flash_sale_identity", default=(None, None)
@@ -47,6 +49,24 @@ def set_flash_sale_identity(
 
 def current_flash_sale_identity() -> Tuple[Optional[int], Optional[str]]:
     return _identity_ctx.get()
+
+
+def invalidate_flash_sale_enabled_cache() -> None:
+    ttl_cache.invalidate(FLASH_SALE_ENABLED_CACHE_KEY)
+
+
+def is_flash_sale_enabled(db: Session) -> bool:
+    """Cờ admin: tắt thì không gán deal, không giảm giá, không hiện khối trang chủ."""
+
+    def _fetch() -> bool:
+        from app.models.sale_calendar import SaleCalendarSettings
+
+        row = db.query(SaleCalendarSettings).filter(SaleCalendarSettings.id == 1).first()
+        if row is None:
+            return True
+        return bool(getattr(row, "flash_sale_enabled", True))
+
+    return bool(ttl_cache.get_or_fetch(FLASH_SALE_ENABLED_CACHE_KEY, FLASH_SALE_ENABLED_TTL_SECONDS, _fetch))
 
 
 @dataclass(frozen=True)
@@ -356,7 +376,7 @@ def get_flash_sale_assignment(
 
     identity = _identity_key(uid, sid)
     slot = resolve_flash_slot(now)
-    if identity is None:
+    if not is_flash_sale_enabled(db) or identity is None:
         return FlashSaleAssignment(product_ids=[], percent_by_id={}, slot=slot)
 
     ttl = max(5.0, (slot.end_at - now_vn(now)).total_seconds())

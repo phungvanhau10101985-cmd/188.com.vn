@@ -4039,6 +4039,7 @@ export type AdminSaleCalendarSettings = {
   manual_discount_percent?: number | null;
   warehouse_clearance_enabled?: boolean;
   warehouse_clearance_discount_percent?: number | null;
+  flash_sale_enabled?: boolean;
   month_rules: Array<{
     month: number;
     enabled: boolean;
@@ -4071,6 +4072,7 @@ export const adminSaleCalendarAPI = {
     clear_manual?: boolean;
     warehouse_clearance_enabled?: boolean;
     warehouse_clearance_discount_percent?: number | null;
+    flash_sale_enabled?: boolean;
   }) =>
     fetchAdmin<AdminSaleCalendarSettings>('/sale-calendar/admin/settings', {
       method: 'PATCH',

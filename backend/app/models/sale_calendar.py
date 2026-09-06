@@ -20,6 +20,7 @@ class SaleCalendarSettings(Base):
     manual_discount_percent = Column(Numeric(5, 2), nullable=True)
     warehouse_clearance_enabled = Column(Boolean, nullable=False, default=True)
     warehouse_clearance_discount_percent = Column(Numeric(5, 2), nullable=True, default=20)
+    flash_sale_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
 
 
 class SaleCalendarMonthRule(Base):
