@@ -119,8 +119,21 @@ export function CartProvider({ children }: { children: ReactNode }) {
   };
 
   const applyCartKeepingLineOrder = (nextCart: Cart | null, prevCart: Cart | null) => {
+    if (!nextCart) return null;
     const enriched = enrichCart(nextCart);
     if (!enriched || !prevCart?.items?.length) return enriched;
+    const incomingById = new Map(enriched.items.map((item) => [item.id, item]));
+    const ordered: Cart['items'] = [];
+    for (const old of prevCart.items) {
+      const next = incomingById.get(old.id);
+      if (next) {
+        ordered.push(next);
+        incomingById.delete(old.id);
+      }
+    }
+    for (const rest of incomingById.values()) ordered.push(rest);
+    return { ...enriched, items: ordered };
+  };
     const incomingById = new Map(enriched.items.map((item) => [item.id, item]));
     const ordered: Cart['items'] = [];
     for (const old of prevCart.items) {
