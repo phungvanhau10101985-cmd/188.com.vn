@@ -10,10 +10,10 @@ import { formatPrice, getProductMainImage } from '@/lib/utils';
 import { productPdpHref } from '@/lib/product-path-slug';
 import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
 import { cdnUrl } from '@/lib/cdn-url';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
-import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import { BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardPromoBadges from '@/components/ProductCardPromoBadges';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import { useCatalogProductPricing } from '@/lib/use-catalog-product-pricing';
 import {
   loadPdpOutfitSuggestions,
   prefetchPdpOutfitSuggestions,
@@ -59,10 +59,8 @@ function OutfitCard({
   imageSizes: string;
 }) {
   const href = productPdpHref(product.slug, product.product_id) ?? `/products/${product.id}`;
-  const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
+  const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, showsClearance } =
+    useCatalogProductPricing(product);
 
   return (
     <ProductPdpLink
@@ -88,7 +86,13 @@ function OutfitCard({
             (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
           }}
         />
-        <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+        {!showsClearance ? (
+          <ProductCardPromoBadges
+            siteSale={catalogSiteSale}
+            birthdayActive={birthdayBadgeActive}
+            birthdayPercent={birthdayDiscount.percent}
+          />
+        ) : null}
       </div>
       <div className="p-2">
         <h4 className="font-medium text-gray-900 line-clamp-2 text-xs leading-tight mb-1 group-hover:text-[#ea580c] transition-colors">
@@ -101,14 +105,10 @@ function OutfitCard({
         ) : null}
         <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
           <span className="text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</span>
-          <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-          {birthdayDiscount.active && displayPrice < (product.price || 0) ? (
+          <BirthdayPromoPriceCakeIcon active={birthdayBadgeActive} percent={birthdayDiscount.percent} />
+          {pricing.compareUnitPrice != null && pricing.compareUnitPrice > displayPrice ? (
             <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
-              {formatPrice(product.price)}
-            </span>
-          ) : product.original_price && product.original_price > product.price ? (
-            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
-              {formatPrice(product.original_price)}
+              {formatPrice(pricing.compareUnitPrice)}
             </span>
           ) : null}
         </div>

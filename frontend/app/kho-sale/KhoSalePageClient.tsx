@@ -153,17 +153,16 @@ export default function KhoSalePageClient({
           Trang chủ
         </Link>
         <span className="mx-2">/</span>
-        <span className="text-gray-900 font-medium">Sale hàng hoàn</span>
+        <span className="text-gray-900 font-medium">Sale thanh lý kho</span>
       </nav>
 
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">
-          Sale hàng hoàn — thanh lý xả kho {monthLabel}
+          Sale thanh lý kho {monthLabel}
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-gray-600 leading-relaxed">
-          Hàng hoàn và tồn kho thanh lý — <strong className="text-amber-900">giá ưu đãi</strong>, thường chỉ còn
-          một số size. Mỗi thẻ gắn loại <strong>hàng thanh lý kho</strong>; đặt hàng qua nút thanh lý trên trang
-          chi tiết.
+          Hàng hoàn và tồn kho — <strong className="text-amber-900">Sale thanh lý kho</strong>, thường chỉ còn
+          một số size. Mỗi thẻ gắn loại <strong>Sale thanh lý kho</strong>; đặt hàng trên trang chi tiết.
         </p>
         {total > 0 && (
           <p className="mt-2 text-sm text-gray-500">

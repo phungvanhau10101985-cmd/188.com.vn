@@ -27,6 +27,7 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
 import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
@@ -150,9 +151,16 @@ export default function ProductDetailMobile({
   );
   const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;
-  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
+  const birthdayOnPdp = !googleDiscount && !isClearancePdp && birthdayDiscount.active;
+  const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
-  const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent) / 100;
+  const loyaltyDiscountAmount = applyCatalogStackedDiscount({
+    listPrice: pricing.listPrice,
+    afterLinePrograms: googleDiscount ? displayPrice : pricing.beforeBirthday,
+    birthdayActive: birthdayOnPdp,
+    birthdayPercent: birthdayDiscount.percent,
+    loyaltyPercent: loyaltyDiscountPercent,
+  }).loyaltySavings;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const openVariantModal = () => setVariantModalOpen(true);
@@ -505,12 +513,14 @@ export default function ProductDetailMobile({
             sitePercent={googleDiscount ? 0 : pricing.sitePercent}
             siteLabel={googleDiscount ? null : pricing.siteLabel}
             countdownTo={googleDiscount ? null : pricing.countdownTo}
-            birthdayActive={googleDiscount ? false : birthdayDiscount.active}
+            birthdayActive={birthdayOnPdp}
             birthdayPercent={birthdayDiscount.percent}
             clearanceHighlight={isClearancePdp}
-            promoLabel={isClearancePdp ? 'Thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
+            promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
             activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
             suppressSiteSaleBanners={!!googleDiscount}
+            isFlashSale={!googleDiscount && pricing.isFlashSale}
+            discountCapped={!googleDiscount && pricing.discountCapped}
             size="sm"
           />
           {googleDiscount ? (
@@ -630,7 +640,7 @@ export default function ProductDetailMobile({
           <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
             <span className="flex items-center justify-center gap-1 text-[9px] font-semibold text-white">
               <span aria-hidden>🎁</span>
-              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
+              CMSN: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
             </span>
           </div>
         )}

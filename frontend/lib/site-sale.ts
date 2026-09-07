@@ -1,6 +1,7 @@
 import type { Product, SiteSaleCalendarState, SiteSaleProductPricing } from '@/types/api';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
+import { applyBirthdayDiscount, BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 import { isGoogleDiscountCartLine } from '@/lib/google-automated-discount';
+import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import {
   isWarehouseCartLine,
   isWarehouseClearanceProduct,
@@ -51,10 +52,64 @@ export function mergeProductFlashSale(
   };
 }
 
-function cartLineHasActiveFlash(item: CartLinePricingInput): boolean {
+export function cartLineHasActiveFlash(item: CartLinePricingInput): boolean {
   if (isFlashSalePricing(item.site_sale)) return true;
   const data = item.product_data as { flash_sale?: SiteSaleProductPricing } | undefined;
   return isFlashSalePricing(data?.flash_sale);
+}
+
+export const FLASH_SALE_PROGRAM_NAME = 'Flash sale';
+export const WAREHOUSE_SALE_PROGRAM_NAME = 'Sale thanh lý kho';
+
+/** Ngày sale trùng tháng dạng «9/9». */
+export function calendarSaleDayMonth(
+  sale?: SiteSaleProductPricing | null,
+  calendar?: Pick<SiteSaleCalendarState, 'event_date' | 'event_label'> | null,
+): string | null {
+  const dateStr = String(sale?.event_date || calendar?.event_date || '').slice(0, 10);
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('-').map(Number);
+    const month = parts[1];
+    const day = parts[2];
+    if (month && day) return `${day}/${month}`;
+  }
+  const raw = `${sale?.event_label ?? ''} ${calendar?.event_label ?? ''}`;
+  const hit = raw.match(/(\d{1,2})\s*\/\s*(\d{1,2})/);
+  if (hit) return `${Number(hit[1])}/${Number(hit[2])}`;
+  return null;
+}
+
+/** «Sale 9/9» — luôn ghi rõ ngày trùng tháng. */
+export function calendarSaleProgramLabel(
+  sale?: SiteSaleProductPricing | null,
+  calendar?: Pick<SiteSaleCalendarState, 'event_date' | 'event_label'> | null,
+): string {
+  const dayMonth = calendarSaleDayMonth(sale, calendar);
+  if (dayMonth) return `Sale ${dayMonth}`;
+  return 'Sale trùng ngày-tháng';
+}
+
+export function siteSaleProgramLabel(
+  sale?: SiteSaleProductPricing | null,
+  calendar?: Pick<SiteSaleCalendarState, 'event_date' | 'event_label'> | null,
+): string {
+  if (sale && isFlashSalePricing(sale)) return FLASH_SALE_PROGRAM_NAME;
+  return calendarSaleProgramLabel(sale, calendar);
+}
+
+/** Ghép tên chương trình đang giảm giá: «Sale 9/9 + CMSN», «Flash sale», «Sale thanh lý kho». */
+export function stackedSaleProgramLabel(opts: {
+  isWarehouse?: boolean;
+  isFlash?: boolean;
+  siteLabel?: string | null;
+  birthday?: boolean;
+}): string {
+  if (opts.isWarehouse) return WAREHOUSE_SALE_PROGRAM_NAME;
+  const parts: string[] = [];
+  if (opts.isFlash) parts.push(FLASH_SALE_PROGRAM_NAME);
+  else if (opts.siteLabel?.trim()) parts.push(opts.siteLabel.trim());
+  if (opts.birthday) parts.push(BIRTHDAY_PROGRAM_NAME);
+  return parts.join(' + ');
 }
 
 type CartLinePricingInput = {
@@ -306,20 +361,42 @@ export function sumCartLineListSubtotal(
   }, 0);
 }
 
-/** Chỉ sale ngày trùng tháng — không gồm thanh lý kho. */
+function sumCartLineSiteKindSavings(
+  items: CartLinePricingInput[],
+  calendar: SiteSaleCalendarState | null | undefined,
+  kind: 'flash' | 'calendar' | 'all',
+): number {
+  return items.reduce((sum, item) => {
+    if (isWarehouseCartLine(item)) return sum;
+    const merged = mergeCartLineSiteSaleFromCalendar(item, calendar);
+    const isFlash = cartLineHasActiveFlash(merged);
+    if (kind === 'flash' && !isFlash) return sum;
+    if (kind === 'calendar' && isFlash) return sum;
+    const pricing = resolveCartLineDisplayPricing(merged, false, 0);
+    return sum + pricing.siteLineSavings;
+  }, 0);
+}
+
+/** Sale dòng (flash + trùng tháng) — không gồm thanh lý kho. */
 export function sumCartLineSiteSaleSavings(
   items: CartLinePricingInput[],
   calendar?: SiteSaleCalendarState | null,
 ): number {
-  return items.reduce((sum, item) => {
-    if (isWarehouseCartLine(item)) return sum;
-    const pricing = resolveCartLineDisplayPricing(
-      mergeCartLineSiteSaleFromCalendar(item, calendar),
-      false,
-      0,
-    );
-    return sum + pricing.siteLineSavings;
-  }, 0);
+  return sumCartLineSiteKindSavings(items, calendar, 'all');
+}
+
+export function sumCartLineFlashSaleSavings(
+  items: CartLinePricingInput[],
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return sumCartLineSiteKindSavings(items, calendar, 'flash');
+}
+
+export function sumCartLineCalendarSaleSavings(
+  items: CartLinePricingInput[],
+  calendar?: SiteSaleCalendarState | null,
+): number {
+  return sumCartLineSiteKindSavings(items, calendar, 'calendar');
 }
 
 /** Tiết kiệm từ giá thanh lý kho (độc lập sale site). */
@@ -331,27 +408,19 @@ export function sumCartLineClearanceSavings(items: CartLinePricingInput[]): numb
   }, 0);
 }
 
-/** Nhãn badge góc ảnh: «5/5 - 6%». */
+/** Nhãn badge góc ảnh: «Sale 9/9 -6%» / «Flash sale -6%». */
 export function siteSaleDateBadgeLabel(siteSale: SiteSaleProductPricing): string | null {
   const pct = siteSale.percent ?? 0;
   if (pct <= 0) return null;
 
   if (isFlashSalePricing(siteSale)) {
-    return `FLASH -${pct}%`;
+    return `${FLASH_SALE_PROGRAM_NAME} -${pct}%`;
   }
 
-  if (siteSale.event_date) {
-    const parts = siteSale.event_date.slice(0, 10).split('-').map(Number);
-    const m = parts[1];
-    const d = parts[2];
-    if (m && d) return `${d}/${m} - ${pct}%`;
-  }
+  const dayMonth = calendarSaleDayMonth(siteSale);
+  if (dayMonth) return `Sale ${dayMonth} -${pct}%`;
 
-  const raw = (siteSale.event_label ?? '').trim();
-  const fromLabel = raw.match(/(\d{1,2})\/(\d{1,2})/);
-  if (fromLabel) return `${fromLabel[1]}/${fromLabel[2]} - ${pct}%`;
-
-  return `-${pct}%`;
+  return `${calendarSaleProgramLabel(siteSale)} -${pct}%`;
 }
 
 export function resolveProductDisplayPricing(
@@ -369,9 +438,7 @@ export function resolveProductDisplayPricing(
       : null;
   if (isWhLine && whListFromDb != null) {
     const beforeBirthday = Math.max(0, Number(product.price ?? 0));
-    const displayPrice = birthdayActive
-      ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
-      : beforeBirthday;
+    const displayPrice = beforeBirthday;
     const compareUnitPrice = whListFromDb;
     const savingsAmount = Math.max(0, compareUnitPrice - displayPrice);
     const discountPercent =
@@ -381,25 +448,25 @@ export function resolveProductDisplayPricing(
             Math.min(100, Math.round((savingsAmount / compareUnitPrice) * 100)),
           )
         : 0;
-    const birthdaySavingsAmount = birthdayActive
-      ? Math.max(0, beforeBirthday - displayPrice)
-      : 0;
     return {
       displayPrice,
       compareAt: compareUnitPrice,
       compareUnitPrice,
       savingsAmount,
-      birthdaySavingsAmount,
+      birthdaySavingsAmount: 0,
       listPrice: compareUnitPrice,
       sitePhase: null,
       siteSavings: 0,
       expectedSalePrice: null,
       sitePercent: discountPercent,
-      siteLabel: null,
+      siteLabel: WAREHOUSE_SALE_PROGRAM_NAME,
       countdownTo: null,
       beforeBirthday,
       discountPercent,
       isWarehouseClearance: true,
+      isFlashSale: false,
+      discountCapped: false,
+      effectiveBirthdayPercent: 0,
     };
   }
   if (isWhLine && whPct > 0) {
@@ -411,29 +478,28 @@ export function resolveProductDisplayPricing(
     if (beforeBirthday >= listPrice || product.original_price == null) {
       beforeBirthday = Math.max(0, Math.round(listPrice * (1 - whPct / 100)));
     }
-    const displayPrice = birthdayActive
-      ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
-      : beforeBirthday;
+    const displayPrice = beforeBirthday;
     const compareUnitPrice =
       listPrice > displayPrice ? listPrice : null;
     const savingsAmount = compareUnitPrice != null ? listPrice - displayPrice : 0;
-    const birthdaySavingsAmount = birthdayActive
-      ? Math.max(0, beforeBirthday - displayPrice)
-      : 0;
     return {
       displayPrice,
       compareAt: compareUnitPrice,
       compareUnitPrice,
       savingsAmount,
-      birthdaySavingsAmount,
+      birthdaySavingsAmount: 0,
       listPrice,
       sitePhase: null,
       siteSavings: 0,
       expectedSalePrice: null,
       sitePercent: 0,
-      siteLabel: null,
+      siteLabel: WAREHOUSE_SALE_PROGRAM_NAME,
       countdownTo: null,
       beforeBirthday,
+      isFlashSale: false,
+      isWarehouseClearance: true,
+      discountCapped: false,
+      effectiveBirthdayPercent: 0,
     };
   }
 
@@ -455,9 +521,14 @@ export function resolveProductDisplayPricing(
     compareAt = product.original_price;
   }
 
-  const displayPrice = birthdayActive
-    ? applyBirthdayDiscount(beforeBirthday, birthdayPercent)
-    : beforeBirthday;
+  const stacked = applyCatalogStackedDiscount({
+    listPrice,
+    afterLinePrograms: beforeBirthday,
+    birthdayActive,
+    birthdayPercent,
+  });
+  const displayPrice = stacked.displayPrice;
+  const birthdaySavingsAmount = stacked.birthdaySavings;
 
   const sitePercent = site?.percent ?? 0;
   let siteSavings = site?.savings_amount ?? 0;
@@ -470,24 +541,19 @@ export function resolveProductDisplayPricing(
     expectedSalePrice = Math.max(0, listPrice - siteSavings);
   }
 
-  const compareUnitPrice = birthdayActive
-    ? beforeBirthday > displayPrice
-      ? beforeBirthday
-      : null
-    : compareAt != null && compareAt > displayPrice
-      ? compareAt
-      : null;
+  const compareUnitPrice =
+    listPrice > displayPrice
+      ? listPrice
+      : compareAt != null && compareAt > displayPrice
+        ? compareAt
+        : null;
 
   const savingsAmount =
     compareUnitPrice != null ? Math.max(0, compareUnitPrice - displayPrice) : siteSavings;
 
-  const birthdaySavingsAmount = birthdayActive
-    ? Math.max(0, beforeBirthday - displayPrice)
-    : 0;
-
   return {
     displayPrice,
-    compareAt,
+    compareAt: compareUnitPrice ?? compareAt,
     compareUnitPrice,
     savingsAmount,
     birthdaySavingsAmount,
@@ -496,9 +562,17 @@ export function resolveProductDisplayPricing(
     siteSavings,
     expectedSalePrice,
     sitePercent,
-    siteLabel: site?.event_label ?? null,
+    siteLabel: isFlashSalePricing(site)
+      ? FLASH_SALE_PROGRAM_NAME
+      : sitePhase && sitePercent > 0
+        ? calendarSaleProgramLabel(site)
+        : null,
     countdownTo: site?.countdown_to ?? null,
     beforeBirthday,
+    isFlashSale: isFlashSalePricing(site),
+    isWarehouseClearance: false,
+    discountCapped: stacked.capped,
+    effectiveBirthdayPercent: stacked.effectiveBirthdayPercent,
   };
 }
 
@@ -525,9 +599,7 @@ export function resolveCartLineDisplayPricing(
   if (isWarehouseCartLine(item)) {
     const wh = resolveWarehouseCartLineUnitPricing(item);
     const qty = Math.max(1, item.quantity || 1);
-    const displayUnitPrice = birthdayActive
-      ? applyBirthdayDiscount(wh.displayPrice, birthdayPercent)
-      : wh.displayPrice;
+    const displayUnitPrice = wh.displayPrice;
     const compareUnitPrice = wh.hasDiscount ? wh.originalPrice : null;
     const displayLineTotal = displayUnitPrice * qty;
     const compareLineTotal = compareUnitPrice != null ? compareUnitPrice * qty : null;
@@ -541,7 +613,7 @@ export function resolveCartLineDisplayPricing(
       listPrice: wh.listPrice,
       sitePhase: null as string | null,
       sitePercent: wh.percent,
-      siteLabel: 'Thanh lý kho',
+      siteLabel: WAREHOUSE_SALE_PROGRAM_NAME,
       siteLineSavings: 0,
       siteUnitSavings: 0,
       teaserUnitSavings: 0,
@@ -550,6 +622,9 @@ export function resolveCartLineDisplayPricing(
       expectedLineTotal: null,
       countdownTo: null,
       beforeBirthday: wh.displayPrice,
+      isFlashSale: false,
+      birthdayLineSavings: 0,
+      birthdayUnitSavings: 0,
     };
   }
 
@@ -628,7 +703,7 @@ export function resolveCartLineDisplayPricing(
   const siteLineSavings = siteUnitSavings * qty;
   const birthdayLineSavings = birthdayUnitSavings * qty;
 
-  const isTeaser = sitePhase === 'teaser' && sitePercent > 0 && !birthdayActive;
+  const isTeaser = sitePhase === 'teaser' && sitePercent > 0;
   const expectedSaleUnitPrice =
     isTeaser && expectedSalePrice != null && expectedSalePrice > 0
       ? expectedSalePrice
@@ -659,7 +734,11 @@ export function resolveCartLineDisplayPricing(
     siteSaleUnitPrice: beforeBirthday,
     sitePhase,
     sitePercent,
-    siteLabel: site?.event_label ?? null,
+    siteLabel: isFlashSalePricing(site)
+      ? FLASH_SALE_PROGRAM_NAME
+      : sitePhase && sitePercent > 0
+        ? calendarSaleProgramLabel(site)
+        : null,
     siteSavings,
     expectedSalePrice,
     expectedSaleUnitPrice,
@@ -668,15 +747,16 @@ export function resolveCartLineDisplayPricing(
     teaserLineSavings,
     countdownTo: site?.countdown_to ?? null,
     beforeBirthday,
+    isFlashSale: isFlashSalePricing(site),
   };
 }
 
 export function siteSaleBannerMessage(state: SiteSaleCalendarState | null): string | null {
   if (!state?.enabled || !state.phase) return null;
   const pct = state.discount_percent ?? 0;
-  const label = state.event_label ?? 'Sale';
+  const label = calendarSaleProgramLabel(null, state);
   if (state.phase === 'teaser') {
-    return `${label} sắp diễn ra — giảm ${pct}% trong ngày sale. Còn ${formatCountdownLabel(state.countdown_to)}`;
+    return `${label} sắp diễn ra — giảm ${pct}% vào ${label}. Còn ${formatCountdownLabel(state.countdown_to)}`;
   }
   if (state.phase === 'active') {
     return `${label} đang diễn ra — giảm ${pct}% toàn website. Kết thúc sau ${formatCountdownLabel(state.countdown_to)}`;

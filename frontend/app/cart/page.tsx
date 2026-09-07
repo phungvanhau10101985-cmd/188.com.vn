@@ -39,13 +39,20 @@ import SiteSaleBanner from '@/components/SiteSaleBanner';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
 import {
+  calendarSaleProgramLabel,
+  cartLineHasActiveFlash,
+  FLASH_SALE_PROGRAM_NAME,
   mergeCartLineSiteSaleFromCalendar,
   resolveCartLineCheckoutTotal,
   resolveCartLineDisplayPricing,
+  siteSaleProgramLabel,
+  stackedSaleProgramLabel,
+  sumCartLineCalendarSaleSavings,
   sumCartLineCheckoutTotals,
   sumCartLineClearanceSavings,
+  sumCartLineFlashSaleSavings,
   sumCartLineListSubtotal,
-  sumCartLineSiteSaleSavings,
+  WAREHOUSE_SALE_PROGRAM_NAME,
 } from '@/lib/site-sale';
 import {
   cartLineMaxQuantity,
@@ -66,6 +73,7 @@ import {
   type AppliedWelcomePromo,
 } from '@/lib/welcome-promo';
 import { applyGrandOrderDiscountCap, lineProgramSavingsFromList, MAX_ORDER_DISCOUNT_PERCENT, resolveCappedPromoPercentDisplay } from '@/lib/order-discount-limits';
+import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 import CappedPromoPercentLabel from '@/components/cart/CappedPromoPercentLabel';
 import {
   computeShippingFee,
@@ -255,6 +263,14 @@ export default function CartPage() {
   const siteSaleState = cart?.site_sale ?? globalSiteSale ?? null;
   const siteSaleActive = siteSaleState?.phase === 'active';
   const siteSaleTeaser = siteSaleState?.phase === 'teaser';
+  const cartFlashLine = useMemo(
+    () =>
+      cartItems
+        .map((item) => mergeCartLineSiteSaleFromCalendar(item, siteSaleState))
+        .find((item) => cartLineHasActiveFlash(item)),
+    [cartItems, siteSaleState],
+  );
+  const cartHasFlash = Boolean(cartFlashLine);
 
   const regularSubtotal = useMemo(
     () => sumCartLineCheckoutTotals(selectedRegularItems, siteSaleState),
@@ -276,8 +292,12 @@ export default function CartPage() {
   );
   const selectedOriginalSubtotal = regularListSubtotal + warehouseListSubtotal;
 
-  const regularSiteSaleSavings = useMemo(
-    () => sumCartLineSiteSaleSavings(selectedRegularItems, siteSaleState),
+  const regularFlashSaleSavings = useMemo(
+    () => sumCartLineFlashSaleSavings(selectedRegularItems, siteSaleState),
+    [selectedRegularItems, siteSaleState],
+  );
+  const regularCalendarSaleSavings = useMemo(
+    () => sumCartLineCalendarSaleSavings(selectedRegularItems, siteSaleState),
     [selectedRegularItems, siteSaleState],
   );
   const warehouseClearanceSavings = useMemo(
@@ -291,12 +311,12 @@ export default function CartPage() {
         if (!isGoogleDiscountCartLine(item)) return sum;
         const pricing = resolveCartLineDisplayPricing(
           mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
-          birthdayLineActive,
-          birthdayPercent,
+          false,
+          0,
         );
         return sum + pricing.lineSavings;
       }, 0),
-    [selectedRegularItems, birthdayLineActive, birthdayPercent, siteSaleState],
+    [selectedRegularItems, siteSaleState],
   );
 
   /** Site sale + Google + mọi giảm dòng — đồng bộ backend (list − subtotal) cho trần 15%. */
@@ -310,15 +330,15 @@ export default function CartPage() {
       selectedRegularItems.reduce((sum, item) => {
         const pricing = resolveCartLineDisplayPricing(
           mergeCartLineSiteSaleFromCalendar(item, siteSaleState),
-          birthdayLineActive,
-          birthdayPercent,
+          false,
+          0,
         );
         if (pricing.sitePhase === 'teaser' && pricing.teaserLineSavings > 0) {
           return sum + pricing.teaserLineSavings;
         }
         return sum;
       }, 0),
-    [selectedRegularItems, birthdayLineActive, birthdayPercent, siteSaleState],
+    [selectedRegularItems, siteSaleState],
   );
 
   const rawWelcomeDiscount = calculateWelcomeDiscount(regularSubtotal, appliedPromo);
@@ -894,11 +914,25 @@ export default function CartPage() {
 
         <SiteSaleBanner state={siteSaleState} className="mb-4" />
 
+        {cartHasFlash && cartFlashLine?.site_sale?.countdown_to ? (
+          <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
+            <p className="font-semibold">{FLASH_SALE_PROGRAM_NAME} đang áp dụng trên sản phẩm trong giỏ</p>
+            <SiteSaleLiveCountdown
+              countdownTo={cartFlashLine.site_sale.countdown_to}
+              phase="active"
+              eventLabel={FLASH_SALE_PROGRAM_NAME}
+              size="sm"
+              inline
+              className="mt-1 block"
+            />
+          </div>
+        ) : null}
+
         {(siteSaleTeaser || siteSaleActive) && siteSaleState?.countdown_to ? (
           <SiteSaleLiveCountdown
             countdownTo={siteSaleState.countdown_to}
             phase={siteSaleState.phase}
-            eventLabel={siteSaleState.event_label}
+            eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
             className="mb-4"
           />
         ) : null}
@@ -1009,10 +1043,8 @@ export default function CartPage() {
             <div className="divide-y divide-gray-100">
               {(cart?.items ?? []).map((item) => {
                 const lineItem = mergeCartLineSiteSaleFromCalendar(item, siteSaleState);
-                const pricingCheckout = resolveCartLineDisplayPricing(lineItem, false, 0);
-                const pricing = birthdayLineActive
-                  ? resolveCartLineDisplayPricing(lineItem, true, birthdayPercent)
-                  : pricingCheckout;
+                const pricing = resolveCartLineDisplayPricing(lineItem, false, 0);
+                const isFlashLine = cartLineHasActiveFlash(lineItem) || pricing.isFlashSale;
                 const lineKey = `${item.product_id}-${item.selected_size ?? ''}-${item.selected_color ?? ''}-${item.id}`;
                 const lineChecked = selectionForTotals.has(item.id);
                 const showCompareUnit =
@@ -1030,6 +1062,13 @@ export default function CartPage() {
                 const googleDiscountPercent = isGoogleLine
                   ? googleDiscountPercentFromPricing(pricing.compareUnitPrice, pricing.displayUnitPrice)
                   : null;
+                const lineProgramName = isGoogleLine
+                  ? 'Google Shopping'
+                  : stackedSaleProgramLabel({
+                      isWarehouse: isWhLine,
+                      isFlash: isFlashLine,
+                      siteLabel: siteSaleProgramLabel(lineItem.site_sale, siteSaleState),
+                    }) || siteSaleProgramLabel(lineItem.site_sale, siteSaleState);
                 return (
                   <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
@@ -1074,10 +1113,43 @@ export default function CartPage() {
                                 {item.selected_color && `Màu: ${item.selected_color}`}
                                 {item.selected_color && item.product_data?.product_id && ' • '}
                                 {item.product_data?.product_id && `ID: ${item.product_data?.product_id}`}
-                                {isWhLine ? ' • Thanh lý kho' : ''}
+                                {isWhLine ? ` • ${WAREHOUSE_SALE_PROGRAM_NAME}` : ''}
                                 {isGoogleLine ? ' • Google Shopping' : ''}
                               </p>
                             )}
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {isFlashLine && pricing.sitePercent > 0 ? (
+                                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  {FLASH_SALE_PROGRAM_NAME} -{pricing.sitePercent}%
+                                </span>
+                              ) : null}
+                              {!isFlashLine && !isWhLine && !isGoogleLine && pricing.sitePhase === 'active' && pricing.sitePercent > 0 ? (
+                                <span className="rounded bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} -{pricing.sitePercent}%
+                                </span>
+                              ) : null}
+                              {!isFlashLine && !isWhLine && !isGoogleLine && pricing.sitePhase === 'teaser' && pricing.sitePercent > 0 ? (
+                                <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  Sắp {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} -{pricing.sitePercent}%
+                                </span>
+                              ) : null}
+                              {isWhLine ? (
+                                <span className="rounded bg-amber-700 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  {WAREHOUSE_SALE_PROGRAM_NAME}
+                                  {pricing.sitePercent > 0 ? ` -${pricing.sitePercent}%` : ''}
+                                </span>
+                              ) : null}
+                              {isGoogleLine ? (
+                                <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  Google{googleDiscountPercent != null ? ` -${googleDiscountPercent}%` : ''}
+                                </span>
+                              ) : null}
+                              {birthdayLineActive && !isWhLine ? (
+                                <span className="rounded bg-pink-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  {BIRTHDAY_PROGRAM_NAME} -{birthdayPercent}% ở tổng đơn
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1092,13 +1164,13 @@ export default function CartPage() {
                               {formatPrice(pricing.displayUnitPrice)}
                             </p>
                             <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
-                              Sale dự kiến {formatPrice(pricing.expectedSaleUnitPrice!)}
+                              {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} dự kiến {formatPrice(pricing.expectedSaleUnitPrice!)}
                             </p>
                             <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
-                              Tiết kiệm ~{formatPrice(pricing.teaserUnitSavings)}
+                              {lineProgramName}: tiết kiệm ~{formatPrice(pricing.teaserUnitSavings)}
                             </p>
                             <span className="mt-0.5 inline-block rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold text-white">
-                              -{pricing.sitePercent}%
+                              {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} -{pricing.sitePercent}%
                             </span>
                             {pricing.countdownTo ? (
                               <p className="mt-1 text-[10px] font-medium text-amber-800 sm:text-[11px]">
@@ -1123,12 +1195,16 @@ export default function CartPage() {
                             ) : null}
                             {pricing.lineSavings > 0 ? (
                               <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
-                                Tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
+                                {lineProgramName}: tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
                               </p>
                             ) : null}
                             {(pricing.sitePhase === 'active' || isWhLine) && pricing.sitePercent > 0 && !isGoogleLine ? (
-                              <span className="mt-0.5 inline-block rounded bg-red-500 px-1 py-0.5 text-[10px] font-bold text-white">
-                                -{pricing.sitePercent}%
+                              <span className={`mt-0.5 inline-block rounded px-1 py-0.5 text-[10px] font-bold text-white ${isFlashLine ? 'bg-rose-600' : isWhLine ? 'bg-amber-700' : 'bg-red-500'}`}>
+                                {isWhLine
+                                  ? `${WAREHOUSE_SALE_PROGRAM_NAME} -${pricing.sitePercent}%`
+                                  : isFlashLine
+                                    ? `${FLASH_SALE_PROGRAM_NAME} -${pricing.sitePercent}%`
+                                    : `${siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} -${pricing.sitePercent}%`}
                               </span>
                             ) : null}
                             {isGoogleLine && googleDiscountPercent != null ? (
@@ -1175,7 +1251,7 @@ export default function CartPage() {
                               Dự kiến {formatPrice(pricing.expectedLineTotal!)}
                             </p>
                             <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
-                              Tiết kiệm ~{formatPrice(pricing.teaserLineSavings)}
+                              {lineProgramName}: tiết kiệm ~{formatPrice(pricing.teaserLineSavings)}
                             </p>
                           </>
                         ) : (
@@ -1187,7 +1263,7 @@ export default function CartPage() {
                             ) : null}
                             {pricing.lineSavings > 0 ? (
                               <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
-                                Tiết kiệm {formatPrice(pricing.lineSavings)}
+                                {lineProgramName}: tiết kiệm {formatPrice(pricing.lineSavings)}
                               </p>
                             ) : null}
                           </>
@@ -1230,9 +1306,9 @@ export default function CartPage() {
               <div className="mb-2 space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] md:text-sm">
                   <span className="text-amber-700">
-                    Tiết kiệm dự kiến khi sale{' '}
+                    Tiết kiệm dự kiến khi {calendarSaleProgramLabel(null, siteSaleState)}{' '}
                     <span className="font-bold">
-                      {siteSaleState?.event_label ?? ''} (-{siteSaleState?.discount_percent ?? 0}%)
+                      (-{siteSaleState?.discount_percent ?? 0}%)
                     </span>
                   </span>
                   <span className="font-medium text-amber-700">~{formatPrice(selectedTeaserSavings)}</span>
@@ -1241,7 +1317,7 @@ export default function CartPage() {
                   <SiteSaleLiveCountdown
                     countdownTo={siteSaleState.countdown_to}
                     phase="teaser"
-                    eventLabel={siteSaleState.event_label}
+                    eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
                     size="sm"
                   />
                 ) : null}
@@ -1252,7 +1328,7 @@ export default function CartPage() {
               <SiteSaleLiveCountdown
                 countdownTo={siteSaleState.countdown_to}
                 phase="active"
-                eventLabel={siteSaleState.event_label}
+                eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
                 size="sm"
                 className="mb-2"
               />
@@ -1264,76 +1340,79 @@ export default function CartPage() {
               </p>
             ) : null}
 
-            {siteSaleActive && hasRegularSelection && regularSiteSaleSavings > 0 ? (
-              <>
-                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                  <span className="text-gray-500">Giá gốc (hàng thường)</span>
-                  <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                  <span className="text-gray-500">
-                    Sale ngày trùng tháng{' '}
-                    <span className="font-bold text-red-600">
-                      {siteSaleState?.event_label ?? ''} (-{siteSaleState?.discount_percent ?? 0}%)
-                    </span>
-                  </span>
-                  <span className="font-medium text-emerald-600">-{formatPrice(regularSiteSaleSavings)}</span>
-                </div>
-              </>
-            ) : null}
-
-            {hasRegularSelection && regularListSubtotal > regularSubtotal && !siteSaleActive && googleCartSavings <= 0 ? (
+            {hasRegularSelection && regularListSubtotal > regularSubtotal ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                <span className="text-gray-500">Giá gốc (hàng thường)</span>
+                <span className="text-gray-500">Giá gốc</span>
                 <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
               </div>
             ) : null}
 
+            {regularFlashSaleSavings > 0 ? (
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">
+                  {FLASH_SALE_PROGRAM_NAME}{' '}
+                  <span className="font-bold text-rose-600">
+                    ({formatPrice(regularFlashSaleSavings)} đã trừ trên giá SP)
+                  </span>
+                </span>
+                <span className="font-medium text-emerald-600">-{formatPrice(regularFlashSaleSavings)}</span>
+              </div>
+            ) : null}
+
+            {regularCalendarSaleSavings > 0 ? (
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">
+                  {calendarSaleProgramLabel(null, siteSaleState)}{' '}
+                  <span className="font-bold text-red-600">
+                    {siteSaleState?.discount_percent ? `(-${siteSaleState.discount_percent}%)` : ''}
+                  </span>
+                </span>
+                <span className="font-medium text-emerald-600">-{formatPrice(regularCalendarSaleSavings)}</span>
+              </div>
+            ) : null}
+
             {googleCartSavings > 0 ? (
-              <>
-                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                  <span className="text-gray-500">Giá gốc (hàng thường)</span>
-                  <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
-                </div>
-                <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                  <span className="text-gray-500">Giá ưu đãi Google Shopping</span>
-                  <span className="font-medium text-emerald-600">-{formatPrice(googleCartSavings)}</span>
-                </div>
-              </>
+              <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
+                <span className="text-gray-500">Giá ưu đãi Google Shopping</span>
+                <span className="font-medium text-emerald-600">-{formatPrice(googleCartSavings)}</span>
+              </div>
             ) : null}
 
             {welcomeApplied && selectedWelcomeDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  Ưu đãi chào mừng{' '}
-                  <span className="font-bold text-emerald-600">{appliedPromo?.code}</span>{' '}
+                  Mã {appliedPromo?.code}{' '}
                   (
                   <CappedPromoPercentLabel
                     display={welcomePercentDisplay}
                     className="font-bold text-emerald-600"
                   />
+                  {appliedPromo?.maxDiscount ? `, tối đa ${formatPrice(appliedPromo.maxDiscount)}` : ''}
                   )
                 </span>
                 <span className="font-medium text-emerald-600">
-                  -
-                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(
-                    selectedWelcomeDiscount
-                  )}
+                  -{formatPrice(selectedWelcomeDiscount)}
                 </span>
               </div>
+            ) : null}
+
+            {welcomeApplied && birthdayActive ? (
+              <p className="mb-1.5 text-[11px] text-pink-700">
+                Đang dùng mã — {BIRTHDAY_PROGRAM_NAME} tạm tắt (chọn một trong hai).
+              </p>
             ) : null}
 
             {birthdayActive && !welcomeApplied && selectedBirthdayDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  Ưu đãi sinh nhật{' '}
+                  {BIRTHDAY_PROGRAM_NAME}{' '}
                   <CappedPromoPercentLabel
                     display={birthdayPercentDisplay}
                     className="font-bold text-pink-600"
                   />
                 </span>
                 <span className="font-medium text-pink-600">
-                  -{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(selectedBirthdayDiscount)}
+                  -{formatPrice(selectedBirthdayDiscount)}
                 </span>
               </div>
             ) : null}
@@ -1364,7 +1443,7 @@ export default function CartPage() {
             {hasWarehouseSelection ? (
               <div className="mb-2 rounded-lg border border-amber-100 bg-amber-50/50 px-2 py-2">
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-900 md:text-xs">
-                  Thanh lý kho
+                  {WAREHOUSE_SALE_PROGRAM_NAME}
                 </p>
                 {warehouseListSubtotal > warehouseSubtotal ? (
                   <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
@@ -1374,7 +1453,7 @@ export default function CartPage() {
                 ) : null}
                 {warehouseClearanceSavings > 0 ? (
                   <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                    <span className="text-gray-600">Giảm giá thanh lý kho</span>
+                    <span className="text-gray-600">{WAREHOUSE_SALE_PROGRAM_NAME}</span>
                     <span className="font-medium text-emerald-700">-{formatPrice(warehouseClearanceSavings)}</span>
                   </div>
                 ) : null}
@@ -1386,12 +1465,18 @@ export default function CartPage() {
             ) : null}
 
             {discountCapped && hasRegularSelection ? (
-              <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 md:text-sm">
-                <span>Trần ưu đãi hàng thường {MAX_ORDER_DISCOUNT_PERCENT}% (không gồm thanh lý kho)</span>
-                <span className="shrink-0 whitespace-nowrap font-semibold text-amber-800">
-                  -{formatPrice(regularTotalDiscount)}
+              <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border border-amber-100 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800 md:text-sm">
+                <span>
+                  Trần ưu đãi hàng thường {MAX_ORDER_DISCOUNT_PERCENT}% giá gốc (không gồm thanh lý kho). Mã còn trần riêng nếu có.
+                </span>
+                <span className="shrink-0 whitespace-nowrap font-semibold text-amber-900">
+                  Đã giảm {formatPrice(regularTotalDiscount)}
                 </span>
               </div>
+            ) : hasRegularSelection && regularTotalDiscount > 0 ? (
+              <p className="mb-2 text-[11px] text-emerald-700 md:text-xs">
+                Đã tiết kiệm {formatPrice(regularTotalDiscount)} trên hàng thường.
+              </p>
             ) : null}
 
             {walletBalance > 0 ? (

@@ -11,6 +11,7 @@ import {
   productShowsClearanceOnCard,
   resolveClearanceCardHeroPercent,
 } from '@/lib/warehouse-clearance';
+import { WAREHOUSE_SALE_PROGRAM_NAME } from '@/lib/site-sale';
 
 type ProductCardClearanceMetaProps = {
   product: Product;
@@ -42,11 +43,11 @@ export default function ProductCardClearanceMeta({
   return (
     <div
       className={`rounded-md border-2 border-amber-300/90 bg-gradient-to-b from-amber-50 to-orange-50/90 px-2.5 py-2 space-y-1.5 shadow-sm ${className}`}
-      aria-label="Hàng thanh lý xả kho"
+      aria-label={WAREHOUSE_SALE_PROGRAM_NAME}
     >
       <div className="flex flex-wrap items-center justify-between gap-1.5">
         <p className={`${headerClass} font-bold uppercase tracking-wide text-amber-950`}>
-          Sale thanh lý xả kho
+          {WAREHOUSE_SALE_PROGRAM_NAME}
         </p>
         {bestDiscountPct > 0 ? (
           <span

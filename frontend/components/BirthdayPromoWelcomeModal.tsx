@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 
 /**
  * Popup chào CMSN toàn site khi khách đang trong chương trình SN / test SN.
@@ -118,10 +119,10 @@ export default function BirthdayPromoWelcomeModal() {
             Chúc mừng sinh nhật!
           </p>
           <span className="mt-3 inline-flex rounded-full bg-pink-600 px-4 py-1.5 text-sm font-bold text-white shadow-sm">
-            Ưu đãi đang bật −{birthday.percent}%
+            {BIRTHDAY_PROGRAM_NAME} −{birthday.percent}%
           </span>
           <p id={descId} className="mt-4 max-w-md text-sm leading-relaxed text-gray-700 sm:text-base">
-            Giá trên website đã được giảm trực tiếp theo chương trình sinh nhật và áp dụng khi thanh toán,
+            Giá trên website đã được giảm trực tiếp theo chương trình {BIRTHDAY_PROGRAM_NAME} và áp dụng khi thanh toán,
             không cần nhập mã.
             {birthday.nextBirthdayLabel ? (
               <span className="mt-2 block font-medium text-gray-800">

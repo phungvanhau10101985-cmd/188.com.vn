@@ -1,6 +1,8 @@
 export const BIRTHDAY_DISCOUNT_PERCENT = 10;
 export const BIRTHDAY_OFFER_DAYS_BEFORE_MIN = 1;
 export const BIRTHDAY_OFFER_DAYS_BEFORE_MAX = 7;
+/** Nhãn hiển thị chương trình giảm giá sinh nhật. */
+export const BIRTHDAY_PROGRAM_NAME = 'CMSN';
 
 export interface BirthdayDiscountState {
   active: boolean;

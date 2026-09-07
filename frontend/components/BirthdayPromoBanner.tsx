@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
+import { calendarSaleProgramLabel, FLASH_SALE_PROGRAM_NAME } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
 
 interface BirthdayPromoBannerProps {
   active: boolean;
@@ -18,6 +21,14 @@ export default function BirthdayPromoBanner({
   compact = false,
   className = '',
 }: BirthdayPromoBannerProps) {
+  const { state: siteSaleState } = useSiteSale();
+  const stackedPrograms = useMemo(() => {
+    const names = [FLASH_SALE_PROGRAM_NAME];
+    if (siteSaleState?.enabled && (siteSaleState.phase === 'active' || siteSaleState.phase === 'teaser')) {
+      names.push(calendarSaleProgramLabel(null, siteSaleState));
+    }
+    return names.join(' / ');
+  }, [siteSaleState]);
   const storageKey = useMemo(
     () => `188_birthday_promo_banner_closed_${nextBirthdayLabel || 'unknown'}_${percent}`,
     [nextBirthdayLabel, percent]
@@ -54,7 +65,7 @@ export default function BirthdayPromoBanner({
         type="button"
         onClick={closeBanner}
         className="absolute right-2 top-2 min-h-[44px] min-w-[44px] rounded-full p-2 text-gray-500 hover:bg-white/70 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 sm:right-3 sm:top-3 sm:min-h-0 sm:min-w-0 sm:p-1.5"
-        aria-label="Đóng banner ưu đãi sinh nhật"
+        aria-label={`Đóng banner ${BIRTHDAY_PROGRAM_NAME}`}
       >
         <svg className="mx-auto h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -73,11 +84,12 @@ export default function BirthdayPromoBanner({
               Chúc mừng sinh nhật bạn!
             </p>
             <span className="w-fit shrink-0 rounded-full bg-pink-600 px-2.5 py-1 text-xs font-bold text-white">
-              Đã kích hoạt -{percent}%
+              {BIRTHDAY_PROGRAM_NAME} -{percent}%
             </span>
           </div>
           <p className="mt-1 text-xs leading-snug text-gray-600 sm:mt-1 sm:leading-5 sm:text-sm">
-            Giá sinh nhật đã được trừ trực tiếp trên website và tự áp dụng khi thanh toán, không cần mã.
+            {BIRTHDAY_PROGRAM_NAME} giảm {percent}% tự áp dụng khi thanh toán, không cần mã. Cộng {stackedPrograms},
+            tổng ưu đãi tối đa 15% giá gốc (hoặc trần từng mã).
             {nextBirthdayLabel ? ` Sinh nhật sắp tới: ${nextBirthdayLabel}.` : ''}
           </p>
           {!compact && (

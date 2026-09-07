@@ -15,6 +15,8 @@ import {
   warehouseVariantSizeLabel,
   warehouseVariantsInStock,
 } from '@/lib/warehouse-clearance';
+import { FLASH_SALE_PROGRAM_NAME, WAREHOUSE_SALE_PROGRAM_NAME, calendarSaleProgramLabel } from '@/lib/site-sale';
+import { useSiteSale } from '@/lib/use-site-sale';
 import Button from '@/components/ui/Button';
 
 type WarehouseClearanceBlockProps = {
@@ -73,6 +75,8 @@ export default function WarehouseClearanceBlock({
   selectedVariantId: selectedVariantIdProp,
   onSelectVariant,
 }: WarehouseClearanceBlockProps) {
+  const { state: siteSaleState } = useSiteSale();
+  const calendarProgramName = calendarSaleProgramLabel(null, siteSaleState);
   const variants = useMemo(() => warehouseVariantsInStock(product), [product]);
   const isControlled = onSelectVariant != null;
   const [internalId, setInternalId] = useState<number | null>(null);
@@ -123,13 +127,13 @@ export default function WarehouseClearanceBlock({
   return (
     <section
       className="rounded-2xl border-2 border-orange-300 bg-gradient-to-br from-orange-50 via-amber-50 to-orange-100/90 p-4 shadow-md ring-1 ring-orange-200/70 sm:p-5"
-      aria-label="Hàng thanh lý trong kho"
+      aria-label={WAREHOUSE_SALE_PROGRAM_NAME}
     >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-orange-200/80 pb-3">
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-base font-extrabold tracking-tight text-orange-950 sm:text-lg">
-              Thanh lý trong kho
+              {WAREHOUSE_SALE_PROGRAM_NAME}
             </p>
             {headerPct > 0 ? (
               <span className="inline-flex min-w-[3.25rem] items-center justify-center rounded-lg bg-red-600 px-2.5 py-1 text-sm font-extrabold text-white shadow-sm ring-2 ring-red-400/30">
@@ -138,7 +142,7 @@ export default function WarehouseClearanceBlock({
             ) : null}
           </div>
           <p className="text-xs font-medium text-orange-900/90 sm:text-sm">
-            Hàng duyệt hoàn — giá riêng, không cộng sale ngày trùng tháng.
+            Hàng duyệt hoàn — giá riêng, không cộng {FLASH_SALE_PROGRAM_NAME} / {calendarProgramName}.
             {variants.length > 1 ? (
               <span className="ml-1 font-semibold text-orange-950">
                 ({variants.length} dòng còn hàng)
@@ -217,7 +221,7 @@ export default function WarehouseClearanceBlock({
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     {pricing.savingsAmount > 0 ? (
                       <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-800 ring-1 ring-emerald-200 sm:text-sm">
-                        Tiết kiệm {formatPrice(pricing.savingsAmount)}
+                        {WAREHOUSE_SALE_PROGRAM_NAME}: tiết kiệm {formatPrice(pricing.savingsAmount)}
                       </span>
                     ) : null}
                     <span
@@ -249,7 +253,7 @@ export default function WarehouseClearanceBlock({
             </span>
             {selectedPricing.savingsAmount > 0 ? (
               <span className="text-xs font-semibold text-emerald-700 sm:text-sm">
-                Tiết kiệm {formatPrice(selectedPricing.savingsAmount * quantity)}
+                {WAREHOUSE_SALE_PROGRAM_NAME}: tiết kiệm {formatPrice(selectedPricing.savingsAmount * quantity)}
               </span>
             ) : null}
           </div>

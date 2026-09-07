@@ -4,7 +4,7 @@ import Link from 'next/link';
 export const metadata = {
   title: 'Vì sao cần ngày sinh và giới tính? | 188.com.vn',
   description:
-    '188.com.vn dùng ngày sinh và giới tính để gửi ưu đãi sinh nhật và gợi ý sản phẩm hợp tuổi, hợp gu cho bạn.',
+    '188.com.vn dùng ngày sinh và giới tính để gửi ưu đãi CMSN và gợi ý sản phẩm hợp tuổi, hợp gu cho bạn.',
 };
 
 export default function GoiYTuoiGioiPage() {
@@ -18,8 +18,8 @@ export default function GoiYTuoiGioiPage() {
       <h2 className="text-lg font-semibold text-zinc-900 mt-2 mb-3">Mục đích chính</h2>
       <ul className="list-disc pl-5 space-y-3 text-zinc-600">
         <li>
-          <strong className="text-zinc-800">Ưu đãi & quà tặng dịp sinh nhật</strong> — khi bạn có ngày sinh trong
-          Hồ sơ, shop có thể gửi chương trình giảm giá và ưu đãi riêng vào dịp sinh nhật của bạn.
+          <strong className="text-zinc-800">Ưu đãi CMSN dịp sinh nhật</strong> — khi bạn có ngày sinh trong
+          Hồ sơ, shop có thể gửi chương trình CMSN giảm giá vào dịp sinh nhật của bạn.
         </li>
         <li>
           <strong className="text-zinc-800">Gợi ý sản phẩm hợp tuổi, hợp gu</strong> — giúp bạn thấy những mẫu phù
@@ -41,7 +41,7 @@ export default function GoiYTuoiGioiPage() {
       <h2 className="text-lg font-semibold text-zinc-900 mt-8 mb-3">Nếu chưa điền hồ sơ</h2>
       <p className="text-zinc-600">
         Bạn vẫn mua sắm bình thường. Khi bổ sung ngày sinh và giới tính, shop mới có thể gửi{' '}
-        <strong className="text-zinc-800">ưu đãi sinh nhật</strong> và{' '}
+        <strong className="text-zinc-800">ưu đãi CMSN</strong> và{' '}
         <strong className="text-zinc-800">gợi ý phù hợp hơn</strong> dành riêng cho bạn.
       </p>
 

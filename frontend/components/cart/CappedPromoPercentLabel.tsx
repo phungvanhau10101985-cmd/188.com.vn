@@ -18,7 +18,7 @@ export default function CappedPromoPercentLabel({ display, className }: CappedPr
     return (
       <span className={className}>
         còn {formatDiscountPercent(display.effectivePercent)}% ({MAX_ORDER_DISCOUNT_PERCENT}% −{' '}
-        {formatDiscountPercent(display.sitePercent)}% sale){' '}
+        {formatDiscountPercent(display.sitePercent)}% flash/sale){' '}
         <span className="font-normal text-gray-400">
           (Giảm giá tổng không quá {MAX_ORDER_DISCOUNT_PERCENT}%)
         </span>

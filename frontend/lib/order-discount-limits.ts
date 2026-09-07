@@ -134,3 +134,51 @@ export function applyGrandOrderDiscountCap(
   const capped = result.capped || siteSaleSavings + rawPromo > maxTotal;
   return { ...result, capped };
 }
+
+/**
+ * Trần 15% cho 1 SP (lưới / PDP): sale/flash dòng + sinh nhật không vượt 15% giá gốc.
+ * Hạng thành viên tính sau, trên phần còn lại của ngân sách trần.
+ */
+export function applyCatalogStackedDiscount(params: {
+  listPrice: number;
+  afterLinePrograms: number;
+  birthdayActive: boolean;
+  birthdayPercent: number;
+  loyaltyPercent?: number;
+}): {
+  displayPrice: number;
+  birthdaySavings: number;
+  loyaltySavings: number;
+  capped: boolean;
+  effectiveBirthdayPercent: number;
+} {
+  const listPrice = Math.max(0, params.listPrice);
+  const afterLine = Math.max(0, params.afterLinePrograms);
+  const siteSavings = Math.max(0, listPrice - afterLine);
+  const rawBirthday =
+    params.birthdayActive && params.birthdayPercent > 0
+      ? (afterLine * params.birthdayPercent) / 100
+      : 0;
+  const afterBirthdayRaw = Math.max(0, afterLine - rawBirthday);
+  const rawLoyalty =
+    (params.loyaltyPercent ?? 0) > 0
+      ? (afterBirthdayRaw * (params.loyaltyPercent ?? 0)) / 100
+      : 0;
+  const capped = applyGrandOrderDiscountCap(
+    listPrice,
+    siteSavings,
+    0,
+    rawBirthday,
+    rawLoyalty,
+  );
+  const displayPrice = Math.max(0, afterLine - capped.birthday);
+  const effectiveBirthdayPercent =
+    afterLine > 0 ? (capped.birthday / afterLine) * 100 : 0;
+  return {
+    displayPrice,
+    birthdaySavings: capped.birthday,
+    loyaltySavings: capped.loyalty,
+    capped: capped.capped,
+    effectiveBirthdayPercent,
+  };
+}

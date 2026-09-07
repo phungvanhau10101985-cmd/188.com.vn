@@ -6,9 +6,9 @@ import type { Product, ProductListResponse } from '@/types/api';
 const PAGE_SIZE = 48;
 
 export const metadata: Metadata = {
-  title: 'Kho sale — Hàng thanh lý xả kho',
+  title: 'Sale thanh lý kho',
   description:
-    'Sản phẩm Sale Sốc, hàng thanh lý kho còn size — giá ưu đãi, số lượng có hạn trên 188.COM.VN.',
+    'Sale thanh lý kho — hàng hoàn còn size, giá ưu đãi, số lượng có hạn trên 188.COM.VN.',
   alternates: { canonical: '/kho-sale' },
   robots: { index: true, follow: true },
 };

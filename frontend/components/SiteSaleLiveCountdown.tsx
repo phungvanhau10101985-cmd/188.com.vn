@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
+import { calendarSaleProgramLabel } from '@/lib/site-sale';
 
 type Props = {
   countdownTo?: string | null;
@@ -56,7 +57,7 @@ export default function SiteSaleLiveCountdown({
 
   if (!clientMounted || !phase || !countdownLive) return null;
 
-  const label = eventLabel?.trim() || 'Sale';
+  const label = eventLabel?.trim() || calendarSaleProgramLabel();
   const prefix = phase === 'teaser' ? `${label} bắt đầu sau` : `${label} — còn`;
   const sizeClass =
     size === 'sm'

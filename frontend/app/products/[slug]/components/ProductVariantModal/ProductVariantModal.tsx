@@ -19,7 +19,8 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import Button from '@/components/ui/Button';
-import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing, stackedSaleProgramLabel } from '@/lib/site-sale';
+import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
@@ -58,6 +59,9 @@ function VariantModalLineTotal({
   savingsPerUnit,
   sitePhase,
   sitePercent,
+  siteLabel,
+  isFlashSale,
+  birthdayActive,
   compact,
 }: {
   quantity: number;
@@ -65,12 +69,21 @@ function VariantModalLineTotal({
   savingsPerUnit: number;
   sitePhase?: 'teaser' | 'active' | string | null;
   sitePercent?: number | null;
+  siteLabel?: string | null;
+  isFlashSale?: boolean;
+  birthdayActive?: boolean;
   compact?: boolean;
 }) {
   const subtotal = unitPrice * quantity;
   const savingsTotal = savingsPerUnit * quantity;
   const showSavings =
     savingsTotal > 0 || (sitePhase === 'teaser' && (sitePercent ?? 0) > 0);
+  const programLabel =
+    stackedSaleProgramLabel({
+      isFlash: isFlashSale,
+      siteLabel: siteLabel || null,
+      birthday: birthdayActive,
+    }) || siteLabel || 'Sale';
 
   return (
     <div
@@ -90,8 +103,8 @@ function VariantModalLineTotal({
         {showSavings ? (
           <p className={`font-medium text-emerald-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
             {sitePhase === 'teaser'
-              ? `Tiết kiệm dự kiến ~${formatPrice(savingsTotal)}`
-              : `Tiết kiệm ${formatPrice(savingsTotal)}`}
+              ? `${siteLabel || programLabel}: tiết kiệm dự kiến ~${formatPrice(savingsTotal)}`
+              : `${programLabel}: tiết kiệm ${formatPrice(savingsTotal)}`}
           </p>
         ) : null}
       </div>
@@ -214,14 +227,21 @@ export default function ProductVariantModal({
   );
   const pricing = resolveProductDisplayPricing(
     productForPricing,
-    birthdayDiscount.active,
+    birthdayDiscount.active && product.is_warehouse_clearance !== true,
     birthdayDiscount.percent,
   );
   const displayPrice = pricing.displayPrice;
-  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
+  const birthdayOnPdp = birthdayDiscount.active && product.is_warehouse_clearance !== true;
+  const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
   const promoSavingsAmount = pricing.savingsAmount * effectiveQuantity;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
-  const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent * effectiveQuantity) / 100;
+  const loyaltyDiscountAmount = applyCatalogStackedDiscount({
+    listPrice: pricing.listPrice,
+    afterLinePrograms: pricing.beforeBirthday,
+    birthdayActive: birthdayOnPdp,
+    birthdayPercent: birthdayDiscount.percent,
+    loyaltyPercent: loyaltyDiscountPercent,
+  }).loyaltySavings * effectiveQuantity;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const images = [
@@ -426,8 +446,10 @@ export default function ProductVariantModal({
                 sitePercent={pricing.sitePercent}
                 siteLabel={pricing.siteLabel}
                 countdownTo={pricing.countdownTo}
-                birthdayActive={birthdayDiscount.active}
+                birthdayActive={birthdayOnPdp}
                 birthdayPercent={birthdayDiscount.percent}
+                isFlashSale={pricing.isFlashSale}
+                discountCapped={pricing.discountCapped}
                 size="sm"
               />
               
@@ -557,6 +579,9 @@ export default function ProductVariantModal({
                     savingsPerUnit={pricing.savingsAmount}
                     sitePhase={pricing.sitePhase}
                     sitePercent={pricing.sitePercent}
+                    siteLabel={pricing.siteLabel}
+                    isFlashSale={pricing.isFlashSale}
+                    birthdayActive={birthdayOnPdp}
                   />
                 ) : null}
               </div>
@@ -590,8 +615,10 @@ export default function ProductVariantModal({
                     sitePercent={pricing.sitePercent}
                     siteLabel={pricing.siteLabel}
                     countdownTo={pricing.countdownTo}
-                    birthdayActive={birthdayDiscount.active}
+                    birthdayActive={birthdayOnPdp}
                     birthdayPercent={birthdayDiscount.percent}
+                    isFlashSale={pricing.isFlashSale}
+                    discountCapped={pricing.discountCapped}
                     size="sm"
                   />
                   
@@ -730,6 +757,9 @@ export default function ProductVariantModal({
                     savingsPerUnit={pricing.savingsAmount}
                     sitePhase={pricing.sitePhase}
                     sitePercent={pricing.sitePercent}
+                    siteLabel={pricing.siteLabel}
+                    isFlashSale={pricing.isFlashSale}
+                    birthdayActive={birthdayOnPdp}
                     compact
                   />
                 ) : null}

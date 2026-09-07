@@ -3,7 +3,14 @@
 import { useMemo } from 'react';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
-import { formatCountdownParts } from '@/lib/site-sale';
+import {
+  FLASH_SALE_PROGRAM_NAME,
+  WAREHOUSE_SALE_PROGRAM_NAME,
+  formatCountdownParts,
+  stackedSaleProgramLabel,
+} from '@/lib/site-sale';
+import { MAX_ORDER_DISCOUNT_PERCENT } from '@/lib/order-discount-limits';
+import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 import { formatPrice } from '@/lib/utils';
 
 export interface ProductPromoPriceBlockProps {
@@ -17,10 +24,12 @@ export interface ProductPromoPriceBlockProps {
   countdownTo?: string | null;
   birthdayActive?: boolean;
   birthdayPercent?: number;
+  isFlashSale?: boolean;
+  discountCapped?: boolean;
   quantity?: number;
   size?: 'sm' | 'md' | 'lg';
   showQuantityTotal?: boolean;
-  /** Nhãn badge % giảm (vd. «Thanh lý kho») — mặc định «Giảm giá». */
+  /** Nhãn badge % giảm (vd. «Sale thanh lý kho»). */
   promoLabel?: string | null;
   /** Nhãn giá đang bán khi có khuyến mãi (mặc định: thanh lý hoặc «Giá ưu đãi»). */
   activePriceLabel?: string | null;
@@ -42,6 +51,8 @@ export default function ProductPromoPriceBlock({
   countdownTo = null,
   birthdayActive = false,
   birthdayPercent = 0,
+  isFlashSale = false,
+  discountCapped = false,
   quantity = 1,
   size = 'md',
   showQuantityTotal = false,
@@ -72,10 +83,10 @@ export default function ProductPromoPriceBlock({
 
   const qty = Math.max(1, quantity);
   const unitSavings = Math.max(0, savingsAmount);
-  const isTeaser = sitePhase === 'teaser' && sitePercent > 0 && !birthdayActive;
+  const isTeaser = sitePhase === 'teaser' && sitePercent > 0;
   const computedExpected =
     isTeaser && sitePercent > 0
-      ? Math.max(0, Math.round(displayPrice * (1 - sitePercent / 100)))
+      ? Math.max(0, Math.round((compareUnitPrice ?? displayPrice) * (1 - sitePercent / 100)))
       : null;
   const teaserExpected =
     expectedSalePrice != null && expectedSalePrice > 0
@@ -83,9 +94,9 @@ export default function ProductPromoPriceBlock({
       : computedExpected;
   const teaserSavings =
     isTeaser && teaserExpected != null
-      ? Math.max(0, displayPrice - teaserExpected)
+      ? Math.max(0, (compareUnitPrice ?? displayPrice) - teaserExpected)
       : isTeaser && sitePercent > 0
-        ? Math.round(displayPrice * sitePercent / 100)
+        ? Math.round((compareUnitPrice ?? displayPrice) * sitePercent / 100)
         : 0;
   const showActivePromo =
     !isTeaser &&
@@ -93,6 +104,8 @@ export default function ProductPromoPriceBlock({
     compareUnitPrice > displayPrice &&
     unitSavings > 0;
   const showTeaserPromo = isTeaser && teaserSavings > 0;
+  const showSiteChip =
+    sitePercent > 0 && !suppressSiteSaleBanners && (sitePhase === 'active' || sitePhase === 'teaser');
 
   const activeDiscountPercent = useMemo(() => {
     if (showTeaserPromo && sitePercent > 0) return sitePercent;
@@ -121,7 +134,11 @@ export default function ProductPromoPriceBlock({
   const showPercentBadge = activeDiscountPercent > 0 && (showActivePromo || showTeaserPromo);
   const resolvedActivePriceLabel =
     activePriceLabel?.trim() ||
-    (clearanceHighlight ? 'Giá thanh lý' : 'Giá ưu đãi');
+    (clearanceHighlight
+      ? WAREHOUSE_SALE_PROGRAM_NAME
+      : isFlashSale
+        ? FLASH_SALE_PROGRAM_NAME
+        : siteLabel?.trim() || (birthdayActive ? BIRTHDAY_PROGRAM_NAME : 'Giá ưu đãi'));
   const percentBadgeClass = clearanceHighlight
     ? size === 'lg'
       ? 'min-w-[4.5rem] rounded-xl bg-red-600 px-3.5 py-2 text-lg font-extrabold text-white shadow-md ring-2 ring-red-400/40'
@@ -135,7 +152,20 @@ export default function ProductPromoPriceBlock({
       ? 'px-2.5 py-1 text-xs'
       : 'px-3 py-1 text-sm';
 
-  const saleLabel = siteLabel?.trim() || 'Sale';
+  const saleLabel = isFlashSale
+    ? FLASH_SALE_PROGRAM_NAME
+    : (siteLabel?.trim() || 'Sale trùng ngày-tháng');
+  const savingsProgramLabel =
+    stackedSaleProgramLabel({
+      isWarehouse: clearanceHighlight,
+      isFlash: isFlashSale,
+      siteLabel:
+        showSiteChip || showTeaserPromo
+          ? saleLabel
+          : promoLabel?.trim() ||
+            (isFlashSale || siteLabel?.trim() ? saleLabel : null),
+      birthday: birthdayActive && !clearanceHighlight,
+    }) || saleLabel;
   const countdownPrefix =
     sitePhase === 'teaser'
       ? `${saleLabel} bắt đầu sau`
@@ -145,45 +175,47 @@ export default function ProductPromoPriceBlock({
 
   return (
     <div className={`space-y-2 ${className}`}>
-      {birthdayActive && unitSavings > 0 ? (
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-pink-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
-          <span aria-hidden>🎂</span>
-          Giá sinh nhật đã giảm {birthdayPercent}%
-        </div>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {birthdayActive && birthdayPercent > 0 ? (
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-pink-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
+            <span aria-hidden>🎂</span>
+            {BIRTHDAY_PROGRAM_NAME} -{birthdayPercent}%
+          </div>
+        ) : null}
 
-      {sitePhase === 'active' && sitePercent > 0 && !birthdayActive && !suppressSiteSaleBanners ? (
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
-          <span aria-hidden>🔥</span>
-          {siteLabel ?? 'Sale ngày trùng tháng'} — giảm {sitePercent}%
-        </div>
-      ) : null}
+        {showSiteChip && sitePhase === 'active' ? (
+          <div className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold text-white shadow-sm ${isFlashSale ? 'bg-rose-600' : 'bg-red-600'}`}>
+            <span aria-hidden>{isFlashSale ? '⚡' : '🔥'}</span>
+            {saleLabel} — giảm {sitePercent}%
+          </div>
+        ) : null}
 
-      {showTeaserPromo && !suppressSiteSaleBanners ? (
-        <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
-          <span aria-hidden>⏳</span>
-          {siteLabel ?? 'Sắp sale'} — giảm {sitePercent}% trong ngày sale
-        </div>
-      ) : null}
+        {showSiteChip && showTeaserPromo ? (
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
+            <span aria-hidden>⏳</span>
+            {saleLabel} — giảm {sitePercent}%
+          </div>
+        ) : null}
 
-      {showActivePromo &&
-      activeDiscountPercent > 0 &&
-      sitePhase !== 'active' &&
-      !birthdayActive ? (
-        <div
-          className={`inline-flex items-center gap-2 rounded-full font-bold text-white shadow-sm ${
-            clearanceHighlight
-              ? 'bg-gradient-to-r from-red-600 to-orange-600 px-4 py-1.5 text-sm'
-              : 'bg-red-600 px-3 py-1 text-xs'
-          }`}
-        >
-          <span aria-hidden>{clearanceHighlight ? '🏷️' : '🔥'}</span>
-          <span>
-            {promoLabel?.trim() || (clearanceHighlight ? 'Thanh lý kho' : 'Giảm giá')} —{' '}
-            <span className="tabular-nums">-{activeDiscountPercent}%</span>
-          </span>
-        </div>
-      ) : null}
+        {showActivePromo &&
+        activeDiscountPercent > 0 &&
+        !showSiteChip &&
+        !birthdayActive ? (
+          <div
+            className={`inline-flex items-center gap-2 rounded-full font-bold text-white shadow-sm ${
+              clearanceHighlight
+                ? 'bg-gradient-to-r from-red-600 to-orange-600 px-4 py-1.5 text-sm'
+                : 'bg-red-600 px-3 py-1 text-xs'
+            }`}
+          >
+            <span aria-hidden>{clearanceHighlight ? '🏷️' : '🔥'}</span>
+            <span>
+              {promoLabel?.trim() || (clearanceHighlight ? WAREHOUSE_SALE_PROGRAM_NAME : saleLabel)} —{' '}
+              <span className="tabular-nums">-{activeDiscountPercent}%</span>
+            </span>
+          </div>
+        ) : null}
+      </div>
 
       {countdownPrefix && countdownLive ? (
         <div
@@ -204,6 +236,12 @@ export default function ProductPromoPriceBlock({
         </div>
       ) : null}
 
+      {discountCapped && !clearanceHighlight ? (
+        <p className="text-[11px] font-medium text-amber-800">
+          Tổng ưu đãi tối đa {MAX_ORDER_DISCOUNT_PERCENT}% giá gốc — giá đang hiển thị đã khớp lúc thanh toán.
+        </p>
+      ) : null}
+
       <div
         className={`flex flex-wrap items-center gap-x-3 gap-y-2 ${
           clearanceHighlight && showActivePromo ? 'sm:items-center' : 'items-baseline'
@@ -219,9 +257,9 @@ export default function ProductPromoPriceBlock({
         ) : null}
 
         <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
-          {showTeaserPromo ? (
+          {showTeaserPromo && !showActivePromo ? (
             <span className="w-full text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-              Giá gốc
+              Giá hiện tại
             </span>
           ) : null}
           {showActivePromo && !showTeaserPromo ? (
@@ -238,11 +276,11 @@ export default function ProductPromoPriceBlock({
               <span
                 className={`inline-flex items-baseline gap-1 rounded-full border border-emerald-200 bg-emerald-50 font-semibold text-emerald-800 shadow-sm ${compareClass}`}
               >
-                <span className="text-[10px] font-medium text-emerald-700">Giá sale dự kiến</span>
+                <span className="text-[10px] font-medium text-emerald-700">Giá {saleLabel} dự kiến</span>
                 <span>{formatPrice(teaserExpected!)}</span>
               </span>
               <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200 sm:text-xs">
-                Tiết kiệm dự kiến ~{formatPrice(teaserSavings)}
+                {saleLabel}: tiết kiệm dự kiến ~{formatPrice(teaserSavings)}
               </span>
               {!clearanceHighlight ? (
                 <span className={percentBadgeClass}>-{activeDiscountPercent}%</span>
@@ -261,7 +299,7 @@ export default function ProductPromoPriceBlock({
                 </span>
               </span>
               <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200 sm:text-xs">
-                Tiết kiệm {formatPrice(unitSavings)}
+                {savingsProgramLabel}: tiết kiệm {formatPrice(unitSavings)}
               </span>
               {showPercentBadge && !(clearanceHighlight && showActivePromo) ? (
                 <span className={percentBadgeClass}>-{activeDiscountPercent}%</span>
@@ -281,8 +319,8 @@ export default function ProductPromoPriceBlock({
             {showActivePromo || showTeaserPromo ? (
               <p className="text-[11px] font-medium text-emerald-600">
                 {showTeaserPromo
-                  ? `Tiết kiệm dự kiến ~${formatPrice(teaserSavings * qty)}`
-                  : `Tiết kiệm ${formatPrice(unitSavings * qty)}`}
+                  ? `${saleLabel}: tiết kiệm dự kiến ~${formatPrice(teaserSavings * qty)}`
+                  : `${savingsProgramLabel}: tiết kiệm ${formatPrice(unitSavings * qty)}`}
               </p>
             ) : null}
           </div>

@@ -228,10 +228,10 @@ export default function BirthGenderSalePromptModal() {
       >
         <div className="p-4 sm:p-5">
           <h2 id={titleId} className="text-lg font-bold text-gray-900">
-            Nhận ưu đãi sinh nhật
+            Nhận ưu đãi CMSN
           </h2>
           <p id={descId} className="mt-1 text-sm text-gray-600">
-            Cập nhật ngày sinh và giới tính để 188.COM.VN gửi chương trình sale và gợi ý phù hợp dịp sinh nhật của
+            Cập nhật ngày sinh và giới tính để 188.COM.VN gửi chương trình CMSN và gợi ý phù hợp dịp sinh nhật của
             bạn.
           </p>
 

@@ -3,7 +3,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import type { SiteSaleCalendarState } from '@/types/api';
-import { siteSaleBannerMessage } from '@/lib/site-sale';
+import { calendarSaleProgramLabel, siteSaleBannerMessage } from '@/lib/site-sale';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 
 type Props = {
@@ -60,13 +60,13 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
         ×
       </button>
       <div className="pr-8">
-        <p className="font-semibold">{state?.event_label ?? 'Chương trình sale'}</p>
+        <p className="font-semibold">{calendarSaleProgramLabel(null, state)}</p>
         <p className="text-xs sm:text-sm opacity-90">{message}</p>
         {state?.countdown_to && state?.phase ? (
           <SiteSaleLiveCountdown
             countdownTo={state.countdown_to}
             phase={state.phase}
-            eventLabel={state.event_label}
+            eventLabel={calendarSaleProgramLabel(null, state)}
             size="sm"
             inline
             className="mt-1 block opacity-95"

@@ -10,14 +10,15 @@ import CdnFillImage from '@/components/CdnFillImage';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi, productPdpHref } from '@/lib/product-path-slug';
 import ProductPdpLink from '@/components/ProductPdpLink';
-import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
-import SiteSaleProductBadge from '@/components/SiteSaleProductBadge';
+import { BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardPromoBadges from '@/components/ProductCardPromoBadges';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
-import { mergeProductFlashSale, productForCatalogCardPricing, resolveProductDisplayPricing } from '@/lib/site-sale';
-import { useFlashSale } from '@/lib/use-flash-sale';
-import { useSiteSale } from '@/lib/use-site-sale';
+import { useCatalogProductPricing } from '@/lib/use-catalog-product-pricing';
+import {
+  resolveProductDisplayPricing,
+  stackedSaleProgramLabel,
+} from '@/lib/site-sale';
 import {
   canOrderAnyVariant,
   getClearanceCardHero,
@@ -35,56 +36,37 @@ type ResolvedProductPricing = ReturnType<typeof resolveProductDisplayPricing>;
 function getProductCardPromoDisplay(
   pricing: ResolvedProductPricing,
   displayPrice: number,
-  birthdayActive: boolean,
 ) {
-  if (birthdayActive) {
-    return {
-      showOriginal: false,
-      showSavingsLine: false,
-      showTeaserLine: false,
-      originalPrice: null as number | null,
-      savings: 0,
-      expectedPrice: null as number | null,
-    };
-  }
-
   const isActive = pricing.sitePhase === 'active' && pricing.sitePercent > 0;
   const isTeaser = pricing.sitePhase === 'teaser' && pricing.sitePercent > 0;
   const originalPrice =
     pricing.compareUnitPrice != null && pricing.compareUnitPrice > displayPrice
       ? pricing.compareUnitPrice
-      : isActive && pricing.listPrice > displayPrice
+      : pricing.listPrice > displayPrice
         ? pricing.listPrice
         : null;
-  const savings = isActive
-    ? Math.max(
-        0,
-        originalPrice != null
-          ? originalPrice - displayPrice
-          : pricing.siteSavings || pricing.savingsAmount,
-      )
-    : isTeaser
-      ? Math.max(
-          0,
-          pricing.siteSavings ||
-            pricing.savingsAmount ||
-            Math.round(displayPrice * pricing.sitePercent / 100),
-        )
-      : 0;
+  const savings = Math.max(
+    0,
+    originalPrice != null
+      ? originalPrice - displayPrice
+      : pricing.savingsAmount || 0,
+  );
   const expectedPrice =
     isTeaser && pricing.expectedSalePrice != null && pricing.expectedSalePrice > 0
       ? pricing.expectedSalePrice
-      : isTeaser && savings > 0
-        ? Math.max(0, displayPrice - savings)
+      : isTeaser && (pricing.siteSavings || 0) > 0
+        ? Math.max(0, (pricing.listPrice || displayPrice) - (pricing.siteSavings || 0))
         : null;
 
   return {
-    showOriginal: isActive && originalPrice != null && originalPrice > displayPrice,
-    showSavingsLine: isActive && savings > 0,
-    showTeaserLine: isTeaser && savings > 0,
+    showOriginal: originalPrice != null && originalPrice > displayPrice,
+    showSavingsLine: !isTeaser && savings > 0,
+    showTeaserLine: isTeaser && (pricing.siteSavings > 0 || expectedPrice != null),
     originalPrice,
     savings,
     expectedPrice,
+    isActive,
+    isTeaser,
   };
 }
 
@@ -109,18 +91,23 @@ function ProductCardPricePromo({
   savingsClassName?: string;
   teaserClassName?: string;
 }) {
-  const promo = getProductCardPromoDisplay(pricing, displayPrice, birthdayActive);
+  const promo = getProductCardPromoDisplay(pricing, displayPrice);
+  const programLabel = stackedSaleProgramLabel({
+    isWarehouse: pricing.isWarehouseClearance,
+    isFlash: pricing.isFlashSale,
+    siteLabel: pricing.siteLabel,
+    birthday: birthdayActive,
+  });
 
   return (
     <div className="space-y-0.5">
       <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
         <span className={priceClassName}>{formatPrice(displayPrice)}</span>
         <BirthdayPromoPriceCakeIcon active={birthdayActive} percent={birthdayPercent} />
-        {birthdayActive && displayPrice < (productListPrice || 0) ? (
-          <span className={strikeClassName}>{formatPrice(productListPrice || 0)}</span>
-        ) : null}
         {promo.showOriginal ? (
           <span className={strikeClassName}>{formatPrice(promo.originalPrice!)}</span>
+        ) : birthdayActive && displayPrice < (productListPrice || 0) ? (
+          <span className={strikeClassName}>{formatPrice(productListPrice || 0)}</span>
         ) : null}
         {promo.showTeaserLine && promo.expectedPrice != null ? (
           <span className="text-[10px] font-semibold text-emerald-700">
@@ -129,39 +116,17 @@ function ProductCardPricePromo({
         ) : null}
       </div>
       {promo.showSavingsLine ? (
-        <p className={savingsClassName}>Tiết kiệm {formatPrice(promo.savings)}</p>
+        <p className={savingsClassName}>
+          {programLabel || 'Sale'}: tiết kiệm {formatPrice(promo.savings)}
+        </p>
       ) : null}
       {promo.showTeaserLine ? (
         <p className={teaserClassName}>
-          Sắp giảm {pricing.sitePercent}% — tiết kiệm ~{formatPrice(promo.savings)}
+          Sắp {pricing.siteLabel || 'Sale trùng ngày-tháng'} — tiết kiệm ~{formatPrice(pricing.siteSavings || promo.savings)}
         </p>
       ) : null}
     </div>
   );
-}
-
-function useProductCardPricing(product: Product) {
-  const birthdayDiscount = useBirthdayDiscount();
-  const { state: siteSaleState } = useSiteSale();
-  const { byId: flashById } = useFlashSale();
-  const productForMainPricing = useMemo(
-    () => productForCatalogCardPricing(mergeProductFlashSale(product, flashById), siteSaleState),
-    [product, siteSaleState, flashById],
-  );
-  const pricing = resolveProductDisplayPricing(
-    productForMainPricing,
-    birthdayDiscount.active,
-    birthdayDiscount.percent,
-  );
-  const catalogListPrice =
-    productForMainPricing.site_sale?.list_price ?? productForMainPricing.price ?? 0;
-  return {
-    pricing,
-    displayPrice: pricing.displayPrice,
-    birthdayDiscount,
-    catalogSiteSale: productForMainPricing.site_sale,
-    catalogListPrice,
-  };
 }
 
 function ProductVideoBadge({ videoLink }: { videoLink?: string | null }) {
@@ -271,10 +236,9 @@ export default function ProductCard({
   const [imageLoading, setImageLoading] = useState(true);
   
   const canOrder = canOrderAnyVariant(product);
-  const { pricing, displayPrice, birthdayDiscount, catalogSiteSale, catalogListPrice } =
-    useProductCardPricing(product);
+  const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, catalogListPrice, showsClearance } =
+    useCatalogProductPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
-  const showsClearance = productShowsClearanceOnCard(product);
   const hasDiscount =
     !showsClearance &&
     ((pricing.compareAt != null && pricing.compareAt > displayPrice) ||
@@ -374,12 +338,17 @@ export default function ProductCard({
               product={product}
               compact={size === 'small'}
             />
-            <SiteSaleProductBadge siteSale={product.site_sale} />
-            <SiteSaleCountdownChip siteSale={product.site_sale} />
-            <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+            {!showsClearance ? (
+              <ProductCardPromoBadges
+                siteSale={catalogSiteSale}
+                birthdayActive={birthdayBadgeActive}
+                birthdayPercent={birthdayDiscount.percent}
+              />
+            ) : null}
+            <SiteSaleCountdownChip siteSale={catalogSiteSale} />
           </>
         )}
-        {hasDiscount && !imageError && !birthdayDiscount.active && !(catalogSiteSale ?? product.site_sale)?.phase ? (
+        {hasDiscount && !imageError && !birthdayBadgeActive && !catalogSiteSale?.phase ? (
           <div className="absolute top-2 left-2 bg-red-500 text-white px-1.5 py-0.5 rounded-full text-xs font-bold shadow-md">
             -{getDiscountPercentage(product.original_price!, product.price)}%
           </div>
@@ -433,45 +402,17 @@ export default function ProductCard({
 
         {/* Price */}
         <div className="space-y-1">
-          {pricing.sitePhase && pricing.sitePercent > 0 && !birthdayDiscount.active ? (
-            <ProductCardPricePromo
-              pricing={pricing}
-              displayPrice={displayPrice}
-              birthdayActive={birthdayDiscount.active}
-              birthdayPercent={birthdayDiscount.percent}
-              productListPrice={showsClearance ? catalogListPrice : product.price}
-              priceClassName={`font-bold text-red-600 ${sizeClasses.price}`}
-              strikeClassName="text-xs text-gray-500 line-through decoration-1 decoration-gray-400"
-              savingsClassName="text-xs font-medium text-emerald-600"
-              teaserClassName="text-xs text-amber-700"
-            />
-          ) : (
-            <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
-              <span className={`font-bold text-red-600 ${sizeClasses.price}`}>
-                {formatPrice(displayPrice)}
-              </span>
-              <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-              {birthdayDiscount.active &&
-                displayPrice < (showsClearance ? catalogListPrice : product.price || 0) && (
-                <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
-                  {formatPrice(showsClearance ? catalogListPrice : product.price)}
-                </span>
-              )}
-              {pricing.compareAt != null && pricing.compareAt > displayPrice && !birthdayDiscount.active && (
-                <span className="text-xs text-gray-500 line-through">
-                  {formatPrice(pricing.compareAt)}
-                </span>
-              )}
-              {hasDiscount &&
-                pricing.compareAt == null &&
-                !birthdayDiscount.active &&
-                !(catalogSiteSale ?? product.site_sale)?.phase && (
-                <span className="text-xs text-gray-500 line-through">
-                  {formatPrice(product.original_price!)}
-                </span>
-              )}
-            </div>
-          )}
+          <ProductCardPricePromo
+            pricing={pricing}
+            displayPrice={displayPrice}
+            birthdayActive={birthdayBadgeActive}
+            birthdayPercent={birthdayDiscount.percent}
+            productListPrice={showsClearance ? catalogListPrice : pricing.listPrice || product.price}
+            priceClassName={`font-bold text-red-600 ${sizeClasses.price}`}
+            strikeClassName="text-xs text-gray-500 line-through decoration-1 decoration-gray-400"
+            savingsClassName="text-xs font-medium text-emerald-600"
+            teaserClassName="text-xs text-amber-700"
+          />
           
           {/* Installment */}
           {displayPrice && displayPrice > 1000000 && (
@@ -535,10 +476,9 @@ const SimpleProductCardComponent = ({
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
-  const { pricing, displayPrice, birthdayDiscount, catalogSiteSale, catalogListPrice } =
-    useProductCardPricing(product);
+  const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, catalogListPrice, showsClearance } =
+    useCatalogProductPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
-  const showsClearance = productShowsClearanceOnCard(product);
   const fullyOutOfStock = isFullyOutOfStock(product);
   const cardImageSource =
     clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
@@ -597,16 +537,15 @@ const SimpleProductCardComponent = ({
           <>
             <ProductCardClearanceImageBadges product={product} compact />
             {showPersonalizedBadge ? <PersonalizedCohortImageBadge /> : null}
-            <SiteSaleProductBadge
-              siteSale={product.site_sale}
-              className={stackedPromoBadgeClass}
-            />
-            <SiteSaleCountdownChip siteSale={product.site_sale} />
-            <BirthdayPromoImageBadge
-              active={birthdayDiscount.active}
-              percent={birthdayDiscount.percent}
-              className={stackedPromoBadgeClass}
-            />
+            {!showsClearance ? (
+              <ProductCardPromoBadges
+                siteSale={catalogSiteSale}
+                birthdayActive={birthdayBadgeActive}
+                birthdayPercent={birthdayDiscount.percent}
+                className={stackedPromoBadgeClass}
+              />
+            ) : null}
+            <SiteSaleCountdownChip siteSale={catalogSiteSale} />
           </>
         )}
 
@@ -637,29 +576,16 @@ const SimpleProductCardComponent = ({
         </h3>
 
         {/* Price */}
-        {pricing.sitePhase && pricing.sitePercent > 0 && !birthdayDiscount.active ? (
-          <div className="mb-1">
-            <ProductCardPricePromo
-              pricing={pricing}
-              displayPrice={displayPrice}
-              birthdayActive={birthdayDiscount.active}
-              birthdayPercent={birthdayDiscount.percent}
-              productListPrice={showsClearance ? catalogListPrice : product.price}
-              priceClassName="text-sm font-bold text-gray-900"
-            />
-          </div>
-        ) : (
-          <div className="mb-1 flex flex-wrap items-baseline gap-x-1 gap-y-0">
-            <span className="text-sm font-bold text-gray-900">{formatPrice(displayPrice)}</span>
-            <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-            {birthdayDiscount.active &&
-              displayPrice < (showsClearance ? catalogListPrice : product.price || 0) && (
-              <span className="text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400">
-                {formatPrice(showsClearance ? catalogListPrice : product.price)}
-              </span>
-            )}
-          </div>
-        )}
+        <div className="mb-1">
+          <ProductCardPricePromo
+            pricing={pricing}
+            displayPrice={displayPrice}
+            birthdayActive={birthdayBadgeActive}
+            birthdayPercent={birthdayDiscount.percent}
+            productListPrice={showsClearance ? catalogListPrice : pricing.listPrice || product.price}
+            priceClassName="text-sm font-bold text-gray-900"
+          />
+        </div>
 
         <ProductCardClearanceMeta product={product} compact className="mb-1.5" />
 

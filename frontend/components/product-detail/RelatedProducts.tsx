@@ -25,10 +25,10 @@ import {
   productSearchParamsFromChineseShopCat2,
 } from '@/lib/related-products-pdp-fetch';
 import { productPdpHref } from '@/lib/product-path-slug';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
-import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import { BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardPromoBadges from '@/components/ProductCardPromoBadges';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import { useCatalogProductPricing } from '@/lib/use-catalog-product-pricing';
 
 const RELATED_LIST_BASE: Pick<ProductSearchParams, 'skip_total' | 'is_active'> = {
   skip_total: true,
@@ -75,10 +75,8 @@ function emptyHint(tab: ProductRelatedTabId): string {
 
 function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSizes: string }) {
   const href = productPdpHref(product.slug, product.product_id) ?? `/products/${product.id}`;
-  const birthdayDiscount = useBirthdayDiscount();
-  const displayPrice = birthdayDiscount.active
-    ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-    : product.price || 0;
+  const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, showsClearance } =
+    useCatalogProductPricing(product);
   return (
     <ProductPdpLink
       href={href}
@@ -96,7 +94,13 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
             (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
           }}
         />
-        <BirthdayPromoImageBadge active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
+        {!showsClearance ? (
+          <ProductCardPromoBadges
+            siteSale={catalogSiteSale}
+            birthdayActive={birthdayBadgeActive}
+            birthdayPercent={birthdayDiscount.percent}
+          />
+        ) : null}
       </div>
 
       <div className="p-2">
@@ -106,11 +110,11 @@ function ProductRelatedCard({ product, imageSizes }: { product: Product; imageSi
 
         <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
           <span className="text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</span>
-          <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-          {birthdayDiscount.active && displayPrice < (product.price || 0) ? (
-            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">{formatPrice(product.price)}</span>
-          ) : product.original_price && product.original_price > product.price ? (
-            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">{formatPrice(product.original_price)}</span>
+          <BirthdayPromoPriceCakeIcon active={birthdayBadgeActive} percent={birthdayDiscount.percent} />
+          {pricing.compareUnitPrice != null && pricing.compareUnitPrice > displayPrice ? (
+            <span className="text-xs text-gray-500 line-through decoration-1 decoration-gray-400">
+              {formatPrice(pricing.compareUnitPrice)}
+            </span>
           ) : null}
         </div>
 

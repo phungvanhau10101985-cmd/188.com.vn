@@ -38,7 +38,7 @@ export function sameAgeGenderCompactHint(
     case 'requires_login':
       return (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span>Điền hồ sơ để nhận ưu đãi sinh nhật & sản phẩm có thể bạn thích.</span>
+          <span>Điền hồ sơ để nhận ưu đãi CMSN & sản phẩm có thể bạn thích.</span>
           <LoginCtaButton href="/auth/login" label="Đăng nhập nhận ưu đãi" cohortMode={mode} />
         </div>
       );
@@ -48,7 +48,7 @@ export function sameAgeGenderCompactHint(
           <Link href="/account/profile" className="font-semibold text-[#ea580c] hover:underline">
             Cập nhật ngày sinh & giới tính
           </Link>{' '}
-          để nhận ưu đãi sinh nhật & sản phẩm hợp tuổi, hợp gu.
+          để nhận ưu đãi CMSN & sản phẩm hợp tuổi, hợp gu.
         </>
       );
     case 'popular_fallback':

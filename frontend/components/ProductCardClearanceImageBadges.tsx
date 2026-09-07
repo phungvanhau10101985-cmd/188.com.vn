@@ -7,6 +7,7 @@ import {
   productShowsClearanceOnCard,
   resolveClearanceCardHeroPercent,
 } from '@/lib/warehouse-clearance';
+import { WAREHOUSE_SALE_PROGRAM_NAME } from '@/lib/site-sale';
 
 type ProductCardClearanceImageBadgesProps = {
   product: Product;
@@ -39,8 +40,11 @@ export default function ProductCardClearanceImageBadges({
   return (
     <div
       className={`pointer-events-none absolute left-2 top-2 z-[3] flex max-w-[calc(100%-3.5rem)] flex-col items-start gap-1 ${className}`}
-      aria-label={`Giảm ${discountPercent}% thanh lý xả kho${hero?.sizeBadge ? `, size ${hero.sizeBadge}` : ''}`}
+      aria-label={`${WAREHOUSE_SALE_PROGRAM_NAME}, giảm ${discountPercent}%${hero?.sizeBadge ? `, size ${hero.sizeBadge}` : ''}`}
     >
+      <span className="inline-flex rounded-md bg-gray-900/90 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white shadow-sm sm:text-[10px]">
+        {WAREHOUSE_SALE_PROGRAM_NAME}
+      </span>
       <span
         className={`inline-flex rounded-lg bg-gradient-to-br from-red-600 to-[#ea580c] font-black tracking-tight text-white shadow-lg ring-2 ring-white ${pctClass}`}
       >

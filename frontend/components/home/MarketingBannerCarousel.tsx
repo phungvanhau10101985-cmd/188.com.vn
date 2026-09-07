@@ -6,6 +6,11 @@ import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
 import { trackEvent } from '@/lib/analytics';
 import type { MarketingBannerItem } from '@/types/api';
+import {
+  calendarSaleProgramLabel,
+  WAREHOUSE_SALE_PROGRAM_NAME,
+} from '@/lib/site-sale';
+import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 
 type Props = {
   refreshKey: string;
@@ -92,19 +97,19 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
     || (item.kind === 'warehouse' ? '/kho-sale' : '/#san-pham-cung-shop');
 
   const bannerAriaLabel = (item: MarketingBannerItem) => {
-    if (item.kind === 'birthday') return `Nhận quà sinh nhật giảm ${item.discount_percent}%`;
-    if (item.kind === 'warehouse') return `Xem danh sách hàng kho giảm ${item.discount_percent}%`;
-    return `Xem sản phẩm sale giảm ${item.discount_percent}%`;
+    if (item.kind === 'birthday') return `${BIRTHDAY_PROGRAM_NAME} giảm ${item.discount_percent}%`;
+    if (item.kind === 'warehouse') return `${WAREHOUSE_SALE_PROGRAM_NAME} giảm ${item.discount_percent}%`;
+    return `${calendarSaleProgramLabel(null, { event_date: item.date_key, event_label: item.date_key })} giảm ${item.discount_percent}%`;
   };
 
   const bannerAlt = (item: MarketingBannerItem) => {
     if (item.kind === 'birthday') {
-      return `Banner mừng sinh nhật ${item.date_key}, tặng ${item.discount_percent}%`;
+      return `Banner ${BIRTHDAY_PROGRAM_NAME} ${item.date_key}, tặng ${item.discount_percent}%`;
     }
     if (item.kind === 'warehouse') {
-      return `Banner sale kho, giảm ${item.discount_percent}%`;
+      return `Banner ${WAREHOUSE_SALE_PROGRAM_NAME}, giảm ${item.discount_percent}%`;
     }
-    return `Banner sale ${item.date_key}, giảm ${item.discount_percent}%`;
+    return `Banner ${calendarSaleProgramLabel(null, { event_date: item.date_key, event_label: item.date_key })}, giảm ${item.discount_percent}%`;
   };
 
   return (

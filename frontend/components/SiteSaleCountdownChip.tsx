@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import type { SiteSaleProductPricing } from '@/types/api';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
+import { siteSaleProgramLabel } from '@/lib/site-sale';
 
 type Props = {
   siteSale?: SiteSaleProductPricing | null;
@@ -24,16 +25,6 @@ function formatLiveCountdown(parts: {
   }
   if (parts.hours <= 0) return `${mm}:${ss}`;
   return `${String(parts.hours).padStart(2, '0')}:${mm}:${ss}`;
-}
-
-function saleEventLabel(siteSale: SiteSaleProductPricing): string {
-  const raw = (siteSale.event_label ?? '').trim();
-  if (raw) return raw;
-  if (siteSale.event_date) {
-    const [y, m, d] = siteSale.event_date.split('-').map(Number);
-    if (m && d) return `Sale ${d}/${m}`;
-  }
-  return 'Sale';
 }
 
 /** Thanh đếm ngược — đặt dưới ảnh SP (teaser: bắt đầu sau; active: còn). */
@@ -65,7 +56,7 @@ export default function SiteSaleCountdownChip({ siteSale, className = '' }: Prop
 
   const countdownLive = formatLiveCountdown(parts);
   const isTeaser = phase === 'teaser';
-  const label = saleEventLabel(siteSale);
+  const label = siteSaleProgramLabel(siteSale);
   const prefix = isTeaser ? `${label} bắt đầu sau` : `${label} — còn`;
 
   return (

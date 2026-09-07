@@ -297,7 +297,7 @@ export default function AccountProfilePage() {
                 ? 'Sau khi đã lưu, chỉ được sửa năm sinh — ngày/tháng giữ nguyên để tránh lạm dụng ưu đãi sinh nhật.'
                 : 'Lần đầu lưu ngày sinh sẽ khóa ngày/tháng; sau đó chỉ sửa được năm sinh.'}
               {' '}
-              Khi đủ ngày sinh và giới tính, shop gửi ưu đãi sinh nhật và gợi ý phù hợp.
+              Khi đủ ngày sinh và giới tính, shop gửi ưu đãi CMSN và gợi ý phù hợp.
             </p>
           </div>
 

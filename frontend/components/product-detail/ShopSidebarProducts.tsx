@@ -15,13 +15,58 @@ import {
   loadRelatedProductsSnapshot,
   pickRandomSidebarProducts,
 } from '@/lib/related-products-pdp-fetch';
-import { applyBirthdayDiscount } from '@/lib/birthday-discount';
-import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { BirthdayPromoImageBadge, BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import { BirthdayPromoPriceCakeIcon } from '@/components/BirthdayPromoProductMarkers';
+import ProductCardPromoBadges from '@/components/ProductCardPromoBadges';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
+import { useCatalogProductPricing } from '@/lib/use-catalog-product-pricing';
 
 interface ShopSidebarProductsProps {
   currentProduct: Product;
+}
+
+function SidebarProductRow({ product }: { product: Product }) {
+  const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, showsClearance } =
+    useCatalogProductPricing(product);
+  const pathSeg =
+    productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
+  if (!pathSeg) return null;
+  return (
+    <Link
+      href={`/products/${encodeURIComponent(String(pathSeg))}`}
+      className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
+    >
+      <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded bg-gray-100">
+        <Image
+          src={getProductMainImage(product)}
+          alt={product.name}
+          fill
+          sizes="128px"
+          className="object-cover"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
+          }}
+        />
+        {!showsClearance ? (
+          <ProductCardPromoBadges
+            siteSale={catalogSiteSale}
+            birthdayActive={birthdayBadgeActive}
+            birthdayPercent={birthdayDiscount.percent}
+            className="!left-1 !top-1"
+          />
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-0">
+        <div className="mt-0.5 text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</div>
+        <BirthdayPromoPriceCakeIcon active={birthdayBadgeActive} percent={birthdayDiscount.percent} />
+      </div>
+      {pricing.compareUnitPrice != null && pricing.compareUnitPrice > displayPrice ? (
+        <div className="-mt-2 text-xs text-gray-400 line-through decoration-1 decoration-gray-400">
+          {formatPrice(pricing.compareUnitPrice)}
+        </div>
+      ) : null}
+      <ProductCardClearanceMeta product={product} compact className="mt-1 w-full max-w-[8.5rem]" />
+    </Link>
+  );
 }
 
 export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProductsProps) {
@@ -29,7 +74,6 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
   const isNear = useNearViewport(containerRef);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
-  const birthdayDiscount = useBirthdayDiscount();
 
   useEffect(() => {
     if (!isNear) return;
@@ -84,49 +128,9 @@ export default function ShopSidebarProducts({ currentProduct }: ShopSidebarProdu
     <aside ref={containerRef} className="w-full">
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="divide-y divide-gray-100">
-          {visibleProducts.map((product) => {
-            const displayPrice = birthdayDiscount.active
-              ? applyBirthdayDiscount(product.price || 0, birthdayDiscount.percent)
-              : product.price || 0;
-            const pathSeg =
-              productPathSlugFromApi(product.slug, product.product_id) || product.product_id;
-            if (!pathSeg) return null;
-            return (
-              <Link
-                key={product.id}
-                href={`/products/${encodeURIComponent(String(pathSeg))}`}
-                className="flex flex-col items-center gap-2 p-3 -mt-6 first:mt-0 hover:bg-gray-50"
-              >
-                <div className="relative h-32 w-32 flex-shrink-0 overflow-hidden rounded bg-gray-100">
-                  <Image
-                    src={getProductMainImage(product)}
-                    alt={product.name}
-                    fill
-                    sizes="128px"
-                    className="object-cover"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).src = cdnUrl('/images/placeholder.jpg');
-                    }}
-                  />
-                  <BirthdayPromoImageBadge
-                    active={birthdayDiscount.active}
-                    percent={birthdayDiscount.percent}
-                    className="left-1 top-1 px-1 py-px text-[9px] sm:text-[10px]"
-                  />
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-0">
-                  <div className="mt-0.5 text-sm font-bold text-[#ea580c]">{formatPrice(displayPrice)}</div>
-                  <BirthdayPromoPriceCakeIcon active={birthdayDiscount.active} percent={birthdayDiscount.percent} />
-                </div>
-                {birthdayDiscount.active && displayPrice < (product.price || 0) && (
-                  <div className="-mt-2 text-xs text-gray-400 line-through decoration-1 decoration-gray-400">
-                    {formatPrice(product.price)}
-                  </div>
-                )}
-                <ProductCardClearanceMeta product={product} compact className="mt-1 w-full max-w-[8.5rem]" />
-              </Link>
-            );
-          })}
+          {visibleProducts.map((product) => (
+            <SidebarProductRow key={product.id} product={product} />
+          ))}
         </div>
       </div>
     </aside>

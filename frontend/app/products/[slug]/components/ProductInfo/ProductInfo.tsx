@@ -17,7 +17,8 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
+import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing, stackedSaleProgramLabel } from '@/lib/site-sale';
+import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
 import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
@@ -137,9 +138,10 @@ export default function ProductInfo({
       ),
     [product, pricingBase, googleDiscount],
   );
-  const displayPrice = pricing.displayPrice;
-  const birthdaySavingsAmount = pricing.birthdaySavingsAmount;
   const isClearancePdp = product.is_warehouse_clearance === true;
+  const displayPrice = pricing.displayPrice;
+  const birthdayOnPdp = !googleDiscount && !isClearancePdp && birthdayDiscount.active;
+  const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -148,7 +150,13 @@ export default function ProductInfo({
   }, [isAuthenticated]);
 
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
-  const loyaltyDiscountAmount = (displayPrice * loyaltyDiscountPercent) / 100;
+  const loyaltyDiscountAmount = applyCatalogStackedDiscount({
+    listPrice: pricing.listPrice,
+    afterLinePrograms: googleDiscount ? displayPrice : pricing.beforeBirthday,
+    birthdayActive: birthdayOnPdp,
+    birthdayPercent: birthdayDiscount.percent,
+    loyaltyPercent: loyaltyDiscountPercent,
+  }).loyaltySavings;
   const loyaltyTierName = loyaltyStatus?.current_tier?.name || 'L0';
 
   const colorList = product.colors || [];
@@ -330,7 +338,7 @@ export default function ProductInfo({
           <div className="border-b border-pink-700 bg-pink-600 px-2 py-0.5 text-center">
             <span className="flex items-center justify-center gap-1 text-[9px] font-semibold text-white">
               <span aria-hidden>🎁</span>
-              Giá sinh nhật: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
+              CMSN: tiết kiệm <strong>{formatPrice(birthdaySavingsAmount)}</strong>
             </span>
           </div>
         )}
@@ -425,16 +433,16 @@ export default function ProductInfo({
       {/* compactMobile: sale đã có trong khối giá — bỏ banner trùng phía trên */}
       {!compactMobile && pricing.sitePhase === 'teaser' && pricing.sitePercent > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <p className="font-semibold">{pricing.siteLabel ?? 'Sắp sale'} — giảm {pricing.sitePercent}%</p>
+          <p className="font-semibold">{pricing.siteLabel} — giảm {pricing.sitePercent}%</p>
           <p className="text-xs mt-0.5">
-            Mua đúng ngày sale tiết kiệm ~{formatPrice(pricing.siteSavings || pricing.savingsAmount)}
+            Mua đúng {pricing.siteLabel} tiết kiệm ~{formatPrice(pricing.siteSavings || pricing.savingsAmount)}
             {pricing.expectedSalePrice ? ` (dự kiến ${formatPrice(pricing.expectedSalePrice)})` : ''}
           </p>
         </div>
       )}
       {!compactMobile && pricing.sitePhase === 'active' && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
-          <p className="font-semibold">{pricing.siteLabel ?? 'Đang sale'} — giảm {pricing.sitePercent}% hôm nay</p>
+          <p className="font-semibold">{pricing.siteLabel} — giảm {pricing.sitePercent}% hôm nay</p>
         </div>
       )}
 
@@ -495,12 +503,14 @@ export default function ProductInfo({
           sitePercent={googleDiscount ? 0 : pricing.sitePercent}
           siteLabel={googleDiscount ? null : pricing.siteLabel}
           countdownTo={googleDiscount ? null : pricing.countdownTo}
-          birthdayActive={googleDiscount ? false : birthdayDiscount.active}
+          birthdayActive={birthdayOnPdp}
           birthdayPercent={birthdayDiscount.percent}
           clearanceHighlight={isClearancePdp}
-          promoLabel={isClearancePdp ? 'Thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
+          promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
           activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
           suppressSiteSaleBanners={!!googleDiscount}
+          isFlashSale={!googleDiscount && pricing.isFlashSale}
+          discountCapped={!googleDiscount && pricing.discountCapped}
           size={compactMobile ? 'sm' : 'lg'}
         />
         {googleDiscount ? (
@@ -572,8 +582,13 @@ export default function ProductInfo({
           {pricing.savingsAmount > 0 || (pricing.sitePhase === 'teaser' && pricing.sitePercent > 0) ? (
             <p className="text-[11px] font-medium text-emerald-600">
               {pricing.sitePhase === 'teaser'
-                ? `Tiết kiệm dự kiến ~${formatPrice(pricing.savingsAmount * quantity)}`
-                : `Tiết kiệm ${formatPrice(pricing.savingsAmount * quantity)}`}
+                ? `${pricing.siteLabel}: tiết kiệm dự kiến ~${formatPrice(pricing.savingsAmount * quantity)}`
+                : `${stackedSaleProgramLabel({
+                    isWarehouse: product.is_warehouse_clearance === true,
+                    isFlash: pricing.isFlashSale,
+                    siteLabel: pricing.siteLabel,
+                    birthday: birthdayDiscount.active && product.is_warehouse_clearance !== true,
+                  }) || 'Sale'}: tiết kiệm ${formatPrice(pricing.savingsAmount * quantity)}`}
             </p>
           ) : null}
         </div>

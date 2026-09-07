@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { SimpleProductCard } from '@/components/ProductCard';
 import HomeSectionErrorBoundary from '@/components/home/HomeSectionErrorBoundary';
-import { formatCountdownParts } from '@/lib/site-sale';
+import { FLASH_SALE_PROGRAM_NAME, formatCountdownParts } from '@/lib/site-sale';
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import { useCountdownNowMs } from '@/lib/use-countdown-now-ms';
@@ -60,7 +60,7 @@ export default function HomeFlashSaleSection({
               id="home-flash-sale-heading"
               className="text-base font-bold text-gray-900 border-b-2 border-[#ea580c] pb-1 w-fit"
             >
-              FLASH SALE
+              {FLASH_SALE_PROGRAM_NAME}
             </h2>
             <p className="mt-1 text-xs text-gray-600">
               12 deal / 10 phút, cùng shop TQ và danh mục vừa xem. Hết lượt mất giảm — chốt giỏ ngay.
