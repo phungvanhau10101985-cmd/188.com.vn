@@ -62,9 +62,6 @@ export default function HomeFlashSaleSection({
             >
               {FLASH_SALE_PROGRAM_NAME}
             </h2>
-            <p className="mt-1 text-xs text-gray-600">
-              12 deal / 10 phút, cùng shop TQ và danh mục vừa xem. Hết lượt mất giảm — chốt giỏ ngay.
-            </p>
           </div>
           {countdownLive ? (
             <p
