@@ -1,7 +1,7 @@
 // features/cart/hooks/useCart.tsx
 'use client';
 
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, ReactNode, useRef } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { cartAPI } from '../api/cart-api';
 import { trackEvent } from '@/lib/analytics';
@@ -14,6 +14,7 @@ import { hasClientAuthUser, hasClientBearerToken } from '@/lib/client-auth-sessi
 import type {
   AddToCartRequest,
   UpdateCartItemRequest,
+  Cart,
   CartState,
   CartLineRef,
 } from '../types/cart';
@@ -60,6 +61,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const [showAddToCartPopup, setShowAddToCartPopup] = useState(false);
   const [lastAddedItem, setLastAddedItem] = useState<AddToCartRequest | null>(null);
+  const cartRef = useRef(cartState.cart);
+  cartRef.current = cartState.cart;
+  const cartMutationSeqRef = useRef(0);
 
   const discardLegacyGuestCart = () => {
     if (typeof window === 'undefined') return;
@@ -114,6 +118,22 @@ export function CartProvider({ children }: { children: ReactNode }) {
       : null;
   };
 
+  const applyCartKeepingLineOrder = (nextCart: Cart | null, prevCart: Cart | null) => {
+    const enriched = enrichCart(nextCart);
+    if (!enriched || !prevCart?.items?.length) return enriched;
+    const incomingById = new Map(enriched.items.map((item) => [item.id, item]));
+    const ordered: Cart['items'] = [];
+    for (const old of prevCart.items) {
+      const next = incomingById.get(old.id);
+      if (next) {
+        ordered.push(next);
+        incomingById.delete(old.id);
+      }
+    }
+    for (const rest of incomingById.values()) ordered.push(rest);
+    return { ...enriched, items: ordered };
+  };
+
   const refreshCart = async () => {
     if (!isAuthenticated) {
       discardLegacyGuestCart();
@@ -126,7 +146,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+    setCartState((prev) => ({
+      ...prev,
+      // Giữ giỏ đang hiện — không skeleton trắng khi đã có dữ liệu
+      isLoading: prev.cart == null ? true : prev.isLoading,
+      error: null,
+    }));
 
     try {
       const cart = await cartAPI.getCart();
@@ -177,16 +202,45 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const updateCartItem = async (lineRef: CartLineRef, updateData: UpdateCartItemRequest) => {
     if (!isAuthenticated) return;
 
-    setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+    const seq = ++cartMutationSeqRef.current;
+    const snapshot = cartRef.current;
+
+    if (typeof updateData.quantity === 'number') {
+      setCartState((prev) => {
+        if (!prev.cart) return { ...prev, error: null };
+        const items = prev.cart.items.map((item) => {
+          if (item.id !== lineRef.id) return item;
+          const quantity = updateData.quantity;
+          const unit = item.unit_price ?? item.product_price ?? 0;
+          return { ...item, quantity, total_price: unit * quantity };
+        });
+        const total_items = items.reduce((sum, item) => sum + item.quantity, 0);
+        return {
+          ...prev,
+          error: null,
+          cart: { ...prev.cart, items, total_items },
+        };
+      });
+    }
 
     try {
       await cartAPI.updateCartItem(lineRef.id, updateData);
-      await refreshCart();
-    } catch (error: any) {
+      if (seq !== cartMutationSeqRef.current) return;
+      const cart = await cartAPI.getCart();
+      if (seq !== cartMutationSeqRef.current) return;
       setCartState((prev) => ({
         ...prev,
-        error: error.message || 'Failed to update cart item',
+        cart: applyCartKeepingLineOrder(cart, prev.cart),
         isLoading: false,
+        error: null,
+      }));
+    } catch (error: any) {
+      if (seq !== cartMutationSeqRef.current) throw error;
+      setCartState((prev) => ({
+        ...prev,
+        cart: snapshot ?? prev.cart,
+        isLoading: false,
+        error: error.message || 'Failed to update cart item',
       }));
       throw error;
     }
@@ -195,17 +249,39 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const removeFromCart = async (lineRef: CartLineRef) => {
     if (!isAuthenticated) return;
 
-    setCartState((prev) => ({ ...prev, isLoading: true, error: null }));
+    const seq = ++cartMutationSeqRef.current;
+    const snapshot = cartRef.current;
+
+    setCartState((prev) => {
+      if (!prev.cart) return { ...prev, error: null };
+      const items = prev.cart.items.filter((item) => item.id !== lineRef.id);
+      const total_items = items.reduce((sum, item) => sum + item.quantity, 0);
+      return {
+        ...prev,
+        error: null,
+        cart: { ...prev.cart, items, total_items },
+      };
+    });
 
     try {
       await cartAPI.removeFromCart(lineRef.id);
-      await refreshCart();
-      trackEvent('remove_from_cart', { product_id: lineRef.product_id });
-    } catch (error: any) {
+      if (seq !== cartMutationSeqRef.current) return;
+      const cart = await cartAPI.getCart();
+      if (seq !== cartMutationSeqRef.current) return;
       setCartState((prev) => ({
         ...prev,
-        error: error.message || 'Failed to remove item from cart',
+        cart: applyCartKeepingLineOrder(cart, prev.cart),
         isLoading: false,
+        error: null,
+      }));
+      trackEvent('remove_from_cart', { product_id: lineRef.product_id });
+    } catch (error: any) {
+      if (seq !== cartMutationSeqRef.current) throw error;
+      setCartState((prev) => ({
+        ...prev,
+        cart: snapshot ?? prev.cart,
+        isLoading: false,
+        error: error.message || 'Failed to remove item from cart',
       }));
       throw error;
     }

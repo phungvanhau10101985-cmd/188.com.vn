@@ -104,18 +104,27 @@ def _cart_items_with_site_sale_pricing(
             line_unit = float(pricing["display_price"])
             resp.product_price = line_unit
             resp.list_price = base if base > 0 else None
-            if pricing.get("phase") == "active" and pricing.get("savings_amount", 0) > 0:
+            phase = pricing.get("phase")
+            if phase == "active" and pricing.get("savings_amount", 0) > 0:
                 resp.original_price = base
             elif sale_state.is_active and pricing.get("savings_amount", 0) > 0:
                 resp.original_price = base
-            resp.site_sale = {
-                **pricing,
-                "event_label": pricing.get("event_label") or sale_state.event_label,
-                "event_date": sale_state.event_date.isoformat() if sale_state.event_date and not flash_pct else None,
-                "countdown_to": pricing.get("countdown_to")
-                or (sale_state.countdown_to.isoformat() if sale_state.countdown_to else None),
-            }
+            else:
+                resp.original_price = None
+            if phase in ("active", "teaser") and float(pricing.get("percent") or 0) > 0:
+                resp.site_sale = {
+                    **pricing,
+                    "event_label": pricing.get("event_label") or sale_state.event_label,
+                    "event_date": sale_state.event_date.isoformat() if sale_state.event_date and not flash_pct else None,
+                    "countdown_to": pricing.get("countdown_to")
+                    or (sale_state.countdown_to.isoformat() if sale_state.countdown_to else None),
+                }
+            else:
+                resp.site_sale = None
         pd = dict(resp.product_data or {})
+        pd.pop("flash_sale", None)
+        if not google_lock:
+            pd.pop("google_automated_discount", None)
         if google_lock:
             pd["price"] = line_unit
             pd["list_price"] = float(google_lock.get("prior_price") or base or line_unit)

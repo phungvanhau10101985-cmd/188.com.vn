@@ -42,7 +42,9 @@ import {
   calendarSaleProgramLabel,
   cartLineHasActiveFlash,
   FLASH_SALE_PROGRAM_NAME,
+  liveCalendarState,
   mergeCartLineSiteSaleFromCalendar,
+  nextCartSaleRefreshAtMs,
   resolveCartLineCheckoutTotal,
   resolveCartLineDisplayPricing,
   siteSaleProgramLabel,
@@ -123,7 +125,7 @@ function CartPageSkeleton() {
 export default function CartPage() {
   const { cart, updateCartItem, removeFromCart, clearCart, isLoading, error, refreshCart } = useCart();
   const { isAuthenticated, user, isLoading: authLoading } = useAuth();
-  const { state: globalSiteSale } = useSiteSale();
+  const { state: globalSiteSale, reload: reloadSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
   const [pageReady, setPageReady] = useState(false);
@@ -152,6 +154,9 @@ export default function CartPage() {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [promoVouchers, setPromoVouchers] = useState<PromotionVoucherItem[]>([]);
   const [promoVouchersLoading, setPromoVouchersLoading] = useState(false);
+  const latestQtyByIdRef = useRef<Map<number, number>>(new Map());
+  const [qtyDrafts, setQtyDrafts] = useState<Record<number, string>>({});
+  const [saleClockMs, setSaleClockMs] = useState(() => Date.now());
 
   useEffect(() => {
     setPageReady(true);
@@ -260,7 +265,7 @@ export default function CartPage() {
   const birthdayActive = cart?.birthday_discount_active === true;
   const birthdayPercent = cart?.birthday_discount_percent ?? 0;
   const birthdayLineActive = birthdayActive && !welcomeApplied && birthdayPercent > 0;
-  const siteSaleState = cart?.site_sale ?? globalSiteSale ?? null;
+  const siteSaleState = liveCalendarState(cart?.site_sale ?? globalSiteSale ?? null, saleClockMs);
   const siteSaleActive = siteSaleState?.phase === 'active';
   const siteSaleTeaser = siteSaleState?.phase === 'teaser';
   const cartFlashLine = useMemo(
@@ -409,22 +414,32 @@ export default function CartPage() {
   }, [siteSaleState?.phase, refreshCart]);
 
   useEffect(() => {
-    if (!isAuthenticated || !siteSaleState?.countdown_to) return;
-    const target = new Date(siteSaleState.countdown_to).getTime();
-    if (!Number.isFinite(target)) return;
+    if (!isAuthenticated) return;
+    const target = nextCartSaleRefreshAtMs(
+      cartItems,
+      cart?.site_sale ?? globalSiteSale ?? null,
+    );
+    if (target == null) return;
     const timer = window.setInterval(() => {
-      if (Date.now() >= target) void refreshCart();
+      if (Date.now() >= target) {
+        setSaleClockMs(Date.now());
+        void refreshCart();
+        void reloadSiteSale();
+      }
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [isAuthenticated, siteSaleState?.countdown_to, refreshCart]);
+  }, [isAuthenticated, cartItems, cart?.site_sale, globalSiteSale, refreshCart, reloadSiteSale]);
 
+  const promoVouchersLoadedRef = useRef(false);
   useEffect(() => {
     if (!isAuthenticated) {
       setPromoVouchers([]);
+      setPromoVouchersLoading(false);
+      promoVouchersLoadedRef.current = false;
       return;
     }
     let cancelled = false;
-    setPromoVouchersLoading(true);
+    if (!promoVouchersLoadedRef.current) setPromoVouchersLoading(true);
     apiClient
       .getMyPromoVouchers(regularSubtotal > 0 ? regularSubtotal : undefined)
       .then((res) => {
@@ -434,7 +449,10 @@ export default function CartPage() {
         if (!cancelled) setPromoVouchers([]);
       })
       .finally(() => {
-        if (!cancelled) setPromoVouchersLoading(false);
+        if (!cancelled) {
+          setPromoVouchersLoading(false);
+          promoVouchersLoadedRef.current = true;
+        }
       });
     return () => {
       cancelled = true;
@@ -477,7 +495,7 @@ export default function CartPage() {
     trackMetaInitiateCheckout({ items: cartItems, value: cartTotalAll });
   }, [isAuthenticated, cartAdsFingerprint, cartTotalAll]);
 
-  if (!pageReady || isLoading) {
+  if (!pageReady || (isLoading && !cart)) {
     return <CartPageSkeleton />;
   }
 
@@ -537,19 +555,27 @@ export default function CartPage() {
     selected_color: item.selected_color,
   });
 
-  const handleQuantityChange = async (
-    item: {
-      id: number;
-      product_id: number;
-      selected_size?: string;
-      selected_color?: string;
-      product_data?: Record<string, unknown> | null;
-    },
-    newQuantity: number,
-  ) => {
-    if (newQuantity < 1) return;
+  type CartQtyLine = {
+    id: number;
+    product_id: number;
+    selected_size?: string;
+    selected_color?: string;
+    product_data?: Record<string, unknown> | null;
+    quantity: number;
+  };
+
+  const applyQuantity = async (item: CartQtyLine, newQuantity: number) => {
+    if (!Number.isFinite(newQuantity)) return;
+    let qty = Math.floor(newQuantity);
+    if (qty < 1) qty = 1;
     const maxQ = cartLineMaxQuantity(item);
-    if (newQuantity > maxQ) {
+    if (qty > maxQ) {
+      latestQtyByIdRef.current.set(item.id, maxQ);
+      setQtyDrafts((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
       pushToast({
         title: 'Số lượng tối đa',
         description: isWarehouseCartLine(item)
@@ -561,12 +587,46 @@ export default function CartPage() {
       await updateCartItem(cartLineRef(item), { quantity: maxQ });
       return;
     }
+    const current = latestQtyByIdRef.current.get(item.id) ?? item.quantity;
+    if (qty === current && qty === item.quantity) return;
+    latestQtyByIdRef.current.set(item.id, qty);
+    setQtyDrafts((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
     try {
-      await updateCartItem(cartLineRef(item), { quantity: newQuantity });
+      await updateCartItem(cartLineRef(item), { quantity: qty });
     } catch (err: unknown) {
+      latestQtyByIdRef.current.delete(item.id);
       const msg = err instanceof Error ? err.message : String(err);
       pushToast({ title: 'Không cập nhật được số lượng', description: msg, variant: 'error', durationMs: 4000 });
     }
+  };
+
+  const handleQuantityDelta = async (item: CartQtyLine, delta: number) => {
+    const current = latestQtyByIdRef.current.get(item.id) ?? item.quantity;
+    await applyQuantity(item, current + delta);
+  };
+
+  const handleQuantityInputChange = (lineId: number, raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 3);
+    setQtyDrafts((prev) => ({ ...prev, [lineId]: digits }));
+  };
+
+  const handleQuantityInputCommit = async (item: CartQtyLine, raw?: string) => {
+    const draft = raw ?? qtyDrafts[item.id];
+    if (draft == null) return;
+    const parsed = parseInt(draft, 10);
+    if (!Number.isFinite(parsed) || draft === '') {
+      setQtyDrafts((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+    await applyQuantity(item, parsed);
   };
 
   const handleRemoveItem = async (item: {
@@ -1216,29 +1276,56 @@ export default function CartPage() {
                         )}
                       </div>
 
-                      <div className="flex items-center justify-start md:justify-center">
+                      <div className="flex w-full items-center justify-between gap-3 md:w-auto md:justify-center md:gap-0">
                         <div className="inline-flex items-center border border-gray-200 rounded-full">
                           <button
                             type="button"
-                            onClick={() => handleQuantityChange(item, item.quantity - 1)}
+                            onClick={() => handleQuantityDelta(item, -1)}
                             disabled={item.quantity <= 1}
                             className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            aria-label="Giảm số lượng"
                           >
                             -
                           </button>
-                          <span className="w-10 text-center text-sm font-semibold text-gray-900">
-                            {item.quantity}
-                          </span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            autoComplete="off"
+                            value={qtyDrafts[item.id] ?? String(item.quantity)}
+                            onChange={(e) => handleQuantityInputChange(item.id, e.target.value)}
+                            onFocus={(e) => e.currentTarget.select()}
+                            onBlur={(e) => {
+                              void handleQuantityInputCommit(item, e.currentTarget.value);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            aria-label={`Số lượng ${item.product_data?.name ?? 'sản phẩm'}`}
+                            className="h-9 w-12 bg-transparent text-center text-sm font-semibold text-gray-900 outline-none focus:bg-gray-50"
+                          />
                           <button
                             type="button"
-                            onClick={() => handleQuantityChange(item, item.quantity + 1)}
+                            onClick={() => handleQuantityDelta(item, 1)}
                             disabled={item.quantity >= maxLineQty}
-                            className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            className="hidden w-9 h-9 md:flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                             aria-label="Tăng số lượng"
                           >
                             +
                           </button>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleQuantityDelta(item, 1)}
+                          disabled={item.quantity >= maxLineQty}
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 text-lg font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 md:hidden"
+                          aria-label="Tăng số lượng"
+                        >
+                          +
+                        </button>
                       </div>
 
                       <div className="text-right">

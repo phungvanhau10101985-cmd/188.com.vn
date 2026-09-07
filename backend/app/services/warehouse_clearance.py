@@ -525,11 +525,12 @@ def resolve_checkout_line_prices(
     product: Product,
     *,
     user=None,
+    user_id: Optional[int] = None,
 ) -> Tuple[float, float]:
     """
     (unit_price, list_price) cho checkout/đặt hàng — đồng bộ với giỏ hàng.
     Dòng kho thanh lý: áp % giảm admin trên giá list SP gốc (resolve_warehouse_list_price).
-    Hàng thường: site sale active (effective_unit_price).
+    Hàng thường: flash (nếu đang gán) → site sale active → giá gốc.
     """
     from app.services.sale_calendar import effective_unit_price
 
@@ -539,6 +540,17 @@ def resolve_checkout_line_prices(
         pricing = apply_clearance_pricing(list_price, percent=pct)
         return float(pricing["display_price"]), float(pricing["list_price"])
     list_price = float(product.price or 0)
+    uid = getattr(user, "id", None) if user is not None else user_id
+    if uid is not None:
+        from app.services.flash_sale import apply_flash_percent_to_price, get_flash_sale_assignment
+
+        assignment = get_flash_sale_assignment(db, user_id=int(uid), guest_session_id=None)
+        flash_pct = assignment.percent_for(getattr(product, "id", None))
+        if flash_pct:
+            pricing = apply_flash_percent_to_price(
+                list_price, flash_pct, countdown_to=assignment.slot.end_at
+            )
+            return float(pricing["display_price"]), list_price
     unit = float(effective_unit_price(db, list_price, user=user))
     return unit, list_price
 

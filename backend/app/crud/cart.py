@@ -18,10 +18,13 @@ def _warehouse_stock_cap(product: Product) -> Optional[int]:
     return warehouse_sellable_qty(product)
 
 
-def _cart_line_unit_prices(db: Session, product: Product) -> Tuple[float, float, bool, Optional[int], float]:
+def _cart_line_unit_prices(
+    db: Session, product: Product, *, user_id: Optional[int] = None
+) -> Tuple[float, float, bool, Optional[int], float]:
     """
     Trả (giá bán đơn vị, giá gốc/list, is_warehouse, cap tồn, % giảm kho).
     Dòng kho: giá bán = giá sau % admin; cap = available trên Product kho.
+    Hàng thường: flash / sale lịch đang chạy — hết chương trình thì giá gốc.
     """
     from app.services.warehouse_clearance import (
         get_warehouse_clearance_settings,
@@ -31,7 +34,7 @@ def _cart_line_unit_prices(db: Session, product: Product) -> Tuple[float, float,
 
     is_wh = is_warehouse_cart_product(product)
     cap = _warehouse_stock_cap(product) if is_wh else None
-    display, original = resolve_checkout_line_prices(db, product)
+    display, original = resolve_checkout_line_prices(db, product, user_id=user_id)
     if not is_wh:
         return display, original, False, None, 0.0
     _enabled, pct = get_warehouse_clearance_settings(db)
@@ -188,7 +191,9 @@ class CartItemCRUD:
             CartItem.selected_color == cart_item.selected_color
         ).first()
         
-        unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
+        unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(
+            db, product, user_id=user_id
+        )
 
         client_pd = dict(cart_item.product_data or {})
         google_token = (cart_item.google_pv2_token or client_pd.get("google_pv2_token") or "").strip()
@@ -332,7 +337,9 @@ class CartItemCRUD:
 
             product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
             if product is not None:
-                unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(db, product)
+                unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(
+                    db, product, user_id=db_cart_item.user_id
+                )
                 pd_existing = dict(db_cart_item.product_data or {}) if isinstance(db_cart_item.product_data, dict) else {}
                 from app.services.google_automated_discount import read_google_discount_lock
 

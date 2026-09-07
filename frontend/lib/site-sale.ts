@@ -19,10 +19,17 @@ export function isFlashSalePricing(
 }
 
 function productHasActiveFlash(product: Product): boolean {
-  return (
-    isFlashSalePricing(product.flash_sale) ||
-    isFlashSalePricing(product.site_sale)
-  );
+  const sale = isFlashSalePricing(product.flash_sale)
+    ? product.flash_sale
+    : isFlashSalePricing(product.site_sale)
+      ? product.site_sale
+      : null;
+  if (!sale || (sale.percent ?? 0) <= 0) return false;
+  if (sale.countdown_to) {
+    const target = new Date(sale.countdown_to).getTime();
+    if (Number.isFinite(target) && Date.now() >= target) return false;
+  }
+  return true;
 }
 
 /**
@@ -52,10 +59,69 @@ export function mergeProductFlashSale(
   };
 }
 
-export function cartLineHasActiveFlash(item: CartLinePricingInput): boolean {
-  if (isFlashSalePricing(item.site_sale)) return true;
-  const data = item.product_data as { flash_sale?: SiteSaleProductPricing } | undefined;
-  return isFlashSalePricing(data?.flash_sale);
+export function saleCountdownExpired(
+  countdownTo?: string | null,
+  nowMs?: number,
+): boolean {
+  if (!countdownTo) return false;
+  const target = new Date(countdownTo).getTime();
+  if (!Number.isFinite(target)) return false;
+  return (nowMs ?? Date.now()) >= target;
+}
+
+/** Phase lịch sale theo đồng hồ máy — teaser hết giờ → active; active hết giờ → tắt. */
+export function liveCalendarPhase(
+  calendar?: Pick<SiteSaleCalendarState, 'enabled' | 'phase' | 'countdown_to'> | null,
+  nowMs?: number,
+): 'teaser' | 'active' | null {
+  if (!calendar?.enabled || !calendar.phase) return null;
+  if (!saleCountdownExpired(calendar.countdown_to, nowMs)) {
+    return calendar.phase === 'teaser' || calendar.phase === 'active' ? calendar.phase : null;
+  }
+  if (calendar.phase === 'teaser') return 'active';
+  return null;
+}
+
+export function liveCalendarState(
+  calendar: SiteSaleCalendarState | null | undefined,
+  nowMs?: number,
+): SiteSaleCalendarState | null {
+  if (!calendar) return calendar ?? null;
+  const phase = liveCalendarPhase(calendar, nowMs);
+  if (phase === calendar.phase) return calendar;
+  if (phase == null) {
+    return { ...calendar, phase: null };
+  }
+  return {
+    ...calendar,
+    phase,
+    countdown_to:
+      phase === 'active' && calendar.phase === 'teaser'
+        ? calendar.active_end_at ?? calendar.countdown_to
+        : calendar.countdown_to,
+  };
+}
+
+/** Cửa sổ giảm giá đã đóng (flash / sale lịch active). Teaser hết giờ không tính hết sale. */
+export function isSaleDiscountWindowEnded(
+  sale?: SiteSaleProductPricing | null,
+  nowMs?: number,
+): boolean {
+  if (!sale) return false;
+  const pct = sale.percent ?? 0;
+  if (pct <= 0 && sale.phase !== 'teaser') return true;
+  if (!saleCountdownExpired(sale.countdown_to, nowMs)) return false;
+  if (sale.phase === 'teaser' && !isFlashSalePricing(sale)) return false;
+  return true;
+}
+
+export function cartLineHasActiveFlash(item: CartLinePricingInput, nowMs?: number): boolean {
+  if (isWarehouseCartLine(item)) return false;
+  const sale = item.site_sale;
+  if (!isFlashSalePricing(sale)) return false;
+  if ((sale?.percent ?? 0) <= 0) return false;
+  if (isSaleDiscountWindowEnded(sale, nowMs)) return false;
+  return sale?.phase === 'active' || sale?.kind === 'flash';
 }
 
 export const FLASH_SALE_PROGRAM_NAME = 'Flash sale';
@@ -207,119 +273,201 @@ export function mergeProductSiteSaleFromCalendar(
   // Hàng kho thanh lý có giá riêng — không chồng Sale site (6/6, …) lên giá đã giảm kho.
   if (isWarehouseClearanceProduct(product)) return product;
   if (productHasActiveFlash(product)) return product;
-  if (!calendar?.enabled || !calendar.phase) return product;
+  const liveCal = liveCalendarState(calendar);
+  if (!liveCal?.enabled || !liveCal.phase) {
+    if (product.site_sale && isSaleDiscountWindowEnded(product.site_sale)) {
+      const list = Math.max(0, product.site_sale.list_price ?? product.original_price ?? product.price ?? 0);
+      return {
+        ...product,
+        price: list || product.price,
+        original_price: undefined,
+        site_sale: undefined,
+      };
+    }
+    return product;
+  }
 
   const existing = product.site_sale;
-  const pct = calendar.discount_percent ?? existing?.percent ?? 0;
+  const pct = liveCal.discount_percent ?? existing?.percent ?? 0;
   if (pct <= 0) return product;
 
   const base = Math.max(0, existing?.list_price ?? product.price ?? 0);
   const savings = Math.round(base * pct / 100);
   const salePrice = Math.max(0, base - savings);
 
-  if (existing?.phase === calendar.phase && (existing.percent ?? 0) > 0) {
+  if (existing?.phase === liveCal.phase && (existing.percent ?? 0) > 0 && !isFlashSalePricing(existing)) {
     const needsPatch =
-      (!existing.countdown_to && calendar.countdown_to) ||
-      (!existing.event_label && calendar.event_label) ||
-      (!existing.event_date && calendar.event_date);
+      (!existing.countdown_to && liveCal.countdown_to) ||
+      (!existing.event_label && liveCal.event_label) ||
+      (!existing.event_date && liveCal.event_date);
     if (!needsPatch) return product;
     return {
       ...product,
       site_sale: {
         ...existing,
-        countdown_to: existing.countdown_to ?? calendar.countdown_to ?? null,
-        event_label: existing.event_label ?? calendar.event_label ?? null,
-        event_date: existing.event_date ?? calendar.event_date ?? null,
+        countdown_to: existing.countdown_to ?? liveCal.countdown_to ?? null,
+        event_label: existing.event_label ?? liveCal.event_label ?? null,
+        event_date: existing.event_date ?? liveCal.event_date ?? null,
       },
     };
   }
 
   const siteSale: SiteSaleProductPricing = {
     list_price: base,
-    display_price: calendar.phase === 'active' ? salePrice : base,
+    display_price: liveCal.phase === 'active' ? salePrice : base,
     savings_amount: savings,
     percent: pct,
-    phase: calendar.phase,
-    expected_sale_price: calendar.phase === 'teaser' ? salePrice : undefined,
-    event_label: calendar.event_label ?? null,
-    event_date: calendar.event_date ?? null,
-    countdown_to: calendar.countdown_to ?? null,
+    phase: liveCal.phase,
+    expected_sale_price: liveCal.phase === 'teaser' ? salePrice : undefined,
+    event_label: liveCal.event_label ?? null,
+    event_date: liveCal.event_date ?? null,
+    countdown_to: liveCal.countdown_to ?? null,
   };
 
   const merged: Product = { ...product, site_sale: siteSale };
-  if (calendar.phase === 'active' && savings > 0) {
+  if (liveCal.phase === 'active' && savings > 0) {
     merged.original_price = base;
     merged.price = salePrice;
   }
   return merged;
 }
 
-/** Gắn site_sale cho dòng giỏ khi API thiếu — dùng trạng thái sale toàn giỏ. */
+function cartLineListUnitPrice(item: CartLinePricingInput): number {
+  return Math.max(
+    0,
+    item.list_price ??
+      item.product_data?.list_price ??
+      item.original_price ??
+      item.product_data?.original_price ??
+      item.site_sale?.list_price ??
+      item.product_price ??
+      item.product_data?.price ??
+      0,
+  );
+}
+
+function revertCartLineToListPrice<T extends CartLinePricingInput>(item: T): T {
+  const list = cartLineListUnitPrice(item);
+  const pd = item.product_data
+    ? { ...item.product_data, flash_sale: undefined, price: list || item.product_data.price }
+    : item.product_data;
+  return {
+    ...item,
+    site_sale: null,
+    list_price: list || item.list_price,
+    product_price: list || item.product_price,
+    original_price: undefined,
+    product_data: pd,
+  };
+}
+
+/** Gắn site_sale cho dòng giỏ khi API thiếu — dùng trạng thái sale toàn giỏ. Hết giờ thì về giá gốc. */
 export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput>(
   item: T,
   calendar: SiteSaleCalendarState | null | undefined,
+  nowMs?: number,
 ): T {
   if (isWarehouseCartLine(item)) return item;
   if (isGoogleDiscountCartLine(item)) return item;
-  if (cartLineHasActiveFlash(item)) return item;
-  if (!calendar?.enabled || !calendar.phase) return item;
+  if (cartLineHasActiveFlash(item, nowMs)) return item;
 
-  const existing = item.site_sale;
-  const pct = calendar.discount_percent ?? existing?.percent ?? 0;
-  if (pct <= 0) return item;
+  let next = item;
+  if (item.site_sale && isSaleDiscountWindowEnded(item.site_sale, nowMs)) {
+    next = revertCartLineToListPrice(item);
+  } else if (isFlashSalePricing(item.site_sale) && !cartLineHasActiveFlash(item, nowMs)) {
+    next = revertCartLineToListPrice(item);
+  }
+
+  const liveCal = liveCalendarState(calendar, nowMs);
+  const phase = liveCal?.phase ?? null;
+  if (!liveCal?.enabled || !phase) {
+    if (next.site_sale && (isFlashSalePricing(next.site_sale) || isSaleDiscountWindowEnded(next.site_sale, nowMs))) {
+      return revertCartLineToListPrice(next);
+    }
+    if (!phase && next.site_sale && next.site_sale.phase === 'active' && !isFlashSalePricing(next.site_sale)) {
+      return revertCartLineToListPrice(next);
+    }
+    return next;
+  }
+
+  const existing = next.site_sale;
+  const pct = liveCal.discount_percent ?? existing?.percent ?? 0;
+  if (pct <= 0) return revertCartLineToListPrice(next);
 
   const base = Math.max(
     0,
     existing?.list_price ??
-      item.list_price ??
-      item.product_data?.list_price ??
-      item.product_data?.original_price ??
-      item.product_price ??
-      item.product_data?.price ??
+      next.list_price ??
+      next.product_data?.list_price ??
+      next.product_data?.original_price ??
+      next.product_price ??
+      next.product_data?.price ??
       0,
   );
   const savings = Math.round(base * pct / 100);
   const salePrice = Math.max(0, base - savings);
 
-  if (existing?.phase === calendar.phase && (existing.percent ?? 0) > 0) {
+  if (existing?.phase === phase && (existing.percent ?? 0) > 0 && !isFlashSalePricing(existing)) {
     const needsPatch =
-      (!existing.countdown_to && calendar.countdown_to) ||
-      (!existing.event_label && calendar.event_label) ||
-      (!existing.event_date && calendar.event_date);
+      (!existing.countdown_to && liveCal.countdown_to) ||
+      (!existing.event_label && liveCal.event_label) ||
+      (!existing.event_date && liveCal.event_date);
     if (!needsPatch) {
-      return { ...item, list_price: base };
+      return { ...next, list_price: base };
     }
     return {
-      ...item,
+      ...next,
       list_price: base,
       site_sale: {
         ...existing,
-        countdown_to: existing.countdown_to ?? calendar.countdown_to ?? null,
-        event_label: existing.event_label ?? calendar.event_label ?? null,
-        event_date: existing.event_date ?? calendar.event_date ?? null,
+        countdown_to: existing.countdown_to ?? liveCal.countdown_to ?? null,
+        event_label: existing.event_label ?? liveCal.event_label ?? null,
+        event_date: existing.event_date ?? liveCal.event_date ?? null,
       },
     };
   }
 
   const siteSale: SiteSaleProductPricing = {
     list_price: base,
-    display_price: calendar.phase === 'active' ? salePrice : base,
+    display_price: phase === 'active' ? salePrice : base,
     savings_amount: savings,
     percent: pct,
-    phase: calendar.phase,
-    expected_sale_price: calendar.phase === 'teaser' ? salePrice : undefined,
-    event_label: calendar.event_label ?? null,
-    event_date: calendar.event_date ?? null,
-    countdown_to: calendar.countdown_to ?? null,
+    phase,
+    expected_sale_price: phase === 'teaser' ? salePrice : undefined,
+    event_label: liveCal.event_label ?? null,
+    event_date: liveCal.event_date ?? null,
+    countdown_to: liveCal.countdown_to ?? null,
   };
 
   return {
-    ...item,
+    ...next,
     list_price: base,
     site_sale: siteSale,
-    original_price: calendar.phase === 'active' && savings > 0 ? base : item.original_price,
-    product_price: calendar.phase === 'active' ? salePrice : base,
+    original_price: phase === 'active' && savings > 0 ? base : undefined,
+    product_price: phase === 'active' ? salePrice : base,
   };
+}
+
+/** Mốc thời gian gần nhất cần refresh giỏ khi một chương trình sale/khoá giá hết hạn. */
+export function nextCartSaleRefreshAtMs(
+  items: Array<CartLinePricingInput & { product_data?: unknown }>,
+  calendar?: SiteSaleCalendarState | null,
+  nowMs?: number,
+): number | null {
+  const now = nowMs ?? Date.now();
+  const times: number[] = [];
+  const pushIso = (iso?: string | null) => {
+    if (!iso) return;
+    const t = new Date(iso).getTime();
+    if (Number.isFinite(t) && t > now) times.push(t);
+  };
+  pushIso(calendar?.countdown_to);
+  for (const item of items) {
+    pushIso(item.site_sale?.countdown_to);
+    const pd = item.product_data as { google_automated_discount?: { locked_until?: string } } | undefined;
+    pushIso(pd?.google_automated_discount?.locked_until ?? null);
+  }
+  return times.length ? Math.min(...times) : null;
 }
 
 export function resolveCartLineTotal(
@@ -628,7 +776,8 @@ export function resolveCartLineDisplayPricing(
     };
   }
 
-  const site = item.site_sale;
+  const siteRaw = item.site_sale;
+  const site = siteRaw && isSaleDiscountWindowEnded(siteRaw) ? null : siteRaw;
   const listPrice = site?.list_price ?? item.list_price ?? item.original_price ?? item.product_data?.original_price ?? item.product_price ?? 0;
   const sitePhase = site?.phase ?? null;
   const sitePercent = site?.percent ?? 0;
@@ -646,7 +795,9 @@ export function resolveCartLineDisplayPricing(
   const googleLine = isGoogleDiscountCartLine(item);
 
   let siteSaleUnitPrice = unitSalePrice;
-  if (sitePhase === 'active' && sitePercent > 0) {
+  if (!site && listPrice > 0 && !googleLine) {
+    siteSaleUnitPrice = listPrice;
+  } else if (sitePhase === 'active' && sitePercent > 0) {
     const computedSale = Math.max(0, Math.round(listPrice * (1 - sitePercent / 100)));
     if (siteSaleUnitPrice <= 0 || siteSaleUnitPrice >= listPrice) {
       siteSaleUnitPrice = computedSale;

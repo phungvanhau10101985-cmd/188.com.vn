@@ -501,6 +501,11 @@ export function readGoogleDiscountFromCartLine(productData: unknown): CartLineGo
   const block = (productData as Record<string, unknown>).google_automated_discount;
   if (!block || typeof block !== 'object') return null;
   const rec = block as Record<string, unknown>;
+  const lockedUntil = rec.locked_until;
+  if (lockedUntil) {
+    const lockMs = new Date(String(lockedUntil)).getTime();
+    if (Number.isFinite(lockMs) && lockMs <= Date.now()) return null;
+  }
   const price = Number(rec.price);
   if (!Number.isFinite(price) || price <= 0) return null;
   let prior: number | null = null;
