@@ -134,18 +134,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
     for (const rest of incomingById.values()) ordered.push(rest);
     return { ...enriched, items: ordered };
   };
-    const incomingById = new Map(enriched.items.map((item) => [item.id, item]));
-    const ordered: Cart['items'] = [];
-    for (const old of prevCart.items) {
-      const next = incomingById.get(old.id);
-      if (next) {
-        ordered.push(next);
-        incomingById.delete(old.id);
-      }
-    }
-    for (const rest of incomingById.values()) ordered.push(rest);
-    return { ...enriched, items: ordered };
-  };
 
   const refreshCart = async () => {
     if (!isAuthenticated) {
