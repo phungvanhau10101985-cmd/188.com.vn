@@ -1214,34 +1214,18 @@ export default function CartPage() {
                         </div>
                       </div>
 
-                      <div className="text-right">
+                      <div className="hidden text-right md:block">
                         {showTeaserPromo ? (
                           <>
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                              Giá gốc
-                            </p>
                             <p className="text-sm md:text-base font-semibold text-gray-900 whitespace-nowrap">
                               {formatPrice(pricing.displayUnitPrice)}
                             </p>
                             <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
-                              {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} dự kiến {formatPrice(pricing.expectedSaleUnitPrice!)}
-                            </p>
-                            <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
-                              {lineProgramName}: tiết kiệm ~{formatPrice(pricing.teaserUnitSavings)}
+                              Dự kiến {formatPrice(pricing.expectedSaleUnitPrice!)}
                             </p>
                             <span className="mt-0.5 inline-block rounded bg-amber-500 px-1 py-0.5 text-[10px] font-bold text-white">
                               {siteSaleProgramLabel(lineItem.site_sale, siteSaleState)} -{pricing.sitePercent}%
                             </span>
-                            {pricing.countdownTo ? (
-                              <p className="mt-1 text-[10px] font-medium text-amber-800 sm:text-[11px]">
-                                <SiteSaleLiveCountdown
-                                  countdownTo={pricing.countdownTo}
-                                  phase="teaser"
-                                  eventLabel={pricing.siteLabel}
-                                  inline
-                                />
-                              </p>
-                            ) : null}
                           </>
                         ) : (
                           <>
@@ -1251,11 +1235,6 @@ export default function CartPage() {
                             {showCompareUnit ? (
                               <p className="text-xs text-gray-400 line-through whitespace-nowrap">
                                 {formatPrice(pricing.compareUnitPrice!)}
-                              </p>
-                            ) : null}
-                            {pricing.lineSavings > 0 ? (
-                              <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
-                                {lineProgramName}: tiết kiệm {formatPrice(pricing.lineSavings / item.quantity)}
                               </p>
                             ) : null}
                             {(pricing.sitePhase === 'active' || isWhLine) && pricing.sitePercent > 0 && !isGoogleLine ? (
@@ -1276,13 +1255,13 @@ export default function CartPage() {
                         )}
                       </div>
 
-                      <div className="flex w-full items-center justify-between gap-3 md:w-auto md:justify-center md:gap-0">
+                      <div className="flex w-full items-center justify-end order-3 md:order-none md:w-auto md:justify-center">
                         <div className="inline-flex items-center border border-gray-200 rounded-full">
                           <button
                             type="button"
                             onClick={() => handleQuantityDelta(item, -1)}
                             disabled={item.quantity <= 1}
-                            className="w-9 h-9 flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            className="flex h-9 w-9 items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                             aria-label="Giảm số lượng"
                           >
                             -
@@ -1311,53 +1290,74 @@ export default function CartPage() {
                             type="button"
                             onClick={() => handleQuantityDelta(item, 1)}
                             disabled={item.quantity >= maxLineQty}
-                            className="hidden w-9 h-9 md:flex items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                            className="flex h-9 w-9 items-center justify-center text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                             aria-label="Tăng số lượng"
                           >
                             +
                           </button>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleQuantityDelta(item, 1)}
-                          disabled={item.quantity >= maxLineQty}
-                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-200 text-lg font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 md:hidden"
-                          aria-label="Tăng số lượng"
-                        >
-                          +
-                        </button>
                       </div>
 
-                      <div className="text-right">
-                        <p className="text-sm md:text-base font-bold text-[#ea580c] whitespace-nowrap">
-                          {formatPrice(pricing.displayLineTotal)}
-                        </p>
+                      <div className="w-full space-y-0.5 order-2 md:order-none md:w-auto">
                         {showTeaserPromo ? (
                           <>
-                            <p className="text-xs font-semibold text-emerald-700 whitespace-nowrap">
-                              Dự kiến {formatPrice(pricing.expectedLineTotal!)}
-                            </p>
-                            <p className="text-[11px] font-medium text-amber-700 whitespace-nowrap">
-                              {lineProgramName}: tiết kiệm ~{formatPrice(pricing.teaserLineSavings)}
-                            </p>
+                            <div className="flex items-center justify-between gap-3 text-[11px] md:justify-end md:text-xs">
+                              <span className="text-gray-500">Giá chưa trừ</span>
+                              <span className="whitespace-nowrap font-medium text-gray-900">
+                                {formatPrice(pricing.displayLineTotal)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-[11px] text-amber-700 md:justify-end md:text-xs">
+                              <span>Trừ {lineProgramName} (dự kiến)</span>
+                              <span className="whitespace-nowrap font-medium">
+                                -{formatPrice(pricing.teaserLineSavings)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 md:justify-end">
+                              <span className="text-[11px] font-medium text-emerald-700 md:text-xs">
+                                Dự kiến sau trừ
+                              </span>
+                              <span className="whitespace-nowrap text-sm font-bold text-[#ea580c] md:text-base">
+                                {formatPrice(pricing.expectedLineTotal!)}
+                              </span>
+                            </div>
+                          </>
+                        ) : showCompareLine || pricing.lineSavings > 0 ? (
+                          <>
+                            <div className="flex items-center justify-between gap-3 text-[11px] md:justify-end md:text-xs">
+                              <span className="text-gray-500">Giá chưa trừ</span>
+                              <span className="whitespace-nowrap font-medium text-gray-900">
+                                {formatPrice(pricing.compareLineTotal ?? pricing.displayLineTotal)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-[11px] text-emerald-700 md:justify-end md:text-xs">
+                              <span>Trừ {lineProgramName}</span>
+                              <span className="whitespace-nowrap font-medium">
+                                -{formatPrice(pricing.lineSavings)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 md:justify-end">
+                              <span className="text-[11px] font-medium text-gray-700 md:text-xs">
+                                Tổng sau trừ
+                              </span>
+                              <span className="whitespace-nowrap text-sm font-bold text-[#ea580c] md:text-base">
+                                {formatPrice(pricing.displayLineTotal)}
+                              </span>
+                            </div>
                           </>
                         ) : (
-                          <>
-                            {showCompareLine ? (
-                              <p className="text-xs text-gray-400 line-through whitespace-nowrap">
-                                {formatPrice(pricing.compareLineTotal!)}
-                              </p>
-                            ) : null}
-                            {pricing.lineSavings > 0 ? (
-                              <p className="text-[11px] font-medium text-emerald-600 whitespace-nowrap">
-                                {lineProgramName}: tiết kiệm {formatPrice(pricing.lineSavings)}
-                              </p>
-                            ) : null}
-                          </>
+                          <div className="flex items-center justify-between gap-3 md:justify-end">
+                            <span className="text-[11px] font-medium text-gray-700 md:hidden">
+                              Thành tiền
+                            </span>
+                            <p className="whitespace-nowrap text-sm font-bold text-[#ea580c] md:text-base">
+                              {formatPrice(pricing.displayLineTotal)}
+                            </p>
+                          </div>
                         )}
                       </div>
 
-                      <div className="flex md:justify-end">
+                      <div className="flex order-4 md:order-none md:justify-end">
                         <button
                           type="button"
                           onClick={() => handleRemoveItem(item)}
@@ -1427,10 +1427,10 @@ export default function CartPage() {
               </p>
             ) : null}
 
-            {hasRegularSelection && regularListSubtotal > regularSubtotal ? (
+            {hasRegularSelection && regularTotalDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                <span className="text-gray-500">Giá gốc</span>
-                <span className="text-gray-400 line-through">{formatPrice(regularListSubtotal)}</span>
+                <span className="text-gray-500">Giá chưa trừ</span>
+                <span className="font-medium text-gray-900">{formatPrice(regularListSubtotal)}</span>
               </div>
             ) : null}
 
@@ -1468,7 +1468,7 @@ export default function CartPage() {
             {welcomeApplied && selectedWelcomeDiscount > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  Mã {appliedPromo?.code}{' '}
+                  Số tiền trừ · Mã {appliedPromo?.code}{' '}
                   (
                   <CappedPromoPercentLabel
                     display={welcomePercentDisplay}
@@ -1522,7 +1522,9 @@ export default function CartPage() {
 
             {hasRegularSelection ? (
               <div className="mb-2 flex items-center justify-between text-[11px] md:text-sm">
-                <span className="font-medium text-gray-700">Tạm tính hàng thường</span>
+                <span className="font-medium text-gray-700">
+                  {regularTotalDiscount > 0 ? 'Tổng sau trừ' : 'Tạm tính hàng thường'}
+                </span>
                 <span className="font-semibold text-gray-900">{formatPrice(regularFinalPrice)}</span>
               </div>
             ) : null}
@@ -1560,10 +1562,6 @@ export default function CartPage() {
                   Đã giảm {formatPrice(regularTotalDiscount)}
                 </span>
               </div>
-            ) : hasRegularSelection && regularTotalDiscount > 0 ? (
-              <p className="mb-2 text-[11px] text-emerald-700 md:text-xs">
-                Đã tiết kiệm {formatPrice(regularTotalDiscount)} trên hàng thường.
-              </p>
             ) : null}
 
             {walletBalance > 0 ? (
