@@ -127,9 +127,8 @@ export default function MarketingBannerManager() {
       <div>
         <h2 className="text-lg font-bold text-gray-900">Banner AI sale, sinh nhật và kho</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Nano Banana Pro tạo một ảnh 21:9 dùng nguyên vẹn trên desktop và mobile. Slider trang
-          chủ ưu tiên CMSN, rồi sale ngày trùng tháng, rồi sale kho. Ảnh sale kho được lưu theo
-          từng mức % để dùng lại.
+          Nano Banana Pro tạo một ảnh banner 21:9. Slider trang chủ ưu tiên CMSN, rồi sale
+          ngày trùng tháng, rồi sale kho. Ảnh sale kho được lưu theo từng mức % để dùng lại.
         </p>
       </div>
 

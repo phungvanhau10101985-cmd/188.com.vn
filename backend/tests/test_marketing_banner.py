@@ -51,8 +51,10 @@ def test_prompts_lock_date_percent_and_single_21_9_image():
     assert "21:9" in sale
     assert "SALE 9.9 - GIẢM 6%" in sale
     assert "Deal vui đúng hẹn - chọn liền hôm nay" in sale
+    assert "Nút CTA ghi nguyên văn" in sale
     assert "MỪNG SINH NHẬT 05/09 - TẶNG 10%" in birthday
     assert "Không ghi tên khách" in birthday
+    assert "Nút CTA ghi nguyên văn" in birthday
     warehouse = svc.build_banner_prompt(
         kind="warehouse",
         day=0,
@@ -67,6 +69,14 @@ def test_prompts_lock_date_percent_and_single_21_9_image():
     assert "SALE KHO - GIẢM 30%" in warehouse
     assert "Hàng kho giá sốc - chốt liền hôm nay" in warehouse
     assert "SĂN HÀNG KHO" in warehouse
+    assert "Nút CTA ghi nguyên văn" in warehouse
+    for prompt in (sale, birthday, warehouse):
+        lowered = prompt.lower()
+        assert "mobile" not in lowered
+        assert "desktop" not in lowered
+        assert "điện thoại" not in lowered
+        assert "smartphone" not in lowered
+        assert "mockup" not in lowered
 
 
 def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):

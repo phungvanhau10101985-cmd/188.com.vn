@@ -169,9 +169,8 @@ def build_banner_prompt(
     cta = dynamic["cta"]
     art_direction = dynamic["art_direction"]
     shared = (
-        "Tạo đúng MỘT banner thương mại điện tử siêu rộng 21:9, chất lượng 2K, "
-        "dùng nguyên ảnh trên desktop lẫn mobile, không crop. Phong cách cao cấp, "
-        "ấn tượng, chuyển đổi cao, màu cam-đỏ-trắng theo thương hiệu 188.com.vn. "
+        "Tạo một banner thương mại điện tử siêu rộng 21:9, chất lượng 2K. "
+        "Phong cách cao cấp, ấn tượng, chuyển đổi cao, màu cam-đỏ-trắng theo thương hiệu 188.com.vn. "
         "Logo chữ 188.com.vn rõ ràng. Chữ tiếng Việt phải lớn, ít, đúng chính tả, "
         "độ tương phản cao; không thêm mức giảm khác. Không dùng watermark hoặc logo hãng khác. "
     )
@@ -179,31 +178,27 @@ def build_banner_prompt(
         return shared + (
             f'Bắt buộc ghi nguyên văn: "SALE {day}.{month} - GIẢM {pct}". '
             f'Ghi nguyên văn câu sáng tác mới: "{verse}". '
-            f'CTA dạng nút ghi nguyên văn: "{cta}". '
+            f'Nút CTA ghi nguyên văn: "{cta}". '
             f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
-            "Dùng hình sản phẩm thời trang, giày dép, phụ kiện hiện đại; tạo cảm giác khẩn cấp. "
-            "Đặt toàn bộ chữ quan trọng ở giữa ảnh và đủ lớn để đọc trên màn hình điện thoại."
+            "Dùng hình sản phẩm thời trang, giày dép, phụ kiện hiện đại; tạo cảm giác khẩn cấp."
         )
     if kind == "warehouse":
         return shared + (
             f'Bắt buộc ghi nguyên văn: "SALE KHO - GIẢM {pct}". '
             f'Ghi nguyên văn câu sáng tác mới: "{verse}". '
-            f'CTA dạng nút ghi nguyên văn: "{cta}". '
+            f'Nút CTA ghi nguyên văn: "{cta}". '
             f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
             "Banner sale kho phải cực ấn tượng, chuyển đổi cao: nền đỏ-cam rực, tia lửa, "
             "ánh sáng xuyên tâm, cảm giác cháy hàng và khẩn cấp. Xếp túi xách, giày, "
-            "đồng hồ, áo vest quanh chữ lớn, mỗi món có viền lửa/phát sáng. "
-            "Không ghi ngày tháng. Đặt toàn bộ chữ quan trọng ở giữa ảnh và đủ lớn "
-            "để đọc trên màn hình điện thoại."
+            "đồng hồ, áo vest quanh chữ lớn, mỗi món có viền lửa/phát sáng. Không ghi ngày tháng."
         )
     return shared + (
         f'Bắt buộc ghi nguyên văn: "MỪNG SINH NHẬT {label} - TẶNG {pct}". '
         f'Ghi nguyên văn câu thơ mới: "{verse}". '
-        f'CTA dạng nút ghi nguyên văn: "{cta}". '
+        f'Nút CTA ghi nguyên văn: "{cta}". '
         f"Định hướng mỹ thuật riêng cho phiên bản này: {art_direction}. "
         "Không ghi tên khách và không ghi năm sinh. Trang trí quà tặng, bánh sinh nhật, "
-        "confetti vừa đủ, sang trọng và ấm áp. Đặt toàn bộ chữ quan trọng ở giữa ảnh "
-        "và đủ lớn để đọc trên màn hình điện thoại."
+        "confetti vừa đủ, sang trọng và ấm áp."
     )
 
 
