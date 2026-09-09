@@ -108,27 +108,14 @@ export default function MarketingBannerManager() {
     }
   };
 
-  const activate = async (asset: AdminMarketingBannerAsset) => {
-    setWorking(true);
-    setError(null);
-    try {
-      await adminMarketingBannerAPI.activate(asset.id);
-      setMessage(`Đã dùng lại phiên bản ${asset.version}.`);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không thể kích hoạt ảnh này.');
-    } finally {
-      setWorking(false);
-    }
-  };
-
   return (
     <section id="ai-banners" className="mt-8 space-y-5 rounded-xl border border-orange-200 bg-white p-6">
       <div>
         <h2 className="text-lg font-bold text-gray-900">Banner AI sale, sinh nhật và kho</h2>
         <p className="mt-1 text-sm text-gray-600">
           Nano Banana Pro tạo một ảnh banner 21:9. Slider trang chủ ưu tiên CMSN, rồi sale
-          ngày trùng tháng, rồi sale kho. Ảnh sale kho được lưu theo từng mức % để dùng lại.
+          ngày trùng tháng, rồi sale kho. Tạo lại thành công sẽ xóa ảnh cũ — mỗi ngày/% chỉ
+          giữ một ảnh đang dùng.
         </p>
       </div>
 
@@ -212,7 +199,17 @@ export default function MarketingBannerManager() {
       ) : (
         <div className="space-y-5">
           {grouped.map((versions) => {
-            const current = versions.find((item) => item.is_active) ?? versions[0];
+            const generating = versions.find((item) => item.status === 'generating');
+            const failed = versions.find((item) => item.status === 'failed');
+            const current =
+              versions.find((item) => item.is_active && item.status === 'ready') ??
+              generating ??
+              failed ??
+              versions[0];
+            const displayImage =
+              versions.find((item) => item.is_active && item.image_url)?.image_url ||
+              current.image_url;
+            const statusLabel = generating ? 'đang tạo lại' : current.status;
             return (
               <article key={`${current.kind}:${current.campaign_key}`} className="rounded-xl border border-gray-200 p-4">
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -223,12 +220,12 @@ export default function MarketingBannerManager() {
                       {current.discount_percent}%
                     </p>
                     <p className="text-xs text-gray-500">
-                      {current.model} · {versions.length} phiên bản · trạng thái {current.status}
+                      {current.model} · trạng thái {statusLabel}
                     </p>
                   </div>
                   <button
                     type="button"
-                    disabled={working}
+                    disabled={working || Boolean(generating)}
                     onClick={() =>
                       void queueRegenerate(
                         current.kind,
@@ -238,47 +235,32 @@ export default function MarketingBannerManager() {
                     }
                     className="rounded-lg border border-orange-300 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50"
                   >
-                    Tạo lại
+                    {generating ? 'Đang tạo lại…' : 'Tạo lại'}
                   </button>
                 </div>
 
-                {current.image_url ? (
+                {displayImage ? (
                   <img
-                    src={current.image_url}
+                    src={displayImage}
                     alt={`Banner ${current.kind} ${current.date_key}`}
                     className="h-auto w-full rounded-lg border border-gray-100"
                     loading="lazy"
                   />
                 ) : (
                   <div className="rounded-lg bg-gray-100 px-4 py-8 text-center text-sm text-gray-600">
-                    {current.status === 'generating' ? 'Đang tạo ảnh…' : current.error_message || 'Chưa có ảnh'}
+                    {generating ? 'Đang tạo ảnh…' : current.error_message || 'Chưa có ảnh'}
                   </div>
                 )}
-
-                {versions.length > 1 ? (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {versions.map((version) => (
-                      <button
-                        key={version.id}
-                        type="button"
-                        disabled={working || version.status !== 'ready' || version.is_active}
-                        onClick={() => void activate(version)}
-                        className={`rounded-md px-3 py-1.5 text-xs ${
-                          version.is_active
-                            ? 'bg-emerald-100 font-semibold text-emerald-800'
-                            : 'border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50'
-                        }`}
-                      >
-                        v{version.version}{version.is_active ? ' đang dùng' : ' dùng lại'}
-                      </button>
-                    ))}
-                  </div>
+                {generating && displayImage ? (
+                  <p className="mt-2 text-xs text-amber-700">Đang tạo ảnh mới. Ảnh cũ vẫn dùng đến khi ảnh mới xong.</p>
                 ) : null}
 
                 <details className="mt-3 text-xs text-gray-600">
                   <summary className="cursor-pointer font-medium">Xem prompt và lỗi</summary>
                   <p className="mt-2 whitespace-pre-wrap rounded bg-gray-50 p-3">{current.prompt}</p>
-                  {current.error_message ? <p className="mt-2 text-red-700">{current.error_message}</p> : null}
+                  {failed?.error_message || current.error_message ? (
+                    <p className="mt-2 text-red-700">{failed?.error_message || current.error_message}</p>
+                  ) : null}
                 </details>
               </article>
             );

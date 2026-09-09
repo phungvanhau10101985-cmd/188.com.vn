@@ -44,3 +44,18 @@ describe('marketing banner responsive contract', () => {
     expect(component).toContain('Math.abs(distance) < 40');
   });
 });
+
+describe('admin marketing banner manager keeps a single image', () => {
+  const manager = fs.readFileSync(
+    path.join(__dirname, '..', 'components', 'admin', 'MarketingBannerManager.tsx'),
+    'utf8',
+  );
+
+  test('regenerate replaces the current image instead of keeping versions', () => {
+    expect(manager).toContain('Tạo lại thành công sẽ xóa ảnh cũ');
+    expect(manager).toContain("generating ? 'Đang tạo lại…' : 'Tạo lại'");
+    expect(manager).not.toContain('dùng lại');
+    expect(manager).not.toContain('phiên bản');
+    expect(manager).not.toContain('adminMarketingBannerAPI.activate');
+  });
+});

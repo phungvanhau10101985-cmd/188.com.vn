@@ -21,6 +21,10 @@ def correct_search_query_via_ai(query: str, gender_context: Optional[str] = None
     """
     if not query or not query.strip():
         return None
+    from app.services.product_internal_sku import looks_like_internal_sku_search_query
+
+    if looks_like_internal_sku_search_query(query):
+        return None
     if not getattr(settings, "AI_SEARCH_CORRECTION_ENABLED", True):
         logger.info("AI search correction disabled by config")
         print("[AI-CORRECT] disabled by config")
@@ -39,6 +43,7 @@ Nhiệm vụ: Sửa cụm từ sau thành tiếng Việt có dấu đúng chuẩ
 - Thêm dấu nếu thiếu (vd: "cao long nam de" -> "cao lông nam đế")
 - Sửa lỗi chính tả phổ biến, ưu tiên lỗi gõ gần phím (m/n, s/x, d/gi/r...)
 - Giữ nguyên từ khóa sản phẩm, không cắt cụt từ (vd. "nhí" không thành "nh")
+- Nếu cụm từ là mã SKU (1 chữ cái + 4 chữ số, vd U9897) thì GIỮ NGUYÊN cả mã, không cắt thành U9
 - Bỏ từ đệm hội thoại: "có không bạn", "có không", "bạn ơi", "shop ơi"
 - Với cụm liên quan giới tính, ưu tiên "nam/nữ" thay vì suy diễn kiểu khác
 - Nếu gặp "giày nan" thì sửa thành "giày nam" (không đổi thành "giày đan")

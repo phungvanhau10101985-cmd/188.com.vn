@@ -23,7 +23,11 @@ from app.models.admin import AdminUser
 from app.models.marketing_banner import MarketingBannerAsset
 from app.models.user import User
 from app.services.birthday_discount import BIRTHDAY_DISCOUNT_PERCENT
-from app.services.bunny_storage import build_public_object_url, upload_file_to_zone
+from app.services.bunny_storage import (
+    build_public_object_url,
+    delete_bunny_storage_objects_for_urls,
+    upload_file_to_zone,
+)
 from app.services.category_size_guide_gemini import gemini_generate_image_from_text
 from app.services.email_service import send_email
 from app.services.sale_calendar import list_upcoming_events
@@ -472,6 +476,33 @@ def _find_generating_asset(
     )
 
 
+def _delete_superseded_campaign_assets(
+    db: Session, *, kind: str, key: str, keep_id: int
+) -> None:
+    """Sau khi ảnh mới ready: xóa mọi bản cũ của cùng campaign, gồm file CDN."""
+    old_rows = (
+        db.query(MarketingBannerAsset)
+        .filter(
+            MarketingBannerAsset.kind == kind,
+            MarketingBannerAsset.campaign_key == key,
+            MarketingBannerAsset.id != keep_id,
+        )
+        .all()
+    )
+    if not old_rows:
+        return
+    urls = [row.image_url for row in old_rows if row.image_url]
+    for row in old_rows:
+        db.delete(row)
+    db.commit()
+    if not urls:
+        return
+    try:
+        delete_bunny_storage_objects_for_urls(urls)
+    except Exception:
+        logger.exception("Không xóa được ảnh banner cũ trên CDN cho %s", key)
+
+
 def generate_banner(
     db: Session,
     *,
@@ -596,6 +627,14 @@ def generate_banner(
         row.error_message = None
         db.commit()
         db.refresh(row)
+        _delete_superseded_campaign_assets(
+            db, kind=kind, key=key, keep_id=int(row.id)
+        )
+        row = (
+            db.query(MarketingBannerAsset)
+            .filter(MarketingBannerAsset.id == asset_id)
+            .one()
+        )
         if notify_admin:
             _admin_preview_email(db, row)
         return row

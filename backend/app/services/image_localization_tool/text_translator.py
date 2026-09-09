@@ -1,4 +1,5 @@
 # text_translator.py
+import os
 import re
 import unicodedata
 import requests
@@ -9,6 +10,12 @@ import json
 
 from config import DEEPSEEK_API_KEY, DEEPSEEK_URL, SKIP_REGEX, DOMAIN_REGEX
 from error_handler import ErrorHandler
+
+try:
+    from app.services.deepseek_http import deepseek_chat_completions, deepseek_message_text
+except Exception:  # standalone tool path / tests without app package
+    deepseek_chat_completions = None
+    deepseek_message_text = None
 
 class TextTranslator:
     def __init__(self):
@@ -273,27 +280,41 @@ YÊU CẦU:
 3. Dịch cả tiếng Anh lẫn tiếng Trung nếu có.
 4. Không giải thích thêm."""
 
+        model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
         payload = {
-            "model": "deepseek-v4-flash",
+            "model": model,
             "messages": [{"role":"user","content":prompt}],
             "temperature": 0.1,
-            "max_tokens": 100
+            # V4 thinking mặc định chiếm hết budget → content rỗng, bbox bị xóa trắng.
+            "max_tokens": 400,
+            "thinking": {"type": "disabled"},
         }
         
+        def _clean_translated(raw: str) -> str:
+            translated = (raw or "").strip()
+            translated = re.sub(r'^(Dịch:|Bản dịch:|Translation:|Vietnamese:)\s*', '', translated, flags=re.IGNORECASE)
+            translated = translated.strip('"').strip("'")
+            return re.sub(r'\s+', ' ', translated).strip()
+
         def _do_request():
-            r = self.session.post(DEEPSEEK_URL, headers=headers, json=payload, timeout=30)
+            if deepseek_chat_completions is not None:
+                r = deepseek_chat_completions(
+                    payload, timeout=30, api_url=DEEPSEEK_URL, api_key=DEEPSEEK_API_KEY
+                )
+            else:
+                r = self.session.post(DEEPSEEK_URL, headers=headers, json=payload, timeout=30)
             if r.status_code >= 400:
                 raise RuntimeError(f"DeepSeek API lỗi HTTP {r.status_code}: {(r.text or '')[:800]}")
             if not r.content: raise Exception("API trả về response rỗng")
             try: j = r.json()
             except json.JSONDecodeError: raise Exception(f"API trả về JSON không hợp lệ")
             if "choices" not in j or not j["choices"]: raise Exception(f"API response thiếu choices")
-            
-            translated = j["choices"][0]["message"]["content"].strip()
-            translated = re.sub(r'^(Dịch:|Bản dịch:|Translation:|Vietnamese:)\s*', '', translated, flags=re.IGNORECASE)
-            translated = translated.strip('"').strip("'")
-            translated = re.sub(r'\s+', ' ', translated).strip()
-            return translated
+            if deepseek_message_text is not None:
+                translated = deepseek_message_text(j)
+            else:
+                msg = j["choices"][0].get("message") or {}
+                translated = str(msg.get("content") or "").strip() or str(msg.get("reasoning_content") or "").strip()
+            return _clean_translated(translated)
         
         translated = self.error_handler.smart_retry(_do_request, max_immediate_retries=3, long_wait_minutes=3)
         print(f"    🟡 [DỊCH] '{text}' ➡️ '{translated}'")
@@ -424,7 +445,12 @@ YÊU CẦU:
                     ignore_blocks.append((text, bbox))
                 else:
                     translated_text = self.call_deepseek_for_translation_single(text)
-                    processed_blocks.append((translated_text, bbox))
+                    if not str(translated_text or "").strip():
+                        # DeepSeek rỗng: giữ pixel gốc. Không được inpaint rồi bỏ qua bước vẽ.
+                        print(f"    ⚠️ [DỊCH RỖNG] giữ nguyên, không xóa: '{text}'")
+                        ignore_blocks.append((text, bbox))
+                    else:
+                        processed_blocks.append((translated_text, bbox))
             else:
                 ignore_blocks.append((text, bbox))
         

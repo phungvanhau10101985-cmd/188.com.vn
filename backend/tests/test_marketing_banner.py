@@ -79,9 +79,10 @@ def test_prompts_lock_date_percent_and_single_21_9_image():
         assert "mockup" not in lowered
 
 
-def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
+def test_generate_deduplicates_and_force_replaces_previous_image(monkeypatch):
     db = _session()
     raw = _png_bytes()
+    deleted_urls: list[str] = []
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -97,6 +98,12 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
         "_upload_banner",
         lambda data, *, kind, key, version: f"https://cdn.test/{key}/v{version}.png",
     )
+    def _capture_deleted(urls):
+        items = list(urls)
+        deleted_urls.extend(items)
+        return len(items)
+
+    monkeypatch.setattr(svc, "delete_bunny_storage_objects_for_urls", _capture_deleted)
     monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
 
     first = svc.generate_banner(
@@ -106,6 +113,8 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
         month=9,
         discount_percent=6,
     )
+    first_id = first.id
+    first_url = first.image_url
     reused = svc.generate_banner(
         db,
         kind="sale",
@@ -122,15 +131,80 @@ def test_generate_deduplicates_and_force_keeps_version_history(monkeypatch):
         force=True,
     )
 
-    assert reused.id == first.id
+    assert reused.id == first_id
+    assert replacement.id != first_id
     assert replacement.version == 2
-    assert first.prompt != replacement.prompt
     assert "Câu sáng tạo phiên bản 2" in replacement.prompt
     assert replacement.is_active is True
-    db.refresh(first)
-    assert first.is_active is False
+    remaining = db.query(MarketingBannerAsset).all()
+    assert [row.id for row in remaining] == [replacement.id]
+    assert db.query(MarketingBannerAsset).filter_by(id=first_id).first() is None
+    assert first_url in deleted_urls
     assert replacement.image_width == 2100
     assert replacement.image_height == 900
+
+
+def test_failed_force_keeps_previous_ready_image(monkeypatch):
+    db = _session()
+    raw = _png_bytes()
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Deal vui đúng hẹn - chọn liền hôm nay",
+            "cta": "MUA NGAY",
+            "art_direction": "editorial tối giản",
+        },
+    )
+    monkeypatch.setattr(
+        svc,
+        "_upload_banner",
+        lambda data, *, kind, key, version: f"https://cdn.test/{key}/v{version}.png",
+    )
+    monkeypatch.setattr(svc, "delete_bunny_storage_objects_for_urls", lambda urls: 0)
+    monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
+
+    first = svc.generate_banner(
+        db,
+        kind="birthday",
+        day=9,
+        month=9,
+        discount_percent=10,
+    )
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("gemini down")
+
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", _boom)
+    try:
+        svc.generate_banner(
+            db,
+            kind="birthday",
+            day=9,
+            month=9,
+            discount_percent=10,
+            force=True,
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("force generate phải thất bại")
+
+    ready = (
+        db.query(MarketingBannerAsset)
+        .filter(MarketingBannerAsset.status == "ready")
+        .all()
+    )
+    assert len(ready) == 1
+    assert ready[0].id == first.id
+    assert ready[0].is_active is True
+    failed = (
+        db.query(MarketingBannerAsset)
+        .filter(MarketingBannerAsset.status == "failed")
+        .all()
+    )
+    assert len(failed) == 1
 
 
 def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatch):

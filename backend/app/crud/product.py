@@ -33,6 +33,7 @@ from app.services.product_internal_sku import (
     ensure_unique_internal_product_code,
     internal_sku_exists_on_other_product,
     internal_sku_is_valid_format,
+    looks_like_internal_sku_search_query,
     sync_internal_code_into_product_info,
 )
 from app.utils.vietnamese import (
@@ -381,6 +382,9 @@ def _get_search_mapping(db: Session, normalized_key: str) -> Optional[SearchMapp
     try:
         if not normalized_key:
             return None
+        # SKU là mã định danh — không dùng mapping AI (vd u9897 → U9) để tránh loãng kết quả.
+        if looks_like_internal_sku_search_query(normalized_key):
+            return None
         return db.query(SearchMapping).filter(SearchMapping.keyword_input == normalized_key).first()
     except Exception:
         return None
@@ -397,6 +401,8 @@ def _touch_search_mapping(db: Session, mapping: SearchMapping) -> None:
 def _save_search_mapping(db: Session, normalized_key: str, keyword_target: str, mapping_type: SearchMappingType) -> None:
     try:
         if not normalized_key or not keyword_target:
+            return
+        if looks_like_internal_sku_search_query(normalized_key):
             return
         mapping = db.query(SearchMapping).filter(SearchMapping.keyword_input == normalized_key).first()
         if mapping:
@@ -4489,6 +4495,37 @@ def get_products(
             WAREHOUSE_CLEARANCE_GROUP_LISTING_PATH,
             is_sale_listing_search_query,
         )
+
+        # Ô tìm web: mã SKU (U9897) khớp đúng cột code / product_id như admin,
+        # không đi ILIKE/AI (Gemini từng cắt u9897 → U9 rồi cache hàng chục SP).
+        if looks_like_internal_sku_search_query(raw_query):
+            pid_filter = _build_product_id_or_code_filter(raw_query)
+            if pid_filter is None:
+                total = 0
+                products = []
+            else:
+                sku_query = query.filter(pid_filter)
+                total = _count_products_query(sku_query)
+                products = sku_query.order_by(
+                    *_order_exprs_for_product_list(sort_norm, None, random_seed=search_refresh)
+                ).offset(skip).limit(limit).all()
+            applied_query = raw_query.strip().upper() if total > 0 else None
+            _log_search(db, raw_query, total, ai_processed=False)
+            page_num = skip // limit + 1 if limit > 0 else 1
+            total_pages = math.ceil(total / limit) if limit > 0 else 1
+            return {
+                "total": total,
+                "products": products,
+                "page": page_num,
+                "size": limit,
+                "total_pages": total_pages,
+                "applied_query": applied_query,
+                "normalized_query": normalized_query,
+                "suggested_queries": suggested_queries,
+                "suggested_categories": suggested_categories,
+                "redirect_path": None,
+                "ai_processed": False,
+            }
 
         sale_keyword_search = is_sale_listing_search_query(raw_query)
 

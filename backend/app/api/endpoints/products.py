@@ -33,6 +33,7 @@ from app.models.admin import AdminUser
 from app.core.security import require_module_permission, require_module_permission_with_destructive_step_up, get_current_user_optional
 from app.models.user import User
 from app.services.flash_sale import set_flash_sale_identity
+from app.services.product_internal_sku import looks_like_internal_sku_search_query
 from app.core.config import settings
 from app.crud import product_media_purge
 from app.services.source_stock_checker import (
@@ -443,11 +444,12 @@ def search_products(
     try:
         response.headers["Cache-Control"] = "public, max-age=60"
         raw_q = (q or "").strip()
+        sku_query = looks_like_internal_sku_search_query(raw_q)
         norm_q = crud.product._normalize_search_key(raw_q)
 
         # Stage 1: Mapping Cache
         mapping = None
-        if norm_q:
+        if norm_q and not sku_query:
             mapping = db.query(SearchMapping).filter(SearchMapping.keyword_input == norm_q).first()
         if mapping:
             if mapping.type == SearchMappingType.category_redirect:
@@ -468,7 +470,7 @@ def search_products(
         except Exception:
             tree = []
 
-        match_path = crud.product._match_category_path(norm_q, tree) if norm_q else None
+        match_path = None if sku_query else (crud.product._match_category_path(norm_q, tree) if norm_q else None)
         if match_path:
             # Save mapping for next time
             crud.product._save_search_mapping(db, norm_q, match_path["path"], SearchMappingType.category_redirect)
@@ -491,13 +493,14 @@ def search_products(
                 _overlay_flash_sale_on_dicts(db, result.get("products"), current_user)
             return result
 
-        # Stage 4: AI Recovery & Normalize
+        # Stage 4: AI Recovery & Normalize — không sửa/cắt mã SKU.
         ai_corrected = None
-        try:
-            from app.services.search_query_corrector import correct_search_query_via_ai
-            ai_corrected = crud.product._run_ai_call(correct_search_query_via_ai, raw_q, timeout_seconds=3)
-        except Exception:
-            ai_corrected = None
+        if not sku_query:
+            try:
+                from app.services.search_query_corrector import correct_search_query_via_ai
+                ai_corrected = crud.product._run_ai_call(correct_search_query_via_ai, raw_q, timeout_seconds=3)
+            except Exception:
+                ai_corrected = None
 
         if ai_corrected and ai_corrected.strip() and ai_corrected.strip() != raw_q:
             norm2 = crud.product._normalize_search_key(ai_corrected)
@@ -662,7 +665,13 @@ def _read_products_list_impl(
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
-    search_cache_active = use_search_cache and raw_q and not pid and not skip_search_cache
+    search_cache_active = (
+        use_search_cache
+        and raw_q
+        and not pid
+        and not skip_search_cache
+        and not looks_like_internal_sku_search_query(raw_q)
+    )
     fetch_skip = skip
     fetch_limit = limit
     paginate_from_list_cache = False

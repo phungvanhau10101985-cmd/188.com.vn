@@ -58,6 +58,14 @@ def internal_sku_is_valid_format(code: Optional[str]) -> bool:
     return bool(INTERNAL_SKU_RE.fullmatch(c)) and not _is_disallowed_internal_sku_create(c)
 
 
+def looks_like_internal_sku_search_query(q: Optional[str]) -> bool:
+    """True nếu cả ô tìm kiếm là đúng 1 SKU nội bộ (vd u9897 / U9897), không lẫn chữ khác."""
+    raw = (q or "").strip()
+    if not raw or any(ch.isspace() for ch in raw):
+        return False
+    return internal_sku_is_valid_format(raw)
+
+
 def internal_sku_exists_on_other_product(
     db: Session,
     code: Optional[str],

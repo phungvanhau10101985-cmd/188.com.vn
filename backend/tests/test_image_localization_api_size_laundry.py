@@ -54,3 +54,40 @@ def test_forbidden_still_deletes_even_when_preserve_size_laundry():
     tr = _translator()
     ocr = [{"text": "一件代发", "bbox": [0, 0, 100, 20]}]
     assert tr.classify_and_process_blocks(ocr, delete_size_and_laundry=False) is None
+
+
+def test_empty_deepseek_keeps_original_instead_of_erasing():
+    tr = _translator()
+    ocr = [{"text": "精美立体压花", "bbox": [10, 20, 100, 40]}]
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value=""):
+        result = tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True)
+    assert result is not None
+    processed, ignore = result
+    assert processed == []
+    assert len(ignore) == 1
+    assert ignore[0][0] == "精美立体压花"
+    assert list(ignore[0][1]) == [10, 20, 100, 40]
+
+
+def test_deepseek_payload_disables_v4_thinking():
+    tr = _translator()
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        content = b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Chất lượng cao"}}]}
+
+    def _fake_completions(payload, **kwargs):
+        captured.update(payload)
+        return _Resp()
+
+    with patch("text_translator.DEEPSEEK_API_KEY", "test-key"), patch(
+        "text_translator.deepseek_chat_completions", _fake_completions
+    ), patch("text_translator.deepseek_message_text", lambda body: "Chất lượng cao"):
+        out = tr.call_deepseek_for_translation_single("高品质")
+    assert out == "Chất lượng cao"
+    assert captured.get("thinking") == {"type": "disabled"}
+    assert int(captured.get("max_tokens") or 0) >= 256
