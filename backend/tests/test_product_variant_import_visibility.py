@@ -5,6 +5,9 @@ from app.services.product_image_visibility import (
     delete_product_if_no_variant_or_images,
     product_data_has_storefront_image,
     product_should_remove_after_localization,
+    is_plausible_product_image_url,
+    _PLACEHOLDER_HOST_RE,
+    _PLACEHOLDER_HOST_SQL_VALUES,
 )
 
 
@@ -45,6 +48,23 @@ def test_product_data_has_storefront_image():
     ) is True
     assert product_data_has_storefront_image({"main_image": "null"}) is False
     assert product_data_has_storefront_image({"main_image": "https://188.com.vn"}) is False
+    assert product_data_has_storefront_image(
+        {
+            "main_image": (
+                "https://188.com.vn/cdn-media/site/localized-images/"
+                "A653098813162a188U9897/A653098813162a188U9897-vi.jpg"
+            )
+        }
+    ) is True
+
+
+def test_placeholder_host_sql_does_not_match_cdn_media():
+    cdn = "https://188.com.vn/cdn-media/site/localized-images/A653098813162a188U9897/x.jpg"
+    assert is_plausible_product_image_url(cdn) is True
+    assert cdn.lower() not in {v.lower() for v in _PLACEHOLDER_HOST_SQL_VALUES}
+    for v in _PLACEHOLDER_HOST_SQL_VALUES:
+        assert _PLACEHOLDER_HOST_RE.match(v)
+    assert is_plausible_product_image_url("https://188.com.vn/") is False
 
 
 def test_product_should_remove_after_localization():

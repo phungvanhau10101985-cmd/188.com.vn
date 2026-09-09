@@ -17,6 +17,13 @@ _logger = logging.getLogger(__name__)
 
 _INVALID_LITERALS = frozenset({"null", "none", "nan", "undefined", "n/a", "-", "0"})
 _PLACEHOLDER_HOST_RE = re.compile(r"^(?:https?://)?(?:www\.)?188\.com\.vn/?$", re.I)
+# SQL: khớp đúng trang chủ (placeholder), không khớp ảnh CDN /cdn-media/ trên cùng host.
+_PLACEHOLDER_HOST_SQL_VALUES = tuple(
+    f"{scheme}{host}{slash}"
+    for scheme in ("", "http://", "https://")
+    for host in ("188.com.vn", "www.188.com.vn")
+    for slash in ("", "/")
+)
 
 
 def _norm_url(raw: Any) -> str:
@@ -172,6 +179,7 @@ def storefront_image_sql_filter():
     """
     Lọc nhanh ở SQL — chỉ loại main_image *đã set* nhưng rõ ràng không hợp lệ.
     main_image trống vẫn qua SQL (ảnh có thể nằm trong images/gallery/colors — kiểm tra Python).
+    URL trang chủ 188.com.vn (không path) là placeholder; ảnh /cdn-media/ trên cùng host vẫn hợp lệ.
     """
     mi = func.trim(Product.main_image)
     explicitly_bad_main = and_(
@@ -179,7 +187,7 @@ def storefront_image_sql_filter():
         mi != "",
         or_(
             func.lower(mi).in_(tuple(_INVALID_LITERALS)),
-            func.lower(mi).like("%188.com.vn%"),
+            func.lower(mi).in_(_PLACEHOLDER_HOST_SQL_VALUES),
             and_(
                 ~or_(
                     mi.ilike("http%"),
