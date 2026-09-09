@@ -269,6 +269,26 @@ def _job_update(job_id: str, **kwargs: Any) -> None:
     _persist_job_to_db(job_id)
 
 
+def _make_product_heartbeat(job_id: str, product_id: str, current: int, total: int):
+    """Cập nhật message job trong lúc xử lý 1 SP (OCR/Gemini) để UI không đứng im."""
+    last = [0.0]
+
+    def _cb(phase: str) -> None:
+        now = time.monotonic()
+        if now - last[0] < 3.0:
+            return
+        last[0] = now
+        _job_update(
+            job_id,
+            phase="processing",
+            current=current,
+            message=f"Đang xử lý {current}/{total}: {product_id} — {phase}"[:500],
+            current_product_id=product_id,
+        )
+
+    return _cb
+
+
 def _job_cancel_signal(job_id: str) -> bool:
     """Đọc DB — worker subprocess thấy hủy ngay dù bộ nhớ process con cũ."""
     j = _job_get(job_id)
@@ -718,6 +738,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     processed_product_ids=processed_ids,
                     percent=percent,
                     skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                    resume_count=0,
                 )
                 continue
 
@@ -733,7 +754,12 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 current_product_id=product_id,
             )
             try:
-                result = service.process_product(db, product, should_cancel=should_cancel)
+                result = service.process_product(
+                    db,
+                    product,
+                    should_cancel=should_cancel,
+                    progress_cb=_make_product_heartbeat(job_id, product_id, current, total),
+                )
                 if _job_is_cancelled(job_id):
                     return
                 status = result.get("status")
@@ -964,6 +990,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                 percent=percent,
                 skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+                resume_count=0,
             )
 
         if _job_is_cancelled(job_id):

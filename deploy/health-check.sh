@@ -31,7 +31,7 @@ echo "==> Health check 188.com.vn (${PROJECT_ROOT})"
 echo "    API : http://127.0.0.1:${API_PORT}/health"
 echo "    Web : http://127.0.0.1:${WEB_PORT}${WEB_PATH}"
 
-if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 2>&1; then
+if imgloc_workers_running; then
   echo "⚠️  Job bản địa hóa ảnh/OCR đang chạy — API có thể timeout."
   echo "    Chạy: bash deploy/cancel-image-localization-job.sh --all-active --nuke"
 fi

@@ -203,7 +203,7 @@ if [[ "${products}" != "200" ]]; then
 fi
 
 # Job OCR/bản địa hóa đang chạy là bình thường — tuyệt đối không coi là sự cố.
-if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 2>&1; then
+if imgloc_workers_running; then
   echo "${LOG_PREFIX} OK (pm2=online health=200 products=200; OCR/job ảnh đang chạy — giữ nguyên)"
   exit 0
 fi

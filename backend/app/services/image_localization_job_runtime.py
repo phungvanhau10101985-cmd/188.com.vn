@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import logging
 import multiprocessing
-import resource
+import os
+import signal
 import subprocess
+import sys
 import threading
 import time
-from typing import Any, Dict, Optional, Set, Tuple
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+try:
+    import resource
+except ImportError:  # Windows
+    resource = None  # type: ignore[assignment]
 
 from app.core.config import settings
 from app.db.session import SessionLocal
@@ -20,6 +28,135 @@ _job_threads_running: Set[str] = set()
 
 _proc_lock = threading.Lock()
 _job_processes: Dict[str, multiprocessing.Process] = {}
+
+
+def worker_process_title(job_id: str) -> str:
+    """Tên /proc/comm — tối đa 15 ký tự (prctl)."""
+    return f"imgloc-{(job_id or '')[:8]}"
+
+
+def cmdline_looks_like_imgloc_worker(comm: str, cmdline: str) -> bool:
+    comm_s = (comm or "").strip()
+    cmd = cmdline or ""
+    if comm_s.startswith("imgloc-"):
+        return True
+    if "resource_tracker" in cmd:
+        return False
+    return "multiprocessing.spawn" in cmd or "_multiprocess_job_entry" in cmd
+
+
+def should_abort_auto_resume(*, resume_count: int, max_resume: int) -> bool:
+    """resume_count = số lần resume liên tiếp không xong thêm SP. 0 = không giới hạn."""
+    if max_resume <= 0:
+        return False
+    return int(resume_count or 0) >= int(max_resume)
+
+
+def job_updated_at_is_stalled(
+    updated_at: Optional[datetime],
+    *,
+    stall_seconds: int,
+    now: Optional[datetime] = None,
+) -> bool:
+    if stall_seconds <= 0 or updated_at is None:
+        return False
+    ts = updated_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    clock = now or datetime.now(timezone.utc)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=timezone.utc)
+    return (clock - ts).total_seconds() >= stall_seconds
+
+
+def _set_worker_process_title(job_id: str) -> None:
+    name = worker_process_title(job_id)
+    try:
+        with open("/proc/self/comm", "w", encoding="utf-8") as fh:
+            fh.write(name[:15])
+    except Exception:
+        pass
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(15, name.encode("utf-8")[:15], 0, 0, 0)
+    except Exception:
+        pass
+    try:
+        sys.argv[0] = name
+    except Exception:
+        pass
+
+
+def _iter_imgloc_os_workers() -> List[Tuple[int, int, str]]:
+    """(pid, ppid, cmdline) — Linux /proc. Rỗng trên Windows."""
+    out: List[Tuple[int, int, str]] = []
+    proc_root = "/proc"
+    try:
+        names = os.listdir(proc_root)
+    except Exception:
+        return out
+    for name in names:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        base = f"{proc_root}/{pid}"
+        try:
+            with open(f"{base}/comm", "r", encoding="utf-8", errors="replace") as fh:
+                comm = fh.read().strip()
+            with open(f"{base}/cmdline", "rb") as fh:
+                cmd = fh.read().replace(b"\x00", b" ").decode("utf-8", "replace").strip()
+            ppid = 0
+            with open(f"{base}/status", "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.startswith("PPid:"):
+                        ppid = int(line.split()[1])
+                        break
+        except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError, OSError):
+            continue
+        if cmdline_looks_like_imgloc_worker(comm, cmd):
+            out.append((pid, ppid, cmd or comm))
+    return out
+
+
+def tracked_worker_pids() -> Set[int]:
+    with _proc_lock:
+        pids: Set[int] = set()
+        for proc in _job_processes.values():
+            pid = getattr(proc, "pid", None)
+            if pid and proc.is_alive():
+                pids.add(int(pid))
+        return pids
+
+
+def reap_untracked_imgloc_workers() -> int:
+    """Giết worker spawn mồ côi (ppid=1 sau SIGKILL/deploy) — không đụng worker con của API hiện tại."""
+    tracked = tracked_worker_pids()
+    killed = 0
+    for pid, ppid, cmd in _iter_imgloc_os_workers():
+        if pid in tracked or pid == os.getpid():
+            continue
+        if ppid not in (0, 1):
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+            logger.warning("reap orphan imgloc worker pid=%s cmd=%s", pid, (cmd or "")[:120])
+        except ProcessLookupError:
+            continue
+        except Exception:
+            logger.exception("reap imgloc worker pid=%s failed", pid)
+    if killed:
+        time.sleep(0.4)
+        for pid, ppid, _cmd in _iter_imgloc_os_workers():
+            if pid in tracked or pid == os.getpid() or ppid not in (0, 1):
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+    return killed
 
 
 def payload_from_stored(data: Any, payload_cls: type):
@@ -66,6 +203,8 @@ def _mem_available_mb() -> Optional[int]:
 
 def _apply_worker_address_space_limit() -> None:
     """Giới hạn RLIMIT_AS của worker — OOM trong job ảnh không nuốt hết RAM VPS."""
+    if resource is None:
+        return
     max_mb = int(getattr(settings, "IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", 0) or 0)
     if max_mb <= 0:
         return
@@ -101,6 +240,7 @@ def memory_pressure_blocks_imgloc() -> Tuple[bool, str]:
 
 def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> None:
     try:
+        _set_worker_process_title(job_id)
         _apply_worker_address_space_limit()
         from app.api.endpoints.image_localization import StartImageLocalizationPayload, _run_job
 
@@ -210,16 +350,21 @@ def terminate_job_worker(job_id: str) -> bool:
         finally:
             _unregister_process(jid)
             unmark_job_thread_running(jid)
-    try:
-        subprocess.run(
-            ["pkill", "-f", f"imgloc-{jid[:8]}"],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        killed = True
-    except Exception:
-        pass
+    title = worker_process_title(jid)
+    for pkill_args in (
+        ["pkill", "-x", title],
+        ["pkill", "-f", title],
+    ):
+        try:
+            subprocess.run(
+                pkill_args,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            killed = True
+        except Exception:
+            pass
     if not killed:
         unmark_job_thread_running(jid)
     return killed
@@ -252,14 +397,6 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
         return
 
-    blocked, detail = memory_pressure_blocks_imgloc()
-    if blocked:
-        logger.warning(
-            "IMAGE_LOCALIZATION_JOB_RESUME deferred — memory pressure (%s)",
-            detail,
-        )
-        return
-
     from app.crud import image_localization_job as job_crud
 
     db = SessionLocal()
@@ -271,11 +408,53 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
     if not rows:
         return
 
+    reap_untracked_imgloc_workers()
+
+    blocked, detail = memory_pressure_blocks_imgloc()
+    if blocked:
+        logger.warning(
+            "IMAGE_LOCALIZATION_JOB_RESUME deferred — memory pressure (%s)",
+            detail,
+        )
+        for row in rows:
+            if _job_worker_alive(row.job_id):
+                continue
+            db_wait = SessionLocal()
+            try:
+                job_crud.patch_job(
+                    db_wait,
+                    row.job_id,
+                    {
+                        "status": "queued",
+                        "phase": "queued",
+                        "message": f"Tạm chờ RAM rồi tiếp tục ({detail}).",
+                    },
+                )
+            finally:
+                db_wait.close()
+        return
+
     max_resume = int(getattr(settings, "IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT", 6) or 6)
+    stall_seconds = int(getattr(settings, "IMAGE_LOCALIZATION_JOB_STALL_SECONDS", 1200) or 0)
 
     for row in rows:
         if _job_worker_alive(row.job_id):
-            continue
+            db_stall = SessionLocal()
+            try:
+                fresh_alive = job_crud.get_job(db_stall, row.job_id)
+            finally:
+                db_stall.close()
+            if fresh_alive and job_updated_at_is_stalled(
+                fresh_alive.updated_at, stall_seconds=stall_seconds
+            ):
+                logger.warning(
+                    "IMAGE_LOCALIZATION_JOB stall job_id=%s updated_at=%s — kill rồi resume",
+                    row.job_id,
+                    fresh_alive.updated_at,
+                )
+                terminate_job_worker(row.job_id)
+            else:
+                continue
         _clear_stale_job_thread_mark(row.job_id)
 
         db_check = SessionLocal()
@@ -288,7 +467,7 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
                 logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
                 continue
             resume_n = int(fresh.resume_count or 0)
-            if max_resume > 0 and resume_n >= max_resume:
+            if should_abort_auto_resume(resume_count=resume_n, max_resume=max_resume):
                 job_crud.patch_job(
                     db_check,
                     row.job_id,
@@ -296,8 +475,8 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
                         "status": "error",
                         "phase": "error",
                         "message": (
-                            f"Dừng auto-resume sau {resume_n} lần (có thể do OOM). "
-                            "Bấm chạy lại job thủ công khi server ổn định."
+                            f"Dừng auto-resume sau {resume_n} lần liên tiếp không tiến thêm SP "
+                            "(có thể do OOM). Bấm chạy lại job thủ công khi server ổn định."
                         ),
                     },
                 )

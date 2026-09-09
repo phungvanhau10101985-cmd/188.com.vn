@@ -2,6 +2,13 @@
 # Thư viện dùng chung cho deploy/health-check.sh và deploy/update-vps.sh
 # shellcheck shell=bash
 
+# Worker job ảnh dùng multiprocessing spawn — cmdline là spawn_main, không phải "imgloc-".
+IMGLOC_WORKER_PGREP='image_localization_job|imgloc-|_multiprocess_job_entry|multiprocessing.spawn'
+
+imgloc_workers_running() {
+  pgrep -f "${IMGLOC_WORKER_PGREP}" >/dev/null 2>&1
+}
+
 health_curl_http_code() {
   local url="$1"
   local max_time="${2:-5}"

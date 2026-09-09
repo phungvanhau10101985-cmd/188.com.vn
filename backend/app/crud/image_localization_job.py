@@ -277,6 +277,11 @@ def sync_dict_to_row(db: Session, job_id: str, job: Dict[str, Any]) -> None:
         row.gemini_mode = job.get("gemini_mode")
     if "local_image_only" in job:
         row.local_image_only = bool(job.get("local_image_only"))
+    if "resume_count" in job:
+        try:
+            row.resume_count = max(0, int(job.get("resume_count") or 0))
+        except (TypeError, ValueError):
+            pass
     if job.get("started_at") and not row.started_at:
         row.started_at = datetime.now(timezone.utc)
     if status in _TERMINAL:

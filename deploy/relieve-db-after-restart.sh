@@ -47,7 +47,7 @@ else
 fi
 
 imgloc_running=0
-if pgrep -f 'image_localization_job|imgloc-|_multiprocess_job_entry' >/dev/null 2>&1; then
+if imgloc_workers_running; then
   imgloc_running=1
   echo "⚠️  Phát hiện tiến trình bản địa hóa ảnh/OCR — API storefront sẽ chậm/timeout."
 fi

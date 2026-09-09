@@ -305,6 +305,13 @@ class Settings:
         self.IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT", "6") or "6"
         )
+        self.IMAGE_LOCALIZATION_JOB_ORPHAN_CHECK_SECONDS: int = int(
+            os.getenv("IMAGE_LOCALIZATION_JOB_ORPHAN_CHECK_SECONDS", "180") or "180"
+        )
+        # Không heartbeat/updated_at trong khoảng này → coi worker treo, kill rồi resume.
+        self.IMAGE_LOCALIZATION_JOB_STALL_SECONDS: int = int(
+            os.getenv("IMAGE_LOCALIZATION_JOB_STALL_SECONDS", "1200") or "1200"
+        )
         # Giới hạn địa chỉ ảo worker subprocess (MB). 0 = tắt. Tránh 1 job ảnh phình >RAM VPS.
         self.IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: int = int(
             os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", "3200") or "3200"

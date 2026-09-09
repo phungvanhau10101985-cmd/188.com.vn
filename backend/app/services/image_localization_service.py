@@ -919,7 +919,13 @@ class LegacyImageLocalizationPipeline:
             "image_classifier": modules["image_classifier"].image_classifier,
         }
 
-    def process_urls(self, product: Product, urls: List[str], should_cancel=None) -> Dict[str, ImageProcessResult]:
+    def process_urls(
+        self,
+        product: Product,
+        urls: List[str],
+        should_cancel=None,
+        progress_cb: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, ImageProcessResult]:
         results: Dict[str, ImageProcessResult] = {}
         merger = self.ImageMerger()
         splitter = self.ImageSplitter()
@@ -927,10 +933,19 @@ class LegacyImageLocalizationPipeline:
         translator = self.TextTranslator()
         img_proc = self.ImageProcessor()
 
+        def _note(msg: str) -> None:
+            if not progress_cb:
+                return
+            try:
+                progress_cb(msg)
+            except Exception:
+                logger.debug("imgloc progress_cb failed", exc_info=True)
+
         batches: Optional[Dict[str, Any]] = None
         try:
             if should_cancel and should_cancel():
                 raise ImageLocalizationError("Job đã bị hủy")
+            _note(f"tải/ghép {len(urls)} ảnh")
             batches = merger.merge_all_images_in_batches(urls, [], [], 0, self.sheets)
             for url, info in (batches.get("column_mapping") or {}).items():
                 status = info.get("status")
@@ -944,18 +959,24 @@ class LegacyImageLocalizationPipeline:
                 raise ImageLocalizationError("Job đã bị hủy")
 
             all_ocr: Dict[int, List[Any]] = {}
-            for batch in batches.get("batches", []):
+            batch_list = list(batches.get("batches") or [])
+            for bi, batch in enumerate(batch_list):
                 if should_cancel and should_cancel():
                     raise ImageLocalizationError("Job đã bị hủy")
+                _note(f"OCR lô {bi + 1}/{len(batch_list)}")
                 with open(batch["merged_path"], "rb") as f:
                     all_ocr[batch["batch_index"]] = self._normalize_ocr(ocr.process_image(f.read()))
 
             split_results = splitter.process_all_batches(batches, all_ocr)
             split_buffer: Dict[str, Dict[str, Any]] = {}
+            split_items = list(split_results.items())
+            n_parts = len(split_items)
 
-            for part_url, data in split_results.items():
+            for part_i, (part_url, data) in enumerate(split_items):
                 if should_cancel and should_cancel():
                     raise ImageLocalizationError("Job đã bị hủy")
+                if part_i == 0 or (part_i + 1) % 2 == 0 or part_i + 1 == n_parts:
+                    _note(f"xử lý phần ảnh {part_i + 1}/{n_parts or 1}")
                 orig_url = normalize_image_url(data.get("original_url") or part_url)
                 if orig_url in results and results[orig_url].status == "deleted":
                     continue
@@ -1436,7 +1457,13 @@ class ProductImageLocalizationService:
 
         run_db_write(SessionLocal, write)
 
-    def process_product(self, db: Session, product: Product, should_cancel=None) -> Dict[str, Any]:
+    def process_product(
+        self,
+        db: Session,
+        product: Product,
+        should_cancel=None,
+        progress_cb: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
         self._should_cancel = should_cancel
         self._abort_if_requested(should_cancel)
 
@@ -1495,6 +1522,7 @@ class ProductImageLocalizationService:
                     product,
                     unique_urls,
                     should_cancel=should_cancel,
+                    progress_cb=progress_cb,
                 )
             except Exception as exc:
                 _raise_if_fatal_dependency(exc)
@@ -1510,9 +1538,15 @@ class ProductImageLocalizationService:
                     gemini_mode=self.gemini_mode,
                 )
                 results = {}
-                for url in unique_urls:
+                n_urls = len(unique_urls)
+                for ui, url in enumerate(unique_urls):
                     if should_cancel and should_cancel():
                         raise ImageLocalizationError("Job đã bị hủy")
+                    if progress_cb:
+                        try:
+                            progress_cb(f"ảnh {ui + 1}/{n_urls} (fallback)")
+                        except Exception:
+                            pass
                     if not self.force and is_188_cdn_url(url):
                         results[url] = ImageProcessResult(url, url, "kept", "Ảnh đã ở CDN 188")
                         continue
@@ -1524,9 +1558,15 @@ class ProductImageLocalizationService:
                         logger.exception("Lỗi bản địa hóa ảnh %s cho product %s", url, product.product_id)
                         results[url] = ImageProcessResult(url, url, "error", str(exc2))
         else:
-            for url in unique_urls:
+            n_urls = len(unique_urls)
+            for ui, url in enumerate(unique_urls):
                 if should_cancel and should_cancel():
                     raise ImageLocalizationError("Job đã bị hủy")
+                if progress_cb:
+                    try:
+                        progress_cb(f"ảnh {ui + 1}/{n_urls}")
+                    except Exception:
+                        pass
                 if not self.force and is_188_cdn_url(url):
                     results[url] = ImageProcessResult(url, url, "kept", "Ảnh đã ở CDN 188")
                     continue

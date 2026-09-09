@@ -17,6 +17,7 @@ sleep 4
 pkill -9 -f "imgloc-" 2>/dev/null || true
 pkill -9 -f "_multiprocess_job_entry" 2>/dev/null || true
 pkill -9 -f "image_localization_job" 2>/dev/null || true
+pkill -9 -f "multiprocessing.spawn" 2>/dev/null || true
 sleep 1
 
 echo "==> Dọn DB + reset SP processing"
