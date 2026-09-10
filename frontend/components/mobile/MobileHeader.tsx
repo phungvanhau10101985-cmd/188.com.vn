@@ -10,9 +10,9 @@ import {
   KHO_SALE_HREF,
   level1CategoryHref,
 } from '@/lib/kho-sale-menu-category';
-import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
-import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
+import MobileImageSearchButton from '@/components/search/MobileImageSearchButton';
 import ButtonSpinner from '@/components/ui/ButtonSpinner';
+import { buildMobileSearchHref } from '@/lib/mobile-search-path';
 import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
@@ -68,14 +68,11 @@ export default function MobileHeader({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchHistoryOpen, setSearchHistoryOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   const [openL1, setOpenL1] = useState<Set<string>>(new Set());
   const [openL2, setOpenL2] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement>(null);
-  const mobileSearchFormRef = useRef<HTMLFormElement | null>(null);
-  const mobileImageInputId = useId();
   const categoryPanelId = useId();
 
   const isHome = pathname === '/';
@@ -162,6 +159,12 @@ export default function MobileHeader({
     }
   }, [isHome, searchParams]);
 
+  useEffect(() => {
+    router.prefetch(buildMobileSearchHref());
+  }, [router]);
+
+  const searchComposeHref = buildMobileSearchHref(searchTerm);
+
   /** Vuốt/nút back: nghe popstate khi panel mở */
   useEffect(() => {
     if (!categoryPanelOpen) return undefined;
@@ -217,30 +220,6 @@ export default function MobileHeader({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchHistoryOpen(false);
-    const term = searchTerm.trim();
-    onSuggestionClick(term || '');
-  };
-
-  const handleHistorySelect = (term: string) => {
-    setSearchTerm(term);
-    setSearchHistoryOpen(false);
-    onSuggestionClick(term);
-  };
-
-  const onImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    try {
-      await storePendingImageAndNavigate(f, router);
-    } catch {
-      router.push('/tim-theo-anh');
-    }
-  };
 
   const toggleL1 = (name: string) => {
     setOpenL1((prev) => {
@@ -444,77 +423,50 @@ export default function MobileHeader({
               )}
             </button>
 
-            <form
-              ref={mobileSearchFormRef}
-              onSubmit={handleSearch}
+            <div
               className={`relative z-[60] flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
-              <input
-                id={mobileImageInputId}
-                type="file"
-                accept="image/jpeg,image/png,image/webp,image/gif"
-                className="sr-only"
-                tabIndex={-1}
-                onChange={onImagePick}
-              />
-              <div className="flex flex-1 min-w-0 items-center gap-2 pl-2.5 pr-1">
+              <Link
+                href={searchComposeHref}
+                className="flex flex-1 min-w-0 items-center gap-2 pl-2.5 pr-1 text-left"
+                aria-label="Mở trang tìm kiếm"
+              >
                 <span className="text-gray-400 shrink-0" aria-hidden>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                   </svg>
                 </span>
-                <input
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  onFocus={() => setSearchHistoryOpen(true)}
-                  aria-expanded={searchHistoryOpen}
-                  aria-haspopup="listbox"
-                  placeholder={
-                    compactHomeChrome
+                <span
+                  className={`flex-1 min-w-0 truncate ${
+                    searchTerm.trim() ? 'text-gray-900' : 'text-gray-500'
+                  } ${tightToolbar ? 'text-sm' : 'text-[15px]'}`}
+                >
+                  {searchTerm.trim()
+                    ? searchTerm
+                    : compactHomeChrome
                       ? 'Tìm trên 188.COM.VN…'
                       : tightToolbar
                         ? 'Tìm trên 188…'
-                        : 'Tìm sản phẩm…'
-                  }
-                  autoComplete="off"
-                  enterKeyHint="search"
-                  className={`flex-1 min-w-0 h-full bg-transparent border-0 text-gray-900 placeholder:text-gray-500 focus:ring-0 focus:outline-none ${tightToolbar ? 'text-sm' : 'text-[15px]'}`}
-                />
-              </div>
-              <SearchHistoryPanel
-                open={searchHistoryOpen}
-                onClose={() => setSearchHistoryOpen(false)}
-                onSelect={handleHistorySelect}
-                className="left-0 right-0"
-                zClass="z-[70]"
-                ignoreRefs={[mobileSearchFormRef]}
-              />
+                        : 'Tìm sản phẩm…'}
+                </span>
+              </Link>
               <div className="flex h-full shrink-0 self-stretch">
-                <label
-                  htmlFor={mobileImageInputId}
+                <MobileImageSearchButton
                   className={`flex h-full items-center justify-center border-l border-gray-100 text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
-                  aria-label="Tìm bằng ảnh"
-                  title="Tìm theo ảnh (NanoAI)"
-                >
-                  <svg className="block size-[18px] shrink-0 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" aria-hidden>
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                </label>
-                <button
-                  type="submit"
+                />
+                <Link
+                  href={searchComposeHref}
                   className={`flex h-full shrink-0 items-center justify-center rounded-r-xl bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
-                  aria-label="Tìm trên 188"
+                  aria-label="Mở trang tìm kiếm"
                 >
                   <span className="flex size-[18px] shrink-0 items-center justify-center" aria-hidden>
                     <svg className="block size-full" fill="none" stroke="currentColor" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </span>
-                </button>
+                </Link>
               </div>
-            </form>
+            </div>
 
             {!isDaXemPage && (
               <Link

@@ -51,6 +51,7 @@ import { trackPathForHomeRecommendationFresh } from '@/lib/home-navigation-mode'
 import NanoAiShopOverlayGuard from '@/components/NanoAiShopOverlayGuard';
 import { AppCategoryTreeProvider } from '@/lib/app-category-tree-context';
 import NanoAiEmbedContextRouteSync from '@/components/NanoAiEmbedContextRouteSync';
+import { isMobileSearchComposePath } from '@/lib/mobile-search-path';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -81,6 +82,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const isProductDetailPage = pathname?.match(/^\/products\/[^/]+$/);
   const pathNorm = pathname != null ? pathname.replace(/\/$/, '') || '/' : '/';
   const isShopVideoFeedPage = pathNorm === '/luot-video-cung-shop';
+  const isMobileSearchComposePage = isMobileSearchComposePath(pathname);
 
   /** Quay về trang chủ từ route khác: luôn cuộn đầu trang (tránh BF cache / khôi phục scroll cũ xuống cuối). */
   const prevPathnameForHomeScrollRef = useRef<string | null>(null);
@@ -373,7 +375,11 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   };
 
   const showMobileBottomNav =
-    !isAdminPage && !isProductDetailPage && !isShopVideoFeedPage && !isCartAddLandingPage;
+    !isAdminPage &&
+    !isProductDetailPage &&
+    !isShopVideoFeedPage &&
+    !isCartAddLandingPage &&
+    !isMobileSearchComposePage;
 
   return (
     <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>
@@ -391,7 +397,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         } as CSSProperties
       }
     >
-      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && (
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && !isMobileSearchComposePage && (
       <div className="hidden md:block">
       {keepDesktopHeaderPinned ? (
         <>
@@ -454,7 +460,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       </div>
       )}
       {/* Mobile: header site — gồm /auth/* để đồng bộ với bottom nav */}
-      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && (
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && !isMobileSearchComposePage && (
         <MobileHeader
           cartItemsCount={getCartItemCount()}
           viewedProductsCount={viewedProductsCount}
@@ -464,31 +470,31 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
         />
       )}
 
-      {!isAdminPage && !isAuthPage && !isCartAddLandingPage && !isShopVideoFeedPage && (
+      {!isAdminPage && !isAuthPage && !isCartAddLandingPage && !isShopVideoFeedPage && !isMobileSearchComposePage && (
         <SiteSaleBanner state={siteSaleState} />
       )}
 
       <main
-        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-14' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''} ${isCartAddLandingPage ? 'min-h-0 p-0' : ''}`}
+        className={`flex-1 md:pb-0 ${showMobileBottomNav ? 'pb-14' : ''} ${isShopVideoFeedPage ? 'bg-black' : ''} ${isCartAddLandingPage || isMobileSearchComposePage ? 'min-h-0 p-0' : ''}`}
       >
         {children}
       </main>
 
       {/* Footer: hiển thị cả mobile và desktop */}
-      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && <Footer />}
-      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && <BackToTopButton />}
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && !isMobileSearchComposePage && <Footer />}
+      {!isAdminPage && !isShopVideoFeedPage && !isCartAddLandingPage && !isMobileSearchComposePage && <BackToTopButton />}
       {/* Mobile: Bottom nav — hiển thị trên /auth/* để điều hướng giống các trang khác */}
       {showMobileBottomNav && <MobileBottomNav notificationCount={0} />}
-      {!isAuthPage && !isShopVideoFeedPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && (
+      {!isAuthPage && !isShopVideoFeedPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && !isMobileSearchComposePage && (
         <FloatingShopVideoFeedButton />
       )}
-      {!isCartAddLandingPage && <PwaInstallPrompt />}
+      {!isCartAddLandingPage && !isMobileSearchComposePage && <PwaInstallPrompt />}
       <NanoAiShopOverlayGuard />
       <NanoAiEmbedContextRouteSync />
       <HomeRecommendationSnapshotManager />
       <CartAddedPopup />
-      {!isAuthPage && !isCartAddLandingPage && <BirthGenderSalePromptModal />}
-      {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && <BirthdayPromoWelcomeModal />}
+      {!isAuthPage && !isCartAddLandingPage && !isMobileSearchComposePage && <BirthGenderSalePromptModal />}
+      {!isAuthPage && !isCartAddLandingPage && !pathname?.startsWith('/admin') && !isMobileSearchComposePage && <BirthdayPromoWelcomeModal />}
     </div>
     </AppCategoryTreeProvider>
   );

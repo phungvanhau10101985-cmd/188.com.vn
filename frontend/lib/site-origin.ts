@@ -20,6 +20,7 @@ export const CRAWLER_DISALLOW_PATHS = [
   "/checkout/",
   "/cart",
   "/luot-video-cung-shop",
+  "/tim-kiem",
 ] as const;
 
 /** User-agent AI phổ biến — cho phép crawl nội dung public giống rule mặc định. */

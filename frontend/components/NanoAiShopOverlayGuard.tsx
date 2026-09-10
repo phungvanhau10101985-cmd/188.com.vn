@@ -18,6 +18,7 @@ function isShopBrowsePath(pathname: string | null): boolean {
   if (pathname.startsWith('/auth')) return false;
   if (pathname.startsWith('/cart/add/')) return false;
   if (norm === '/luot-video-cung-shop') return false;
+  if (norm === '/tim-kiem') return false;
   return true;
 }
 
