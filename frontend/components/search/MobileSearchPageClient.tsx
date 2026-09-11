@@ -415,9 +415,9 @@ export default function MobileSearchPageClient() {
               </svg>
             </button>
 
-            <div className="flex min-h-[44px] min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200">
+            <div className="flex h-11 min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-2.5 pr-1">
-                <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <svg className="h-5 w-5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
                 <input
@@ -433,7 +433,7 @@ export default function MobileSearchPageClient() {
                   enterKeyHint="search"
                   inputMode="search"
                   aria-label="Từ khóa tìm kiếm"
-                  className="min-w-0 flex-1 bg-transparent text-[16px] text-gray-900 placeholder:text-gray-500 border-0 focus:ring-0 focus:outline-none h-11"
+                  className="min-w-0 flex-1 h-full bg-transparent text-[16px] text-gray-900 placeholder:text-gray-500 border-0 focus:ring-0 focus:outline-none"
                 />
                 {searchTerm ? (
                   <button
@@ -451,13 +451,16 @@ export default function MobileSearchPageClient() {
                   </button>
                 ) : null}
               </div>
-              <MobileImageSearchButton className="flex h-full w-11 shrink-0 cursor-pointer items-center justify-center border-l border-gray-200 text-gray-500 hover:bg-orange-50 hover:text-[#ea580c] active:bg-orange-100" />
+              <MobileImageSearchButton
+                className="flex h-full w-11 shrink-0 cursor-pointer items-center justify-center border-l border-gray-200 text-gray-600 hover:bg-orange-50 hover:text-[#ea580c] active:bg-orange-100"
+                iconClassName="block size-6 shrink-0 pointer-events-none"
+              />
               <button
                 type="submit"
                 className="flex h-full w-11 shrink-0 items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800"
                 aria-label="Tìm trên 188"
               >
-                <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <svg className="size-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                 </svg>
               </button>

@@ -453,17 +453,23 @@ export default function MobileHeader({
               <div className="flex h-full shrink-0 self-stretch">
                 <MobileImageSearchButton
                   className={`flex h-full items-center justify-center border-l border-gray-100 text-gray-500 hover:text-[#ea580c] hover:bg-orange-50/90 active:bg-orange-100 cursor-pointer transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
+                  iconClassName={`block shrink-0 pointer-events-none ${tightToolbar ? 'size-5' : 'size-6'}`}
                 />
                 <Link
                   href={searchComposeHref}
                   className={`flex h-full shrink-0 items-center justify-center rounded-r-xl bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
                   aria-label="Mở trang tìm kiếm"
                 >
-                  <span className="flex size-[18px] shrink-0 items-center justify-center" aria-hidden>
-                    <svg className="block size-full" fill="none" stroke="currentColor" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                  </span>
+                  <svg
+                    className={`block shrink-0 ${tightToolbar ? 'size-5' : 'size-6'}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
                 </Link>
               </div>
             </div>

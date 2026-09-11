@@ -25,6 +25,7 @@ interface HeroSectionProps {
    * Trên PDP 1 SP dùng h2 để tránh trùng h1 với tên sản phẩm.
    */
   headlineAs?: 'h1' | 'h2' | 'p';
+  className?: string;
 }
 
 export default function HeroSection({
@@ -39,6 +40,7 @@ export default function HeroSection({
   ctaSlot,
   carouselImages,
   headlineAs = 'h1',
+  className = '',
 }: HeroSectionProps) {
   const useProductHeroPicker = editable && !!onSaveField;
 
@@ -94,7 +96,7 @@ export default function HeroSection({
   };
 
   return (
-    <section className="relative isolate my-4 overflow-hidden rounded-[2rem] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-5 py-8 sm:px-8 md:my-8 md:px-10 md:py-12">
+    <section className={`relative isolate my-4 overflow-hidden rounded-[2rem] border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-amber-50 px-5 py-8 sm:px-8 md:my-8 md:px-10 md:py-12 ${className}`.trim()}>
       <div aria-hidden="true" className="absolute -left-20 bottom-0 h-48 w-48 rounded-full bg-orange-200/30 blur-3xl" />
       <div aria-hidden="true" className="absolute -right-16 -top-16 h-52 w-52 rounded-full bg-amber-200/40 blur-3xl" />
       <div className="relative grid grid-cols-1 items-center gap-8 md:grid-cols-2 md:gap-12">

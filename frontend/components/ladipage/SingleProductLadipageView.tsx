@@ -34,6 +34,7 @@ import TrustCtaSection from './TrustCtaSection';
 import FaqSection from './FaqSection';
 import LadipageTrustStrip from './LadipageTrustStrip';
 import ProductBuyModal from './ProductBuyModal';
+import ProductDetailDesktopChrome from '@/app/products/[slug]/components/ProductDetailDesktopChrome';
 import { buildHeroCarouselUrlsFromProduct, collectProductImageUrls } from '@/lib/ladipage-utils';
 import type {
   FaqSectionData,
@@ -327,13 +328,16 @@ export default function SingleProductLadipageView({
         <div className="px-4 pt-2">{renderLadipageSections('mobile')}</div>
       </div>
 
-      {/* Desktop: giữ hero marketing + gallery cạnh thông tin mua */}
-      <div className="mx-auto hidden max-w-6xl px-4 pb-8 md:block">
+      {/* Desktop: breadcrumb + thanh cùng loại (ghim head rút gọn khi cuộn) + hero marketing */}
+      <div className="hidden md:block">
+        <ProductDetailDesktopChrome product={product} />
+        <div className="mx-auto max-w-6xl px-4 pb-8">
         {heroSection && heroData && (
           <SectionErrorBoundary>
             <HeroSection
               data={heroData}
               headlineAs="h2"
+              className="!mt-2 md:!mt-2 md:!mb-6"
               carouselImages={heroCarouselImages}
               ctaSlot={
                 <button
@@ -370,6 +374,7 @@ export default function SingleProductLadipageView({
         </SectionErrorBoundary>
 
         {renderLadipageSections('desktop')}
+        </div>
       </div>
 
       <ProductBuyModal

@@ -12,7 +12,7 @@ type MobileImageSearchButtonProps = {
 /** Bấm là mở chọn ảnh ngay — dùng trên header mobile và trang /tim-kiem. */
 export default function MobileImageSearchButton({
   className,
-  iconClassName = 'block size-[18px] shrink-0 pointer-events-none',
+  iconClassName = 'block size-6 shrink-0 pointer-events-none',
 }: MobileImageSearchButtonProps) {
   const inputId = useId();
   const router = useRouter();
@@ -29,7 +29,7 @@ export default function MobileImageSearchButton({
   };
 
   return (
-    <>
+    <span className="inline-flex h-full self-stretch">
       <input
         id={inputId}
         type="file"
@@ -66,6 +66,6 @@ export default function MobileImageSearchButton({
           />
         </svg>
       </label>
-    </>
+    </span>
   );
 }
