@@ -5,11 +5,9 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } fr
 import Link from 'next/link';
 import LoadingLink from '@/components/ui/LoadingLink';
 import Image from 'next/image';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
-import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
-import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
@@ -27,6 +25,7 @@ import {
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
+import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import { useClientMounted } from '@/lib/use-client-mounted';
 import { hasClientAuthUser } from '@/lib/client-auth-session';
 import {
@@ -90,7 +89,6 @@ export default function Navigation({
 }: NavigationProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [tree, setTree] = useState<CategoryLevel1[]>(() => {
     if (hasRealCategoryTree(initialCategoryTree)) return initialCategoryTree ?? [];
     const cached = readNavCategoryTreeCache();
@@ -103,8 +101,6 @@ export default function Navigation({
   });
   const [isScrolled, setIsScrolled] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
-  const [stickySearchTerm, setStickySearchTerm] = useState('');
-  const [stickySearchHistoryOpen, setStickySearchHistoryOpen] = useState(false);
   const [stickyMenuOpen, setStickyMenuOpen] = useState(false);
   const [catalogMenuOpen, setCatalogMenuOpen] = useState(false);
   const clientMounted = useClientMounted();
@@ -117,7 +113,6 @@ export default function Navigation({
   const { getCartItemCount } = useCart();
   const displayCartCount = getCartItemCount();
   const dropdownRef = useRef<HTMLElement | null>(null);
-  const stickySearchRef = useRef<HTMLFormElement | null>(null);
   const thinBarOuterRef = useRef<HTMLDivElement | null>(null);
   const prefetchedCategoryHrefsRef = useRef<Set<string>>(new Set());
   /** Căn mega-menu theo đúng pill cấp 1 — container và từng pill (không ép full-width trái). */
@@ -216,12 +211,6 @@ export default function Navigation({
       cancelled = true;
     };
   }, [initialCategoryTree]);
-
-  useEffect(() => {
-    if (pathname === '/') {
-      setStickySearchTerm(searchParams.get('q') ?? '');
-    }
-  }, [pathname, searchParams]);
 
   useEffect(() => {
     const getScrollY = () => {
@@ -328,23 +317,6 @@ export default function Navigation({
       window.removeEventListener('scroll', onSync);
     };
   }, [openLevel1, updateMegaPlacement]);
-
-  const handleStickySearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setStickySearchHistoryOpen(false);
-    const raw = stickySearchTerm.trim();
-    if (!raw) {
-      router.push('/');
-      return;
-    }
-    navigateProductTextSearch(router, raw, tree);
-  };
-
-  const handleStickyHistorySelect = (query: string) => {
-    setStickySearchTerm(query);
-    setStickySearchHistoryOpen(false);
-    navigateProductTextSearch(router, query, tree);
-  };
 
   const prefetchCategoryHref = useCallback(
     (href: string) => {
@@ -612,40 +584,33 @@ export default function Navigation({
               </button>
               </div>
             </div>
-            <form
-              ref={stickySearchRef}
-              onSubmit={handleStickySearch}
-              className="relative z-[105] w-full max-w-md justify-self-center"
-            >
-              <input
-                type="text"
-                value={stickySearchTerm}
-                onChange={(e) => setStickySearchTerm(e.target.value)}
-                onFocus={() => setStickySearchHistoryOpen(true)}
-                placeholder="Tìm kiếm..."
-                autoComplete="off"
-                aria-expanded={stickySearchHistoryOpen}
-                aria-haspopup="listbox"
-                className="w-full pl-4 pr-24 py-2 text-xs rounded-lg border-0 bg-white focus:outline-none focus:ring-2 focus:ring-orange-200"
-              />
-              <SearchHistoryPanel
-                open={stickySearchHistoryOpen}
-                onClose={() => setStickySearchHistoryOpen(false)}
-                onSelect={handleStickyHistorySelect}
-                zClass="z-[115]"
-                ignoreRefs={[stickySearchRef]}
-              />
-              <LazyDesktopImageSearchPopover panelZClass="z-[110]" />
-              <button
-                type="submit"
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"
-                aria-label="Tìm kiếm"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </button>
-            </form>
+            <div className="relative z-[105] w-full max-w-md justify-self-center">
+              <div className="flex items-stretch overflow-hidden rounded-lg bg-white">
+                <Link
+                  href={MOBILE_SEARCH_HREF}
+                  className="flex min-w-0 flex-1 items-center py-2 pl-4 pr-2 text-xs text-gray-500 hover:text-gray-700"
+                  aria-label="Mở trang tìm kiếm"
+                >
+                  Tìm kiếm...
+                </Link>
+                <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100 pr-1">
+                  <LazyDesktopImageSearchPopover
+                    panelZClass="z-[110]"
+                    triggerPosition="inline-end"
+                    triggerButtonClassName="text-gray-500 hover:text-[#ea580c] p-0.5 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40"
+                  />
+                  <Link
+                    href={MOBILE_SEARCH_HREF}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c]"
+                    aria-label="Mở trang tìm kiếm"
+                  >
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
+            </div>
             <div className="justify-self-end">
               <div className="flex items-center gap-6 px-3 h-[32px]">
                 <Link href="/da-xem" className="flex items-center text-white/90 hover:text-white transition-colors group">

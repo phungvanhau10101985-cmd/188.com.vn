@@ -4,17 +4,17 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
-import SearchHistoryPanel from '@/components/search/SearchHistoryPanel';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { hasClientAuthUser } from '@/lib/client-auth-session';
+import { buildMobileSearchHref } from '@/lib/mobile-search-path';
 
 const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
   width: 320,
@@ -29,23 +29,19 @@ interface HeaderProps {
   initialSearchTerm?: string;
 }
 
-export default function Header({ onSearch = () => {}, cartItemsCount, favoriteItemsCount, initialSearchTerm }: HeaderProps) {
+export default function Header({ cartItemsCount, favoriteItemsCount, initialSearchTerm }: HeaderProps) {
   const searchParams = useSearchParams();
   const qFromUrl = searchParams.get('q') ?? '';
-  const [searchTerm, setSearchTerm] = useState(initialSearchTerm ?? qFromUrl);
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [searchHistoryOpen, setSearchHistoryOpen] = useState(false);
+  const displayQuery = (initialSearchTerm ?? qFromUrl).trim();
+  const searchComposeHref = buildMobileSearchHref(displayQuery);
   const [accountOpen, setAccountOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [hasStoredUser, setHasStoredUser] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
-  const searchBoxRef = useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
   const loginHref = useLoginRedirectHref();
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const showAuthenticatedActions = isAuthenticated || hasStoredUser;
-  const isProductDetailPage = Boolean(pathname?.match(/^\/products\/[^/]+$/));
 
   useEffect(() => {
     const syncStoredUser = () => setHasStoredUser(hasClientAuthUser());
@@ -85,11 +81,6 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   }, [accountOpen]);
 
   useEffect(() => {
-    const q = initialSearchTerm ?? qFromUrl;
-    setSearchTerm(q);
-  }, [initialSearchTerm, qFromUrl]);
-
-  useEffect(() => {
     if (showAuthenticatedActions) {
       apiClient.getSearchSuggestions(12)
         .then((r) => setSuggestions(r.suggestions || []))
@@ -107,79 +98,45 @@ export default function Header({ onSearch = () => {}, cartItemsCount, favoriteIt
   }, [showAuthenticatedActions, qFromUrl]);
   const { getCartItemCount } = useCart();
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchHistoryOpen(false);
-    setIsSearchFocused(false);
-    onSearch(searchTerm);
-  };
-
-  const handleSuggestionClick = (term: string) => {
-    setSearchTerm(term);
-    onSearch(term);
-  };
-
-  const handleLogout = () => {
-    logout();
-  };
-
-  // Sử dụng cartItemsCount từ props hoặc từ cart hook
   const displayCartCount = cartItemsCount || getCartItemCount();
 
   const searchBar = (
     <>
-      <form onSubmit={handleSearch} className="relative z-[60]">
-        <div
-          ref={searchBoxRef}
-          className={`relative transition-all duration-200 ${isSearchFocused ? 'ring-2 ring-white/50 rounded-xl shadow-lg shadow-black/10' : 'rounded-xl shadow-sm'}`}
-        >
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onFocus={() => {
-              setIsSearchFocused(true);
-              setSearchHistoryOpen(true);
-            }}
-            placeholder="Tìm kiếm sản phẩm, thương hiệu..."
-            autoComplete="off"
-            aria-expanded={searchHistoryOpen}
-            aria-haspopup="listbox"
-            className="w-full pl-4 pr-24 py-3 bg-white border-0 rounded-xl focus:outline-none text-gray-800 placeholder-gray-500 text-sm"
-          />
-          <SearchHistoryPanel
-            open={searchHistoryOpen}
-            onClose={() => {
-              setSearchHistoryOpen(false);
-              setIsSearchFocused(false);
-            }}
-            onSelect={(term) => handleSuggestionClick(term)}
-            zClass="z-[70]"
-            ignoreRefs={[searchBoxRef]}
-          />
-          <LazyDesktopImageSearchPopover />
-          <button
-            type="submit"
-            className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-[#ea580c]"
-            aria-label="Tìm kiếm"
+      <div className="relative z-[60]">
+        <div className="relative flex items-stretch overflow-hidden rounded-xl bg-white shadow-sm">
+          <Link
+            href={searchComposeHref}
+            className="flex min-w-0 flex-1 items-center py-3 pl-4 pr-2 text-sm"
+            aria-label="Mở trang tìm kiếm"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </button>
+            <span className={`truncate ${displayQuery ? 'text-gray-800' : 'text-gray-500'}`}>
+              {displayQuery || 'Tìm kiếm sản phẩm, thương hiệu...'}
+            </span>
+          </Link>
+          <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100 pr-1.5">
+            <LazyDesktopImageSearchPopover triggerPosition="inline-end" />
+            <Link
+              href={searchComposeHref}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c]"
+              aria-label="Mở trang tìm kiếm"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </Link>
+          </div>
         </div>
-      </form>
+      </div>
       {suggestions.length > 0 && (
         <div className="flex items-center gap-2 mt-0.5 overflow-hidden whitespace-nowrap">
           {suggestions.map((term) => (
-            <button
+            <Link
               key={term}
-              type="button"
-              onClick={() => handleSuggestionClick(term)}
+              href={buildMobileSearchHref(term)}
               className="text-xs text-orange-100 hover:text-white transition-colors px-1.5 py-0.5 flex-shrink-0"
             >
               {term}
-            </button>
+            </Link>
           ))}
         </div>
       )}

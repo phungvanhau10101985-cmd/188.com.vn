@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import type { Product } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
@@ -11,7 +10,6 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
 import { useAppCategoryTreeBase } from '@/lib/app-category-tree-context';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
-import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import {
   persistRelatedFiltersFromProduct,
   buildHomeListingSearchParams,
@@ -20,6 +18,7 @@ import {
 } from '@/lib/product-related-tabs';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
+import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import ProductHeader from './ProductHeader/ProductHeader';
 
@@ -32,13 +31,11 @@ interface ProductDetailDesktopChromeProps {
  * Khi cuộn, thanh này ghim thành head rút gọn (logo / tìm / icon).
  */
 export default function ProductDetailDesktopChrome({ product }: ProductDetailDesktopChromeProps) {
-  const router = useRouter();
   const appCategoryTree = useAppCategoryTreeBase();
   const categoryTree = usePersonalizedCategoryTree(appCategoryTree.length > 0 ? appCategoryTree : undefined);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [openLevel1, setOpenLevel1] = useState<string | null>(null);
   const [isStickyPinned, setIsStickyPinned] = useState(false);
-  const [stickySearchTerm, setStickySearchTerm] = useState('');
   const stickyBarRef = useRef<HTMLDivElement>(null);
   const menuCloseTimerRef = useRef<number | null>(null);
   const { getCartItemCount } = useCart();
@@ -79,16 +76,6 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
     };
   }, []);
 
-  const handleStickySearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const term = stickySearchTerm.trim();
-    if (!term) {
-      router.push('/');
-      return;
-    }
-    navigateProductTextSearch(router, term, categoryTree);
-  };
-
   const handleMenuEnter = () => {
     if (menuCloseTimerRef.current) {
       window.clearTimeout(menuCloseTimerRef.current);
@@ -121,11 +108,11 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
       <ProductHeader product={product} />
       <div
         ref={stickyBarRef}
-        className={`sticky top-0 left-0 right-0 z-[30] backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
+        className={`sticky top-0 left-0 right-0 z-[30] overflow-visible backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
       >
         <div className="max-w-7xl mx-auto px-4 py-0">
           <div className="grid grid-cols-[minmax(12rem,17.33rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,21.33rem)_minmax(0,1fr)_9.33rem]">
-            <div className={`min-w-0 ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
+            <div className={`min-w-0 overflow-visible ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
               <div className="flex min-w-0 items-center gap-2">
                 <Link
                   href={getStorefrontHomeHref()}
@@ -230,30 +217,26 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
                     </div>
                   )}
                 </div>
-                <form
-                  onSubmit={handleStickySearch}
-                  className="relative z-[105] ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-visible rounded-lg bg-white focus-within:ring-2 focus-within:ring-orange-200 lg:ml-3"
-                >
-                  <input
-                    type="text"
-                    value={stickySearchTerm}
-                    onChange={(e) => setStickySearchTerm(e.target.value)}
-                    placeholder="Tìm kiếm..."
-                    autoComplete="off"
-                    className="min-w-0 flex-1 border-0 bg-transparent py-1.5 pl-2.5 pr-1.5 text-xs text-gray-800 placeholder:text-gray-500 focus:outline-none focus:ring-0"
-                  />
+                <div className="relative z-[105] ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-hidden rounded-lg bg-white lg:ml-3">
+                  <Link
+                    href={MOBILE_SEARCH_HREF}
+                    className="flex min-w-0 flex-1 items-center py-1.5 pl-2.5 pr-1.5 text-xs text-gray-500 hover:text-gray-700"
+                    aria-label="Mở trang tìm kiếm"
+                  >
+                    Tìm kiếm...
+                  </Link>
                   <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100/80 bg-white px-1">
                     <LazyDesktopImageSearchPopover
                       panelZClass="z-[110]"
                       triggerPosition="inline-end"
                       triggerButtonClassName="text-gray-500 hover:text-[#ea580c] p-0.5 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40 [&_svg]:h-4 [&_svg]:w-4"
                     />
-                    <button
-                      type="submit"
+                    <Link
+                      href={MOBILE_SEARCH_HREF}
                       className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c]"
-                      aria-label="Tìm kiếm"
+                      aria-label="Mở trang tìm kiếm"
                     >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -261,9 +244,9 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
                           d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                         />
                       </svg>
-                    </button>
+                    </Link>
                   </div>
-                </form>
+                </div>
               </div>
             </div>
 

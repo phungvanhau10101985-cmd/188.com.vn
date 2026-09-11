@@ -10,8 +10,6 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Product } from '@/types/api';
 import { hasValidProductImageUrl } from '@/lib/image-utils';
 import CdnFillImage from '@/components/CdnFillImage';
-import ProductPdpLink from '@/components/ProductPdpLink';
-import { productPdpHref } from '@/lib/product-path-slug';
 import Button from '@/components/ui/Button';
 import MobileImageSearchButton from '@/components/search/MobileImageSearchButton';
 import { snapshotProductDataAsProduct } from '@/lib/viewed-product-card';
@@ -46,6 +44,14 @@ function productTileImage(product: Product): string | null {
   return null;
 }
 
+function searchQueryFromProduct(product: Product): string {
+  const sub3 = (product.sub_subcategory || '').trim();
+  const sub2 = (product.subcategory || '').trim();
+  const cat = (product.category || '').trim();
+  const name = (product.name || '').trim();
+  return sub3 || sub2 || cat || name;
+}
+
 function productFromViewedRow(row: unknown): Product | null {
   if (!row || typeof row !== 'object') return null;
   const r = row as { product_id?: number; product_data?: Record<string, unknown> };
@@ -73,7 +79,7 @@ async function loadPersonalizedSuggestProducts(): Promise<{ products: Product[];
 
   if (viewedRes.status === 'fulfilled' && Array.isArray(viewedRes.value)) {
     for (const row of viewedRes.value) {
-      if (out.length >= 8) break;
+      if (out.length >= 12) break;
       const before = out.length;
       pushUniqueSuggestProduct(out, seen, productFromViewedRow(row));
       if (out.length > before) fromViewed = true;
@@ -82,22 +88,22 @@ async function loadPersonalizedSuggestProducts(): Promise<{ products: Product[];
 
   if (feedRes.status === 'fulfilled') {
     for (const p of feedRes.value.products || []) {
-      if (out.length >= 8) break;
+      if (out.length >= 12) break;
       pushUniqueSuggestProduct(out, seen, p);
     }
   }
 
-  if (out.length < 8) {
+  if (out.length < 12) {
     try {
       const popular = await apiClient.getProducts({
-        limit: 12,
+        limit: 16,
         skip: 0,
         is_active: true,
         skip_total: true,
         sort: 'views_desc',
       });
       for (const p of popular.products || []) {
-        if (out.length >= 8) break;
+        if (out.length >= 12) break;
         pushUniqueSuggestProduct(out, seen, p);
       }
     } catch {
@@ -105,7 +111,7 @@ async function loadPersonalizedSuggestProducts(): Promise<{ products: Product[];
     }
   }
 
-  return { products: out.slice(0, 8), fromViewed };
+  return { products: out.slice(0, 12), fromViewed };
 }
 
 function loadGuestSuggestions(): string[] {
@@ -399,11 +405,14 @@ export default function MobileSearchPageClient() {
 
   return (
       <div
-        className="fixed inset-0 z-[200] flex flex-col bg-white"
+        className="fixed inset-0 z-[200] flex flex-col bg-gray-50"
         style={viewportHeight ? { height: viewportHeight } : { height: '100dvh' }}
       >
-        <header className="shrink-0 bg-white pt-[env(safe-area-inset-top,0px)] border-b border-gray-100">
-          <form onSubmit={handleSubmit} className="flex items-center gap-1.5 px-2 py-2">
+        <header className="shrink-0 border-b border-gray-100 bg-white pt-[env(safe-area-inset-top,0px)]">
+          <form
+            onSubmit={handleSubmit}
+            className="mx-auto flex w-full max-w-3xl items-center gap-1.5 px-3 py-2.5 sm:px-4 md:py-3"
+          >
             <button
               type="button"
               onClick={handleBack}
@@ -415,7 +424,7 @@ export default function MobileSearchPageClient() {
               </svg>
             </button>
 
-            <div className="flex h-11 min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200">
+            <div className="flex h-11 min-w-0 flex-1 items-stretch overflow-hidden rounded-xl bg-gray-100 ring-1 ring-gray-200 focus-within:ring-2 focus-within:ring-orange-300">
               <div className="flex min-w-0 flex-1 items-center gap-1.5 pl-2.5 pr-1">
                 <svg className="h-5 w-5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -457,7 +466,7 @@ export default function MobileSearchPageClient() {
               />
               <button
                 type="submit"
-                className="flex h-full w-11 shrink-0 items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800"
+                className="flex h-full w-11 shrink-0 items-center justify-center bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 md:w-14"
                 aria-label="Tìm trên 188"
               >
                 <svg className="size-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
@@ -468,9 +477,10 @@ export default function MobileSearchPageClient() {
           </form>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-50 pb-[max(16px,env(safe-area-inset-bottom))]">
+          <div className="mx-auto w-full max-w-3xl px-3 pt-3 sm:px-4 md:pt-5">
           {historyError && (
-            <div className="mx-3 mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+            <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
               {historyError}{' '}
               <button type="button" onClick={() => void loadHistory()} className="font-medium underline">
                 Thử lại
@@ -478,7 +488,7 @@ export default function MobileSearchPageClient() {
             </div>
           )}
 
-          <section className="px-3 pt-3" aria-label="Lịch sử tìm kiếm">
+          <section aria-label="Lịch sử tìm kiếm">
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-gray-900">Lịch sử tìm kiếm</h2>
               {history.length > 0 && (
@@ -506,7 +516,7 @@ export default function MobileSearchPageClient() {
                 {matchedHistory.map((row) => (
                   <div
                     key={`${row.id}-${row.search_query}`}
-                    className="inline-flex max-w-full items-center rounded-full bg-gray-100 pl-3 pr-1 py-1"
+                    className="inline-flex max-w-full items-center rounded-full bg-white pl-3 pr-1 py-1 shadow-sm ring-1 ring-gray-200"
                   >
                     <button
                       type="button"
@@ -517,7 +527,7 @@ export default function MobileSearchPageClient() {
                     </button>
                     <button
                       type="button"
-                      className="ml-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 disabled:opacity-40"
+                      className="ml-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
                       aria-label={`Xóa ${row.search_query}`}
                       disabled={removingQuery === row.search_query || clearingAll}
                       onClick={() => void handleRemoveHistory(row.search_query)}
@@ -533,7 +543,7 @@ export default function MobileSearchPageClient() {
           </section>
 
           {matchedSuggestions.length > 0 && (
-            <section className="px-3 pt-4" aria-label="Gợi ý từ khóa">
+            <section className="pt-5" aria-label="Gợi ý từ khóa">
               <h2 className="mb-2 text-sm font-semibold text-gray-900">Gợi ý từ khóa</h2>
               <div className="flex flex-wrap gap-2">
                 {matchedSuggestions.map((term) => (
@@ -541,7 +551,7 @@ export default function MobileSearchPageClient() {
                     key={term}
                     type="button"
                     onClick={() => runSearch(term)}
-                    className="max-w-full truncate rounded-full bg-orange-50 px-3 py-1.5 text-sm text-[#c2410c] ring-1 ring-orange-100"
+                    className="max-w-full truncate rounded-full bg-orange-50 px-3 py-1.5 text-sm text-[#c2410c] ring-1 ring-orange-100 hover:bg-orange-100"
                   >
                     {term}
                   </button>
@@ -551,21 +561,17 @@ export default function MobileSearchPageClient() {
           )}
 
           {showSuggestSection && (
-          <section className="px-3 pt-4 pb-4" aria-label="Gợi ý tìm kiếm">
-            <h2 className="text-sm font-semibold text-gray-900">
-              {typed.length >= 2 ? 'Sản phẩm gợi ý' : 'Gợi ý tìm kiếm'}
-            </h2>
-            {typed.length < 2 && !suggestLoading && suggestProducts.length > 0 ? (
-              <p className="mt-0.5 mb-2 text-xs text-gray-500">
-                {suggestFromViewed
-                  ? 'Dựa trên sản phẩm bạn đã xem'
-                  : 'Dành cho bạn — cùng phong cách đang xem'}
-              </p>
-            ) : (
-              <div className="mb-2" />
-            )}
+          <section className="pt-5 pb-6" aria-label="Gợi ý tìm kiếm">
+            <h2 className="text-sm font-semibold text-gray-900">Gợi ý tìm kiếm</h2>
+            <p className="mt-0.5 mb-3 text-xs text-gray-500">
+              {typed.length >= 2
+                ? 'Bấm ảnh để tìm sản phẩm cùng kiểu'
+                : suggestFromViewed
+                  ? 'Dựa trên sản phẩm bạn đã xem — bấm ảnh để tìm'
+                  : 'Bấm ảnh để tìm sản phẩm cùng loại'}
+            </p>
             {suggestError && typed.length < 2 && (
-              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
                 {suggestError}{' '}
                 <button type="button" onClick={retrySuggestProducts} className="font-medium underline">
                   Thử lại
@@ -573,7 +579,7 @@ export default function MobileSearchPageClient() {
               </div>
             )}
             {typedError && (
-              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
                 {typedError}{' '}
                 <button type="button" onClick={retryTypedProducts} className="font-medium underline">
                   Thử lại
@@ -582,61 +588,57 @@ export default function MobileSearchPageClient() {
             )}
             {((suggestLoading && typed.length < 2) ||
               (typedLoading && typed.length >= 2 && visibleProducts.length === 0)) && (
-              <div className="grid grid-cols-2 gap-2.5">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="overflow-hidden rounded-xl border border-gray-100 bg-gray-50">
-                    <div className="aspect-square animate-pulse bg-gray-200" />
-                    <div className="h-10 animate-pulse bg-gray-100" />
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="overflow-hidden rounded-2xl bg-white ring-1 ring-gray-100">
+                    <div className="aspect-[3/4] animate-pulse bg-gray-200" />
+                    <div className="h-9 animate-pulse bg-gray-100" />
                   </div>
                 ))}
               </div>
             )}
             {!typedLoading && typed.length >= 2 && visibleProducts.length === 0 && !typedError && (
               <p className="py-2 text-sm text-gray-500">
-                Chưa thấy sản phẩm khớp. Bấm nút tìm để xem kết quả đầy đủ.
+                Chưa thấy gợi ý khớp. Bấm nút tìm để xem kết quả đầy đủ.
               </p>
             )}
             {visibleProducts.length > 0 && !(suggestLoading && typed.length < 2) && (
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 md:grid-cols-4">
                 {visibleProducts.map((product) => {
                   const img = productTileImage(product);
                   if (!img) return null;
-                  const tileClass =
-                    'overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm text-left active:scale-[0.99]';
-                  const body = (
-                    <>
-                      <div className="relative aspect-square bg-gray-50">
-                        <CdnFillImage
-                          rawSrc={img}
-                          alt={product.name}
-                          widthHint={300}
-                          heightHint={300}
-                          className="object-cover"
-                          sizes="45vw"
-                        />
-                      </div>
-                      <p className="line-clamp-2 px-2 py-1.5 text-xs font-medium leading-snug text-gray-800">
-                        {product.name}
-                      </p>
-                    </>
-                  );
-                  if (typed.length >= 2) {
-                    const href = productPdpHref(product.slug, product.product_id);
-                    if (!href) return null;
-                    return (
-                      <ProductPdpLink key={product.id} href={href} className={tileClass}>
-                        {body}
-                      </ProductPdpLink>
-                    );
-                  }
+                  const query =
+                    typed.length >= 2
+                      ? (product.name || '').trim() || searchQueryFromProduct(product)
+                      : searchQueryFromProduct(product);
+                  if (!query) return null;
                   return (
                     <button
                       key={product.id}
                       type="button"
-                      onClick={() => runSearch(product.name)}
-                      className={tileClass}
+                      onClick={() => runSearch(query)}
+                      aria-label={`Tìm kiếm ${query}`}
+                      className="group overflow-hidden rounded-2xl bg-white text-left shadow-sm ring-1 ring-gray-100 transition hover:-translate-y-0.5 hover:shadow-md hover:ring-orange-200 active:scale-[0.99]"
                     >
-                      {body}
+                      <div className="relative aspect-[3/4] bg-gray-50">
+                        <CdnFillImage
+                          rawSrc={img}
+                          alt={query}
+                          widthHint={320}
+                          heightHint={420}
+                          className="object-cover"
+                          sizes="(min-width: 768px) 180px, 45vw"
+                        />
+                        <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-semibold text-[#ea580c] shadow-sm">
+                          <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          Tìm
+                        </span>
+                      </div>
+                      <p className="line-clamp-2 px-2.5 py-2 text-xs font-medium leading-snug text-gray-800 group-hover:text-[#c2410c] sm:text-sm">
+                        {query}
+                      </p>
                     </button>
                   );
                 })}
@@ -644,6 +646,7 @@ export default function MobileSearchPageClient() {
             )}
           </section>
           )}
+          </div>
         </div>
       </div>
   );
