@@ -41,6 +41,9 @@ interface Order {
   items: OrderItem[];
   tracking_number?: string | null;
   can_confirm_received?: boolean;
+  fulfillment_source?: 'china' | 'vietnam';
+  checkout_group_id?: string | null;
+  split_index?: number;
 }
 
 const CUSTOMER_TABS = [
@@ -99,6 +102,7 @@ function paymentMethodText(order: Order, item?: OrderItem): string {
 
 export default function AccountOrdersPage() {
   const searchParams = useSearchParams();
+  const checkoutGroup = searchParams.get('checkout_group');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -269,9 +273,19 @@ export default function AccountOrdersPage() {
       {/* Cảnh báo */}
       <div className="bg-red-50 border border-red-100 rounded-lg px-4 py-2">
         <p className="text-red-700 text-sm">
-          Lưu ý: Hệ thống sẽ tự động huỷ các đơn đặt hàng quá 03 ngày chưa được thanh toán.
+          Lưu ý: Đơn chờ cọc sẽ được nhắc thanh toán; hàng giữ tại kho Việt Nam có thể được nhả sau 24 giờ. Shop không tự hủy đơn theo mặc định.
         </p>
       </div>
+
+      {checkoutGroup ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p className="font-semibold">Đặt hàng thành công</p>
+          <p className="mt-1">
+            Lần đặt hàng này được tách thành{' '}
+            {orders.filter((order) => order.checkout_group_id === checkoutGroup).length || 2} mã để hàng Việt Nam và Trung Quốc được xử lý độc lập. Phí giao hàng chỉ tính một lần.
+          </p>
+        </div>
+      ) : null}
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
@@ -309,7 +323,28 @@ export default function AccountOrdersPage() {
                     <Link href={`/account/orders/${order.id}`} className="text-blue-600 hover:underline font-medium">
                       {order.order_code}
                     </Link>
+                    <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      order.fulfillment_source === 'china'
+                        ? 'bg-red-50 text-red-700'
+                        : 'bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {order.fulfillment_source === 'china' ? 'Hàng Trung Quốc' : 'Có sẵn Việt Nam'}
+                    </span>
                     <p className="text-gray-500 text-sm mt-1">{formatDate(order.created_at)}</p>
+                    {order.checkout_group_id && orders.some(
+                      (other) => other.id !== order.id && other.checkout_group_id === order.checkout_group_id,
+                    ) ? (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Cùng lần đặt hàng:{' '}
+                        {orders
+                          .filter((other) => other.id !== order.id && other.checkout_group_id === order.checkout_group_id)
+                          .map((other) => (
+                            <Link key={other.id} href={`/account/orders/${other.id}`} className="mr-2 text-blue-600 underline">
+                              {other.order_code}
+                            </Link>
+                          ))}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 text-sm">

@@ -297,6 +297,8 @@ def serialize_order(order: Order) -> dict[str, Any]:
     return {
         "id": order.id,
         "order_code": order.order_code,
+        "fulfillment_source": getattr(order, "fulfillment_source", "vietnam"),
+        "checkout_group_id": getattr(order, "checkout_group_id", None),
         "status": status_val,
         "status_label": ORDER_STATUS_LABELS.get(status_val, status_val),
         "payment_method": _enum_str(order.payment_method),

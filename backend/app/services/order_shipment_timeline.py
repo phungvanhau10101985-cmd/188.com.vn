@@ -31,6 +31,10 @@ FOOTER_NOTE = (
     "188.com.vn trực tiếp vận hành đơn hàng từ Trung Quốc về Việt Nam và luôn ưu tiên xử lý "
     "nhanh nhất có thể. Mọi cập nhật mới sẽ hiển thị ngay tại đây."
 )
+VIETNAM_FOOTER_NOTE = (
+    "Đơn hàng có sẵn tại Việt Nam đang được 188.com.vn soạn, đóng gói và bàn giao "
+    "cho đơn vị vận chuyển. Mọi cập nhật mới sẽ hiển thị tại đây."
+)
 
 STEP_CUSTOMER_HINTS: dict[str, str] = {
     "at_customs": (
@@ -45,6 +49,8 @@ STEP_CUSTOMER_HINTS: dict[str, str] = {
         "188.com.vn đã đóng hàng và gửi cho shipper. "
         "Vui lòng bấm «Đã nhận hàng» khi bạn nhận đủ hàng."
     ),
+    "vn_picking": "Nhân viên kho đang lấy đúng sản phẩm, size, màu và kiểm tra tình trạng hàng.",
+    "vn_packed": "Hàng đang được đóng gói tại kho Việt Nam để bàn giao cho đơn vị vận chuyển.",
 }
 
 
@@ -52,12 +58,35 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _step_defs(deposit_flow: bool) -> list[dict[str, Any]]:
+def _fulfillment_source(order: Order) -> str:
+    return (getattr(order, "fulfillment_source", None) or "vietnam").strip().lower()
+
+
+def _step_defs(deposit_flow: bool, source: str = "china") -> list[dict[str, Any]]:
     first_title = (
         "Đã đặt cọc — 188.com.vn đã xác nhận đơn"
         if deposit_flow
         else "188.com.vn đã xác nhận đơn hàng"
     )
+    if source == "vietnam":
+        return [
+            {"key": "order_confirmed", "title": first_title, "auto_hours": 0},
+            {
+                "key": "vn_picking",
+                "title": "188.com.vn đang lấy và kiểm tra hàng tại kho Việt Nam",
+                "manual": True,
+            },
+            {
+                "key": "vn_packed",
+                "title": "Hàng đã được kiểm tra — đang đóng gói để bàn giao shipper",
+                "manual": True,
+            },
+            {
+                "key": "awaiting_confirm",
+                "title": "188.com.vn đã gửi shipper — chờ bạn xác nhận nhận hàng",
+                "manual": True,
+            },
+        ]
     return [
         {"key": "deposit_confirmed", "title": first_title, "auto_hours": 0},
         {"key": "tq_preparing", "title": "188.com.vn TQ đang chuẩn bị & đóng gói hàng", "auto_hours": 24},
@@ -117,7 +146,7 @@ def ensure_shipment_timeline(db: Session, order: Order, *, force: bool = False) 
         db.query(OrderShipmentEvent).filter(OrderShipmentEvent.order_id == order.id).delete()
 
     now = _utc_now()
-    steps = _step_defs(_deposit_flow(order))
+    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
     for idx, step in enumerate(steps):
         db.add(
             OrderShipmentEvent(
@@ -146,14 +175,15 @@ def ensure_shipment_timeline(db: Session, order: Order, *, force: bool = False) 
     if len(events) > 1:
         second = events[1]
         second.status = EVENT_ACTIVE
-        second.scheduled_at = now + timedelta(hours=steps[1]["auto_hours"])
+        auto_h = int(steps[1].get("auto_hours") or 0)
+        second.scheduled_at = now + timedelta(hours=auto_h) if auto_h > 0 else None
 
     _sync_order_processing_status(db, order, events)
     return True
 
 
 def _activate_next(db: Session, order: Order, events: list[OrderShipmentEvent], current_idx: int) -> None:
-    steps = _step_defs(_deposit_flow(order))
+    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
     if current_idx + 1 >= len(events):
         return
     nxt = events[current_idx + 1]
@@ -204,7 +234,7 @@ def advance_auto_milestones(db: Session, order_id: int) -> int:
 
     advanced = _activate_due_pending(events)
 
-    steps = _step_defs(_deposit_flow(order))
+    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
     step_by_key = {s["key"]: s for s in steps}
     now = _utc_now()
 
@@ -269,7 +299,7 @@ def _sync_order_processing_status(db: Session, order: Order, events: list[OrderS
         return
     active_keys = {e.step_key for e in events if e.status == EVENT_ACTIVE}
     completed_keys = {e.step_key for e in events if e.status == EVENT_COMPLETED}
-    if active_keys & {"at_customs", "international_shipping", "tq_warehouse", "tq_preparing"}:
+    if active_keys & {"at_customs", "international_shipping", "tq_warehouse", "tq_preparing", "vn_packed"}:
         if st in (OrderStatus.DEPOSIT_PAID.value, OrderStatus.CONFIRMED.value):
             order.status = OrderStatus.PROCESSING.value
     elif "deposit_confirmed" in completed_keys and st == OrderStatus.CONFIRMED.value:
@@ -323,6 +353,8 @@ def admin_clear_customs_and_ship(
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
         raise ValueError("Không tìm thấy đơn hàng.")
+    if _fulfillment_source(order) == "vietnam":
+        raise ValueError("Đơn hàng Việt Nam không có bước thông quan.")
 
     advance_auto_milestones(db, order_id)
     events = (
@@ -350,6 +382,33 @@ def admin_clear_customs_and_ship(
     return order
 
 
+def admin_start_vietnam_packing(db: Session, order_id: int, admin_id: int) -> Order:
+    """Kho Việt Nam đã lấy/kiểm hàng và bắt đầu đóng gói."""
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise ValueError("Không tìm thấy đơn hàng.")
+    if _fulfillment_source(order) != "vietnam":
+        raise ValueError("Thao tác này chỉ dành cho đơn hàng Việt Nam.")
+
+    ensure_shipment_timeline(db, order)
+    events = _load_timeline_events(db, order.id)
+    picking = _event_by_key(events, "vn_picking")
+    packed = _event_by_key(events, "vn_packed")
+    if not picking or picking.status != EVENT_ACTIVE:
+        raise ValueError("Đơn chưa ở bước lấy hàng hoặc bước này đã hoàn tất.")
+    now = _utc_now()
+    picking.status = EVENT_COMPLETED
+    picking.completed_at = now
+    picking.updated_by_admin_id = admin_id
+    if packed:
+        packed.status = EVENT_ACTIVE
+        packed.scheduled_at = None
+        packed.updated_by_admin_id = admin_id
+    order.status = OrderStatus.PROCESSING.value
+    db.flush()
+    return order
+
+
 def admin_mark_out_for_customer_confirm(
     db: Session,
     order_id: int,
@@ -365,8 +424,12 @@ def admin_mark_out_for_customer_confirm(
 
     advance_auto_milestones(db, order_id)
     events = _load_timeline_events(db, order_id)
-    domestic = _event_by_key(events, "domestic_shipping")
+    source = _fulfillment_source(order)
+    outbound_step = "vn_packed" if source == "vietnam" else "domestic_shipping"
+    domestic = _event_by_key(events, outbound_step)
     if not domestic or domestic.status != EVENT_ACTIVE:
+        if source == "vietnam":
+            raise ValueError("Đơn chưa hoàn tất lấy/kiểm hàng hoặc đã được xử lý.")
         raise ValueError("Đơn chưa ở bước hàng về shop hoặc đã được xử lý.")
 
     now = _utc_now()
@@ -417,7 +480,7 @@ def mark_delivered_on_timeline(db: Session, order: Order, *, admin_id: Optional[
         return
 
     for ev in events:
-        if ev.step_key == "domestic_shipping" and ev.status == EVENT_ACTIVE:
+        if ev.step_key in ("domestic_shipping", "vn_picking", "vn_packed") and ev.status == EVENT_ACTIVE:
             ev.status = EVENT_COMPLETED
             ev.completed_at = now
             if admin_id:
@@ -457,11 +520,12 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
             current_key = ev.step_key
             if ev.step_key == "at_customs":
                 waiting_admin = True
-            if ev.step_key == "domestic_shipping":
+            if ev.step_key in ("domestic_shipping", "vn_packed"):
                 waiting_domestic = True
             break
 
-    step_titles = {s["key"]: s["title"] for s in _step_defs(_deposit_flow(order))}
+    source = _fulfillment_source(order)
+    step_titles = {s["key"]: s["title"] for s in _step_defs(_deposit_flow(order), source)}
     tracking_number = getattr(order, "tracking_number", None)
     shipping_provider = getattr(order, "shipping_provider", None)
     if not (tracking_number or "").strip():
@@ -495,7 +559,9 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
         "order_status": st,
         "tracking_number": tracking_number,
         "shipping_provider": shipping_provider,
-        "footer_note": FOOTER_NOTE,
+        "fulfillment_source": source,
+        "timeline_variant": "vn_domestic" if source == "vietnam" else "china_import",
+        "footer_note": VIETNAM_FOOTER_NOTE if source == "vietnam" else FOOTER_NOTE,
         "current_step_key": current_key,
         "waiting_admin_at_customs": waiting_admin,
         "waiting_admin_domestic_delivery": waiting_domestic,
@@ -572,7 +638,7 @@ def _force_complete_auto_steps_until_pause(db: Session, order: Order) -> None:
     if not should_have_timeline(order):
         return
     ensure_shipment_timeline(db, order)
-    steps = _step_defs(_deposit_flow(order))
+    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
     step_by_key = {s["key"]: s for s in steps}
     now = _utc_now()
 
@@ -641,6 +707,40 @@ def apply_ems_import_shipping_sync(
         if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
             return False, "Đơn và EMS đã giao — không cần cập nhật."
         return False, "Đơn đã giao — bỏ qua đồng bộ EMS."
+
+    if _fulfillment_source(order) == "vietnam":
+        ensure_shipment_timeline(db, order)
+        now = _utc_now()
+        events = _load_timeline_events(db, order.id)
+        for ev in events:
+            if ev.step_key == "awaiting_confirm":
+                ev.status = EVENT_ACTIVE
+                ev.scheduled_at = None
+            else:
+                ev.status = EVENT_COMPLETED
+                ev.completed_at = ev.completed_at or now
+            if admin_id:
+                ev.updated_by_admin_id = admin_id
+        if ems_tracking_code:
+            order.tracking_number = ems_tracking_code.strip()
+        order.shipping_provider = "EMS"
+        order.status = OrderStatus.SHIPPING.value
+        order.shipped_at = order.shipped_at or now
+        _set_awaiting_confirm_ems_note(
+            db,
+            order.id,
+            admin_id=admin_id,
+            ems_status_description=ems_status_description,
+        )
+        if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
+            order.status = OrderStatus.DELIVERED.value
+            mark_delivered_on_timeline(db, order, admin_id=admin_id)
+        db.flush()
+        return True, (
+            "EMS đã phát — đơn Việt Nam cập nhật đã giao."
+            if ems_phase in EMS_IMPORT_DELIVERED_PHASES
+            else "Đơn Việt Nam đã cập nhật bàn giao EMS."
+        )
 
     aid = admin_id or 0
     _force_complete_auto_steps_until_pause(db, order)

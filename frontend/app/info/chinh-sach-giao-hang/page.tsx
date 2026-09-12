@@ -44,6 +44,9 @@ export default function ChinhSachGiaoHangPage() {
             <li>Kho nội địa (Việt Nam), hoặc</li>
             <li>Kho quốc tế (thông qua đối tác logistics quốc tế).</li>
           </ul>
+          <p className="mb-4">
+            Nếu giỏ hàng có cả hai nguồn, hệ thống sẽ tách thành hai mã đơn để hàng có sẵn tại Việt Nam được xử lý độc lập và có thể giao trước. Khách hàng vẫn chỉ thanh toán một lần phí giao hàng theo tổng giỏ đã hiển thị khi đặt hàng.
+          </p>
           <p className="font-semibold text-zinc-800 mb-2">Thời gian giao hàng dự kiến:</p>
           <ul className="list-disc pl-5 space-y-2 mb-4">
             <li>

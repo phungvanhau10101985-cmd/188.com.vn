@@ -49,6 +49,8 @@ interface Order {
   items: OrderItem[];
   tracking_number?: string | null;
   can_confirm_received?: boolean;
+  fulfillment_source?: 'china' | 'vietnam';
+  checkout_group_id?: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -88,6 +90,7 @@ export default function AccountOrderDetailPage() {
   const params = useParams();
   const id = Number(params?.id);
   const [order, setOrder] = useState<Order | null>(null);
+  const [siblingOrders, setSiblingOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
@@ -128,6 +131,23 @@ export default function AccountOrderDetailPage() {
   useEffect(() => {
     loadOrder();
   }, [loadOrder]);
+
+  useEffect(() => {
+    if (!order?.checkout_group_id) {
+      setSiblingOrders([]);
+      return;
+    }
+    apiClient
+      .getOrders({ limit: 200 })
+      .then((rows) =>
+        setSiblingOrders(
+          (rows as Order[]).filter(
+            (row) => row.id !== order.id && row.checkout_group_id === order.checkout_group_id,
+          ),
+        ),
+      )
+      .catch(() => setSiblingOrders([]));
+  }, [order?.id, order?.checkout_group_id]);
 
   useEffect(() => {
     if (!id || !order || order.status !== 'waiting_deposit' || !order.requires_deposit) return;
@@ -263,7 +283,24 @@ export default function AccountOrderDetailPage() {
         <span className="px-2 py-1 rounded text-sm font-medium bg-gray-100 text-gray-700">
           {STATUS_LABELS[order.status] || order.status}
         </span>
+        <span className={`px-2 py-1 rounded-full text-sm font-medium ${
+          order.fulfillment_source === 'china'
+            ? 'bg-red-50 text-red-700'
+            : 'bg-emerald-50 text-emerald-700'
+        }`}>
+          {order.fulfillment_source === 'china' ? 'Hàng Trung Quốc' : 'Có sẵn Việt Nam'}
+        </span>
       </div>
+      {siblingOrders.length ? (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          Cùng lần đặt hàng:{' '}
+          {siblingOrders.map((sibling) => (
+            <Link key={sibling.id} href={`/account/orders/${sibling.id}`} className="mr-3 font-medium underline">
+              {sibling.order_code} — {sibling.fulfillment_source === 'china' ? 'Trung Quốc' : 'Việt Nam'}
+            </Link>
+          ))}
+        </div>
+      ) : null}
 
       <div className="bg-white rounded-xl shadow border border-gray-100 p-4 sm:p-6 space-y-4 sm:space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

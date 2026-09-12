@@ -853,6 +853,8 @@ def apply_wallet_to_order(db: Session, user_id: int, order: Order, requested_amo
     elif old_deposit > 0:
         order.deposit_amount = min(old_deposit, new_total)
         order.remaining_amount = max(Decimal("0"), new_total - _dec(order.deposit_amount))
+    else:
+        order.remaining_amount = new_total
 
     if new_total == 0 and not order.requires_deposit:
         order.status = OrderStatus.CONFIRMED

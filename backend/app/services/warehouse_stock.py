@@ -1,7 +1,7 @@
 """
-Tồn kho thanh lý: giữ khi đã cọc/xác nhận, trừ khi giao thành công, hoàn khi hủy/hoàn hàng.
+Tồn hàng tại Việt Nam: giữ khi checkout/xác nhận, trừ khi giao thành công, hoàn khi hủy/hoàn hàng.
 
-- Chưa cọc (waiting_deposit): `available` và `warehouse_reserved` không đổi; checkout chặn nếu hết chỗ bán.
+- Hàng Việt Nam chờ cọc: giữ ngay; `stock_hold_expires_at` là mốc cảnh báo để admin xử lý.
 - Đã cọc / confirmed: `warehouse_reserved` += qty (giữ chỗ, chưa trừ `available`).
 - Giao thành công (delivered): `available` -= qty, `warehouse_reserved` -= qty.
 - Hủy trước giao / hoàn sau giao: hoàn reserve hoặc cộng lại `available`.
@@ -41,7 +41,7 @@ class WarehouseStockError(Exception):
 
 
 def warehouse_sellable_qty(product: Product) -> int:
-    """Số lượng có thể bán = tồn thực − đang giữ cho đơn đã cọc."""
+    """Số lượng có thể bán = tồn thực − đang giữ cho các đơn chưa giao."""
     avail = max(0, int(product.available or 0))
     reserved = max(0, int(getattr(product, "warehouse_reserved", 0) or 0))
     return max(0, avail - reserved)
@@ -65,7 +65,8 @@ def _warehouse_order_items(order: Order) -> List[OrderItem]:
         product = item.product
         if product is None:
             continue
-        if is_warehouse_cart_product(product):
+        source = (getattr(item, "fulfillment_source", "") or "").strip().lower()
+        if source == "vietnam" or bool(getattr(item, "is_warehouse_item", False)) or is_warehouse_cart_product(product):
             out.append(item)
     return out
 
@@ -74,11 +75,11 @@ def validate_warehouse_checkout_lines(
     db: Session,
     lines: Sequence[Tuple[Product, int]],
 ) -> None:
-    """Chặn đặt hàng khi không đủ chỗ bán (available − reserved)."""
+    """Chặn đặt hàng Việt Nam khi không đủ chỗ bán (available − reserved)."""
     totals: dict[int, int] = {}
     products_by_id: dict[int, Product] = {}
     for product, qty in lines:
-        if qty <= 0 or not is_warehouse_cart_product(product):
+        if qty <= 0:
             continue
         pid = int(product.id)
         totals[pid] = totals.get(pid, 0) + qty
@@ -89,18 +90,23 @@ def validate_warehouse_checkout_lines(
         if sellable < qty:
             name = (locked.name or locked.product_id or "").strip() or f"#{pid}"
             raise WarehouseStockError(
-                f"Sản phẩm thanh lý «{name}» chỉ còn {sellable} — không đủ số lượng đặt ({qty}).",
+                f"Sản phẩm «{name}» tại kho Việt Nam chỉ còn {sellable} — không đủ số lượng đặt ({qty}).",
                 product_id=pid,
             )
 
 
 def _order_needs_reserve(order: Order) -> bool:
     st = getattr(order.status, "value", order.status)
+    if (
+        (getattr(order, "fulfillment_source", "") or "").strip().lower() == "vietnam"
+        and st == OrderStatus.WAITING_DEPOSIT.value
+    ):
+        return True
     return st in COMMITTED_STATUSES
 
 
 def reserve_warehouse_stock_for_order(db: Session, order: Order) -> None:
-    """Giữ tồn sau khi khách đã cọc hoặc đơn confirmed (không cọc). Idempotent."""
+    """Giữ tồn hàng Việt Nam từ checkout; idempotent."""
     if not _order_needs_reserve(order):
         return
     items = _warehouse_order_items(order)
@@ -130,6 +136,12 @@ def reserve_warehouse_stock_for_order(db: Session, order: Order) -> None:
             0, int(getattr(product, "warehouse_reserved", 0) or 0) + qty
         )
         item.warehouse_stock_reserved_at = now
+    order.stock_hold_released_at = None
+    order.deposit_hold_overdue = False
+    if st := getattr(order.status, "value", order.status):
+        if st != OrderStatus.WAITING_DEPOSIT.value:
+            order.deposit_exception = False
+            order.deposit_exception_note = None
     logger.info("warehouse_stock reserve order_id=%s lines=%s", order.id, len(items))
 
 

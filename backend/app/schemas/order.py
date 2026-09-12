@@ -66,6 +66,9 @@ class OrderItemResponse(BaseModel):
     selected_color_name: Optional[str]
     requires_deposit: bool
     deposit_amount: Decimal
+    fulfillment_source: str = "vietnam"
+    source_platform: Optional[str] = None
+    is_warehouse_item: bool = False
     
     class Config:
         from_attributes = True
@@ -98,6 +101,7 @@ class OrderUpdate(BaseModel):
     estimated_delivery: Optional[datetime] = None
     cancelled_reason: Optional[str] = None
     staff_consultation_contacted: Optional[bool] = None
+    override_reason: Optional[str] = Field(default=None, min_length=5, max_length=1000)
 
 class OrderResponse(BaseModel):
     """Order response for users"""
@@ -115,6 +119,10 @@ class OrderResponse(BaseModel):
     discount_amount: Decimal
     wallet_amount_used: Decimal = Decimal('0')
     total_amount: Decimal
+    fulfillment_source: str = "vietnam"
+    fulfillment_needs_review: bool = False
+    checkout_group_id: Optional[str] = None
+    split_index: int = 1
     
     # Deposit information
     requires_deposit: bool
@@ -135,6 +143,10 @@ class OrderResponse(BaseModel):
     tracking_number: Optional[str]
     estimated_delivery: Optional[datetime]
     actual_delivery: Optional[datetime]
+    stock_hold_expires_at: Optional[datetime] = None
+    deposit_hold_overdue: bool = False
+    deposit_exception: bool = False
+    deposit_exception_note: Optional[str] = None
     
     # Items
     items: List[OrderItemResponse]
@@ -165,6 +177,13 @@ class OrderResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+class OrderCreateResponse(BaseModel):
+    orders: List[OrderResponse]
+    checkout_group_id: str
+    charged_shipping_fee: Decimal
+    next_action_order_id: Optional[int] = None
+
 # ========== ADMIN ORDER SCHEMAS ==========
 class AdminOrderItemResponse(OrderItemResponse):
     """Chi tiết dòng đơn cho admin — gồm link nguồn TQ (không trả cho khách)."""
@@ -182,6 +201,7 @@ class AdminOrderResponse(OrderResponse):
     cancelled_reason: Optional[str]
     updated_at: Optional[datetime]
     staff_consultation_contacted: bool = False
+    sla_warnings: List[str] = Field(default_factory=list)
     items: List[AdminOrderItemResponse]
     
     class Config:

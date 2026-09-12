@@ -5,28 +5,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body, status, Back
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 
 from app.db.session import get_db
 from app import crud, models, schemas
-from app.crud.cart import cart as cart_crud, _resolve_cart_line_image
-from app.crud import promotion as crud_promotion
-from app.crud.promotion import PromoValidationError
-from app.models.order import OrderStatus as OrderStatusEnum, DepositType as DepositTypeEnum, PaymentStatus as PaymentStatusEnum
+from app.models.order import (
+    OrderStatus as OrderStatusEnum,
+    DepositType as DepositTypeEnum,
+    PaymentStatus as PaymentStatusEnum,
+)
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission, verify_recent_admin_auth
 from app.core.config import settings
 from app.services.email_service import (
     deliver_deposit_confirmed_email,
     send_order_email,
     schedule_deposit_confirmed_email,
-    send_order_created_email_task,
     send_order_received_confirmed_email_task,
 )
 from app.services.facebook_capi import schedule_meta_purchase_capi_for_order
 from app.services import sepay as sepay_svc
-from app.services import promotion_grants as grant_svc
-from app.services.order_discounts import calculate_order_discounts
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 from app.services import order_shipper_notify as shipper_notify_svc
@@ -37,6 +35,8 @@ from app.services import ems_freight_settlement_import as freight_settlement_svc
 from app.services import shipping_operations as shipping_ops_svc
 from app.services import shop_return_confirm as shop_return_confirm_svc
 from app.services import ems_import_sample_templates as ems_sample_tpl_svc
+from app.services import checkout_fulfillment as checkout_fulfillment_svc
+from app.services import deposit_sla as deposit_sla_svc
 from app.schemas import order_shipment as shipment_schemas
 
 
@@ -107,8 +107,8 @@ def resolve_order_deposit_due(order: models.Order) -> Decimal:
 router = APIRouter()
 
 # ========== USER ORDER ENDPOINTS ==========
-@router.post("", response_model=schemas.OrderResponse, include_in_schema=False)
-@router.post("/", response_model=schemas.OrderResponse)
+@router.post("", response_model=schemas.OrderCreateResponse, include_in_schema=False)
+@router.post("/", response_model=schemas.OrderCreateResponse)
 def create_order(
     order_data: schemas.OrderCreate,
     background_tasks: BackgroundTasks,
@@ -120,289 +120,15 @@ def create_order(
     Khách chưa đăng nhập: user_id để trống, không áp dụng giảm giá loyalty.
     """
     try:
-        # 1. Validate items and calculate deposit
-        from app.services.warehouse_clearance import (
-            is_warehouse_cart_product,
-            resolve_checkout_line_prices,
-        )
-        from app.services.google_automated_discount import (
-            GoogleAutomatedDiscountError,
-            apply_google_discount_to_cart_line,
-            read_google_discount_lock,
-        )
-
-        cart_lines_by_key: dict = {}
-        if current_user is not None:
-            cart_items = cart_crud.get_user_cart_items(db, user_id=current_user.id)
-            for ci in cart_items:
-                key = (
-                    int(ci.product_id),
-                    (ci.selected_size or "").strip() or None,
-                    (ci.selected_color or "").strip() or None,
-                )
-                cart_lines_by_key[key] = ci
-
-        items = []
-        total_amount = Decimal('0')
-        list_amount = Decimal('0')
-        regular_subtotal = Decimal('0')
-        regular_list_subtotal = Decimal('0')
-        warehouse_subtotal = Decimal('0')
-        requires_deposit = False
-        warehouse_checkout_lines: list = []
-        
-        for item in order_data.items:
-            product = crud.product.get_product(db, item.product_id)
-            if not product:
-                raise HTTPException(status_code=404, detail=f"Product {item.product_id} not found")
-            if is_warehouse_cart_product(product):
-                warehouse_checkout_lines.append((product, int(item.quantity or 0)))
-            
-            # Check if product requires deposit
-            if product.deposit_require:
-                requires_deposit = True
-            
-            unit_f, list_f = resolve_checkout_line_prices(db, product, user=current_user)
-            list_unit = Decimal(str(list_f))
-
-            cart_key = (
-                int(product.id),
-                (item.selected_size or "").strip() or None,
-                (item.selected_color or "").strip() or None,
-            )
-            cart_line = cart_lines_by_key.get(cart_key)
-            cart_pd = dict(cart_line.product_data or {}) if cart_line and isinstance(cart_line.product_data, dict) else {}
-            google_lock = read_google_discount_lock(cart_pd) if not is_warehouse_cart_product(product) else None
-            if google_lock:
-                unit_f = float(google_lock["price"])
-                list_f = float(google_lock.get("prior_price") or list_f or unit_f)
-            elif (item.google_pv2_token or "").strip() and not is_warehouse_cart_product(product):
-                try:
-                    unit_f, list_f, _ = apply_google_discount_to_cart_line(
-                        product=product,
-                        unit_sale=float(unit_f),
-                        list_original=float(list_f),
-                        product_data={},
-                        google_pv2_token=item.google_pv2_token,
-                    )
-                except GoogleAutomatedDiscountError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-            unit_price = Decimal(str(unit_f))
-            list_unit = Decimal(str(list_f))
-            item_total = unit_price * item.quantity
-            total_amount += item_total
-            list_amount += list_unit * item.quantity
-            if is_warehouse_cart_product(product):
-                warehouse_subtotal += item_total
-            else:
-                regular_subtotal += item_total
-                regular_list_subtotal += list_unit * item.quantity
-
-            line_image = ""
-            if cart_line:
-                line_image = (cart_line.product_image or "").strip()
-                if not line_image:
-                    line_image = (cart_pd.get("main_image") or "").strip()
-            if not line_image:
-                color_for_image = (item.selected_color or item.selected_color_name or "").strip() or None
-                if not color_for_image and cart_line:
-                    color_for_image = (cart_line.selected_color or cart_line.selected_color_name or "").strip() or None
-                line_image = _resolve_cart_line_image(
-                    product,
-                    color_for_image,
-                    cart_pd if cart_line else {},
-                )
-            product_image = line_image or (product.main_image or "")
-
-            items.append({
-                "product_id": product.id,
-                "product_name": product.name,
-                "product_image": product_image,
-                "unit_price": unit_price,
-                "quantity": item.quantity,
-                "total_price": item_total,
-                "selected_size": item.selected_size,
-                "selected_color": item.selected_color,
-                "selected_color_name": item.selected_color_name,
-                "requires_deposit": product.deposit_require,
-                "deposit_amount": unit_price * Decimal('0.3') if product.deposit_require else Decimal('0')
-            })
-
-        if warehouse_checkout_lines:
-            from app.services.warehouse_stock import (
-                WarehouseStockError,
-                validate_warehouse_checkout_lines,
-            )
-
-            try:
-                validate_warehouse_checkout_lines(db, warehouse_checkout_lines)
-            except WarehouseStockError as exc:
-                raise HTTPException(status_code=400, detail=exc.message) from exc
-        
-        # --- PROMO + BIRTHDAY + LOYALTY DISCOUNT (chỉ khi đã đăng nhập) ---
-        birthday_discount_amount = Decimal('0')
-        loyalty_discount_amount = Decimal('0')
-        welcome_discount_amount = Decimal('0')
-        discount_notes = []
-        applied_promotion = None
-        applied_grant_id = None
-
-        if current_user is not None and regular_subtotal > 0:
-            try:
-                breakdown = calculate_order_discounts(
-                    db,
-                    user=current_user,
-                    subtotal=regular_subtotal,
-                    list_subtotal=regular_list_subtotal,
-                    promo_code=order_data.promo_code,
-                )
-            except PromoValidationError as exc:
-                raise HTTPException(status_code=400, detail=exc.message) from exc
-
-            birthday_discount_amount = breakdown.birthday_discount_amount
-            loyalty_discount_amount = breakdown.loyalty_discount_amount
-            welcome_discount_amount = breakdown.welcome_discount_amount
-            discount_notes = list(breakdown.discount_notes)
-            applied_promotion = breakdown.applied_promotion
-            applied_grant_id = breakdown.applied_grant_id
-            
-        # Apply discount (chỉ hàng thường — đồng bộ giỏ hàng)
-        total_discount_amount = birthday_discount_amount + loyalty_discount_amount + welcome_discount_amount
-        regular_after_discount = max(Decimal('0'), regular_subtotal - total_discount_amount)
-        total_amount_after_discount = regular_after_discount + warehouse_subtotal
-
-        # 2. Calculate deposit
-        deposit_type = order_data.deposit_type
-        # SP yêu cầu cọc nhưng client không gửi deposit_type → mặc định 30% (tránh requires_deposit=True với deposit_amount=0)
-        if requires_deposit and deposit_type is None:
-            deposit_type = schemas.DepositType.PERCENT_30
-
-        deposit_amount = Decimal('0')
-        deposit_percentage = 0
-
-        if requires_deposit and deposit_type:
-            if deposit_type == schemas.DepositType.PERCENT_30:
-                deposit_percentage = 30
-                deposit_amount = total_amount_after_discount * Decimal('0.3')
-            elif deposit_type == schemas.DepositType.PERCENT_100:
-                deposit_percentage = 100
-                deposit_amount = total_amount_after_discount
-            elif deposit_type == schemas.DepositType.NONE:
-                requires_deposit = False
-        
-        # 3. Calculate shipping fee (simplified)
-        shipping_fee = Decimal('30000') if total_amount_after_discount < Decimal('500000') else Decimal('0')
-        order_total_before_wallet = total_amount_after_discount + shipping_fee
-
-        referrer_user_id = affiliate_svc.resolve_order_referrer_user_id(
-            db,
-            user_id=current_user.id if current_user else None,
-            referral_code=order_data.referral_code,
-        )
-        
-        # 4. Create order
-        order = crud.order.create_order_with_deposit(
+        return checkout_fulfillment_svc.create_checkout_fulfillment(
             db=db,
-            user_id=current_user.id if current_user else None,
-            customer_name=order_data.customer_name,
-            customer_phone=order_data.customer_phone,
-            customer_email=order_data.customer_email,
-            customer_address=order_data.customer_address,
-            customer_note=order_data.customer_note,
-            payment_method=order_data.payment_method.value,
-            shipping_method=order_data.shipping_method,
-            subtotal=total_amount,
-            discount_amount=total_discount_amount,
-            shipping_fee=shipping_fee,
-            total_amount=order_total_before_wallet,
-            admin_notes="\n".join(discount_notes),
-            requires_deposit=requires_deposit,
-            deposit_type=deposit_type.value if deposit_type else None,
-            deposit_percentage=deposit_percentage,
-            deposit_amount=deposit_amount,
-            remaining_amount=order_total_before_wallet - deposit_amount,
-            items=items,
-            referrer_user_id=referrer_user_id,
+            order_data=order_data,
+            current_user=current_user,
+            background_tasks=background_tasks,
         )
-
-        if current_user is not None and applied_promotion and welcome_discount_amount > 0:
-            grant_svc.mark_grant_used(
-                db,
-                user_id=current_user.id,
-                promotion_id=applied_promotion.id,
-                order_id=order.id,
-            )
-            crud_promotion.record_promotion_usage(
-                db,
-                promotion=applied_promotion,
-                user_id=current_user.id,
-                order_id=order.id,
-                discount_amount=welcome_discount_amount,
-                grant_id=applied_grant_id,
-            )
-            db.commit()
-            db.refresh(order)
-
-        wallet_note = ""
-        if current_user is not None and order_data.wallet_amount and Decimal(str(order_data.wallet_amount)) > 0:
-            used = affiliate_svc.apply_wallet_to_order(
-                db,
-                current_user.id,
-                order,
-                Decimal(str(order_data.wallet_amount)),
-            )
-            if used > 0:
-                wallet_note = f"Thanh toán ví: -{used:,.0f} đ"
-                discount_notes.append(wallet_note)
-                order.admin_notes = "\n".join(discount_notes)
-
-        if not requires_deposit:
-            affiliate_svc.create_pending_commission_for_order(db, order)
-
-        if shipment_svc.should_have_timeline(order):
-            shipment_svc.ensure_shipment_timeline(db, order)
-
-        if not requires_deposit:
-            from app.services.warehouse_stock import (
-                WarehouseStockError,
-                reload_order_with_items,
-                reserve_warehouse_stock_for_order,
-            )
-
-            order_loaded = reload_order_with_items(db, order.id)
-            if order_loaded:
-                try:
-                    reserve_warehouse_stock_for_order(db, order_loaded)
-                except WarehouseStockError as exc:
-                    db.rollback()
-                    raise HTTPException(status_code=400, detail=exc.message) from exc
-
-        db.commit()
-        db.refresh(order)
-        
-        # 5. If deposit required, set status to WAITING_DEPOSIT (use enum, not .value)
-        if requires_deposit and _dec(order.total_amount) > 0:
-            order.status = OrderStatusEnum.WAITING_DEPOSIT
-            db.commit()
-            db.refresh(order)
-        
-        if referrer_user_id:
-            background_tasks.add_task(affiliate_svc.notify_referrer_new_order_task, order.id)
-        
-        recipient = order.customer_email or (getattr(current_user, "email", None) if current_user else None)
-        if recipient:
-            background_tasks.add_task(send_order_created_email_task, order.id)
-        return order
-        
-    except HTTPException:
+    except Exception:
         db.rollback()
         raise
-    except Exception as e:
-        db.rollback()
-        import logging
-        logging.getLogger(__name__).exception("Error creating order: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("", response_model=List[schemas.OrderResponse], include_in_schema=False)
 @router.get("/", response_model=List[schemas.OrderResponse])
@@ -688,6 +414,10 @@ def admin_get_orders(
     status: Optional[str] = None,
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
+    fulfillment_source: Optional[str] = Query(None, pattern="^(china|vietnam)$"),
+    deposit_hold_overdue: Optional[bool] = None,
+    fulfillment_needs_review: Optional[bool] = None,
+    preset: Optional[str] = Query(None, pattern="^china_no_deposit$"),
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = Query(None, description="Tra mã đơn, tên hoặc SĐT khách"),
@@ -702,10 +432,17 @@ def admin_get_orders(
         status=status,
         payment_status=payment_status,
         requires_deposit=requires_deposit,
+        fulfillment_source=fulfillment_source,
+        deposit_hold_overdue=deposit_hold_overdue,
+        fulfillment_needs_review=fulfillment_needs_review,
+        preset=preset,
         date_from=date_from,
         date_to=date_to,
         q=q,
     )
+    from app.services.order_sla import enrich_admin_orders_sla
+
+    enrich_admin_orders_sla(db, items)
     return {
         "items": items,
         "pagination": {
@@ -1495,6 +1232,7 @@ async def admin_import_freight_settlement_excel(
 
 
 @router.put("/admin/{order_id}", response_model=schemas.AdminOrderResponse)
+@router.patch("/admin/{order_id}", response_model=schemas.AdminOrderResponse)
 def admin_update_order(
     order_id: int,
     order_update: schemas.OrderUpdate,
@@ -1511,12 +1249,15 @@ def admin_update_order(
     old_status_val = getattr(order_before.status, "value", order_before.status)
     update_payload = order_update.model_dump(exclude_unset=True)
 
-    order = crud.order.admin_update_order(
-        db=db,
-        order_id=order_id,
-        order_update=order_update,
-        admin_id=current_admin.id
-    )
+    try:
+        order = crud.order.admin_update_order(
+            db=db,
+            order_id=order_id,
+            order_update=order_update,
+            admin_id=current_admin.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1716,6 +1457,7 @@ def admin_refund_deposit(
         raise HTTPException(status_code=404, detail="Order not found")
     if _dec(order.deposit_paid) <= 0:
         raise HTTPException(status_code=400, detail="Đơn chưa ghi nhận tiền cọc")
+    old_status_val = getattr(order.status, "value", order.status)
 
     note = (str(body.get("refund_note") or body.get("reason") or "").strip() or "Đã duyệt trả cọc")
     for payment in crud.payment.get_order_payments(db, order_id=order.id):
@@ -1732,6 +1474,11 @@ def admin_refund_deposit(
     order.updated_at = datetime.now()
     order.admin_notes = ((order.admin_notes or "") + f"\n[Hoàn cọc] {note}").strip()
     affiliate_svc.handle_order_payment_status_change(db, order, PaymentStatusEnum.REFUNDED)
+    from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
+
+    sync_warehouse_stock_on_status_change(
+        db, order, old_status_val, OrderStatusEnum.CANCELLED.value
+    )
 
     db.commit()
     db.refresh(order)
@@ -1811,6 +1558,23 @@ def admin_mark_out_for_customer_confirm(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/admin/{order_id}/shipment/start-vietnam-packing", response_model=schemas.AdminOrderResponse)
+def admin_start_vietnam_packing(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("orders")),
+):
+    try:
+        order = shipment_svc.admin_start_vietnam_packing(
+            db, order_id, current_admin.id
+        )
+        db.commit()
+        db.refresh(order)
+        return order
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 def _require_shipment_cron_secret(authorization: Optional[str]) -> None:
     expected = (settings.CRON_SECRET or "").strip()
     if not expected:
@@ -1828,6 +1592,15 @@ def cron_advance_shipment_timelines(
     _require_shipment_cron_secret(authorization)
     advanced = shipment_svc.advance_auto_milestones_batch(db)
     return {"ok": True, "advanced": advanced}
+
+
+@router.get("/cron/process-deposit-sla")
+def cron_process_deposit_sla(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_shipment_cron_secret(authorization)
+    return deposit_sla_svc.process_deposit_sla(db)
 
 
 @router.get("/cron/refresh-ems-tracking", response_model=shipment_schemas.EmsTrackingRefreshEnqueueResponse)

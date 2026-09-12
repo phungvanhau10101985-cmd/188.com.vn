@@ -210,6 +210,20 @@ class Settings:
         self.AUTH_COOKIE_SAMESITE: str = _ss if _ss in ("lax", "strict", "none") else "lax"
         self.FRONTEND_BASE_URL: str = (os.getenv("FRONTEND_BASE_URL", "http://localhost:3001").strip().rstrip("/") or "http://localhost:3001")
         self.CRON_SECRET: str = os.getenv("CRON_SECRET", "").strip()
+        remind_raw = os.getenv("DEPOSIT_REMIND_HOURS", "2,20")
+        self.DEPOSIT_REMIND_HOURS: List[int] = sorted(
+            {
+                int(part.strip())
+                for part in remind_raw.split(",")
+                if part.strip().isdigit() and int(part.strip()) > 0
+            }
+        ) or [2, 20]
+        self.VN_STOCK_HOLD_HOURS: int = max(
+            1, int(os.getenv("VN_STOCK_HOLD_HOURS", "24") or "24")
+        )
+        self.AUTO_CANCEL_EXPIRED_DEPOSIT: bool = os.getenv(
+            "AUTO_CANCEL_EXPIRED_DEPOSIT", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
         self.BIRTHDAY_PROMO_CRON_SECRET: str = (
             os.getenv("BIRTHDAY_PROMO_CRON_SECRET", "").strip()
             or self.CRON_SECRET

@@ -6,13 +6,73 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 
-from app.models.order import Order, OrderItem, OrderStatus, PaymentStatus, PaymentMethod, DepositType
+from app.models.order import (
+    Order,
+    OrderItem,
+    OrderStatus,
+    PaymentStatus,
+    PaymentMethod,
+    DepositType,
+    OrderStatusOverride,
+)
 from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 
 logger = logging.getLogger(__name__)
+
+VALID_ORDER_TRANSITIONS = {
+    OrderStatus.PENDING.value: {
+        OrderStatus.WAITING_DEPOSIT.value,
+        OrderStatus.CONFIRMED.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.WAITING_DEPOSIT.value: {
+        OrderStatus.DEPOSIT_PAID.value,
+        OrderStatus.CONFIRMED.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.DEPOSIT_PAID.value: {
+        OrderStatus.PROCESSING.value,
+        OrderStatus.SHIPPING.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.CONFIRMED.value: {
+        OrderStatus.PROCESSING.value,
+        OrderStatus.SHIPPING.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.PROCESSING.value: {
+        OrderStatus.SHIPPING.value,
+        OrderStatus.CANCELLED.value,
+    },
+    OrderStatus.SHIPPING.value: {
+        OrderStatus.DELIVERED.value,
+        OrderStatus.RETURNED.value,
+    },
+    OrderStatus.DELIVERED.value: {
+        OrderStatus.COMPLETED.value,
+        OrderStatus.RETURNED.value,
+    },
+    OrderStatus.COMPLETED.value: {OrderStatus.RETURNED.value},
+    OrderStatus.RETURNED.value: set(),
+    OrderStatus.CANCELLED.value: set(),
+}
+
+# Các bước vận hành hợp lệ theo nguồn, nhưng phải đi qua endpoint nghiệp vụ tương ứng
+# (timeline/EMS với TQ; soạn/đóng gói với VN), không đi qua PATCH admin chung.
+SOURCE_ROUTINE_TRANSITIONS = {
+    "vietnam": {
+        OrderStatus.CONFIRMED.value: {OrderStatus.PROCESSING.value},
+        OrderStatus.PROCESSING.value: {OrderStatus.SHIPPING.value},
+    },
+    "china": {
+        OrderStatus.DEPOSIT_PAID.value: {OrderStatus.PROCESSING.value},
+        OrderStatus.CONFIRMED.value: {OrderStatus.PROCESSING.value},
+        OrderStatus.PROCESSING.value: {OrderStatus.SHIPPING.value},
+    },
+}
 
 def generate_order_code(db: Session) -> str:
     """Mã đơn hàng ngắn: DH001, DH002, ... (2 chữ + 3 số)"""
@@ -53,6 +113,11 @@ def create_order_with_deposit(
     discount_amount: Decimal = Decimal('0'),
     admin_notes: Optional[str] = None,
     referrer_user_id: Optional[int] = None,
+    fulfillment_source: str = "vietnam",
+    checkout_group_id: Optional[str] = None,
+    split_index: int = 1,
+    stock_hold_expires_at: Optional[datetime] = None,
+    commit: bool = True,
 ) -> Order:
     """Create new order with deposit calculation"""
     try:
@@ -81,6 +146,10 @@ def create_order_with_deposit(
             discount_amount=discount_amount,
             admin_notes=admin_notes,
             referrer_user_id=referrer_user_id,
+            fulfillment_source=fulfillment_source,
+            checkout_group_id=checkout_group_id,
+            split_index=split_index,
+            stock_hold_expires_at=stock_hold_expires_at,
             requires_deposit=requires_deposit,
             deposit_type=deposit_type_enum,
             deposit_percentage=deposit_percentage,
@@ -109,18 +178,27 @@ def create_order_with_deposit(
                 selected_color=item_data.get('selected_color'),
                 selected_color_name=item_data.get('selected_color_name'),
                 requires_deposit=item_data['requires_deposit'],
-                deposit_amount=item_data['deposit_amount']
+                deposit_amount=item_data['deposit_amount'],
+                fulfillment_source=item_data.get('fulfillment_source', fulfillment_source),
+                source_platform=item_data.get('source_platform'),
+                source_url=item_data.get('source_url'),
+                product_sku_snapshot=item_data.get('product_sku_snapshot'),
+                is_warehouse_item=bool(item_data.get('is_warehouse_item', False)),
             )
             db.add(order_item)
         
-        db.commit()
-        db.refresh(order)
+        if commit:
+            db.commit()
+            db.refresh(order)
+        else:
+            db.flush()
         
         logger.info(f"Created order {order_code} with deposit: {requires_deposit}")
         return order
         
     except Exception as e:
-        db.rollback()
+        if commit:
+            db.rollback()
         logger.error(f"Error creating order: {str(e)}")
         raise
 
@@ -155,13 +233,14 @@ def update_order_deposit_type(
     if deposit_type not in (DepositType.PERCENT_30.value, DepositType.PERCENT_100.value):
         return None
     total = Decimal(str(order.total_amount))
+    deposit_base = max(Decimal("0"), total - Decimal(str(order.shipping_fee or 0)))
     if deposit_type == DepositType.PERCENT_100.value:
         order.deposit_percentage = 100
-        order.deposit_amount = total
-        order.remaining_amount = Decimal('0')
+        order.deposit_amount = deposit_base
+        order.remaining_amount = total - deposit_base
     else:
         order.deposit_percentage = 30
-        order.deposit_amount = (total * Decimal('0.3')).quantize(Decimal('0.01'))
+        order.deposit_amount = (deposit_base * Decimal('0.3')).quantize(Decimal('0.01'))
         order.remaining_amount = (total - order.deposit_amount).quantize(Decimal('0.01'))
     order.deposit_type = DepositType(deposit_type)
     order.updated_at = datetime.now()
@@ -198,6 +277,10 @@ def _admin_orders_filtered_query(
     status: Optional[str] = None,
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
+    fulfillment_source: Optional[str] = None,
+    deposit_hold_overdue: Optional[bool] = None,
+    fulfillment_needs_review: Optional[bool] = None,
+    preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -217,6 +300,19 @@ def _admin_orders_filtered_query(
 
     if requires_deposit is not None:
         query = query.filter(Order.requires_deposit == requires_deposit)
+    if fulfillment_source:
+        query = query.filter(Order.fulfillment_source == fulfillment_source)
+    if deposit_hold_overdue is not None:
+        query = query.filter(Order.deposit_hold_overdue == deposit_hold_overdue)
+    if fulfillment_needs_review is not None:
+        query = query.filter(Order.fulfillment_needs_review == fulfillment_needs_review)
+    if preset == "china_no_deposit":
+        query = query.filter(
+            Order.fulfillment_source == "china",
+            Order.requires_deposit.is_(False),
+            Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.PROCESSING.value]),
+            Order.shipped_at.is_(None),
+        )
 
     if date_from:
         query = query.filter(Order.created_at >= date_from)
@@ -245,6 +341,10 @@ def get_orders_admin(
     status: Optional[str] = None,
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
+    fulfillment_source: Optional[str] = None,
+    deposit_hold_overdue: Optional[bool] = None,
+    fulfillment_needs_review: Optional[bool] = None,
+    preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -255,6 +355,10 @@ def get_orders_admin(
         status=status,
         payment_status=payment_status,
         requires_deposit=requires_deposit,
+        fulfillment_source=fulfillment_source,
+        deposit_hold_overdue=deposit_hold_overdue,
+        fulfillment_needs_review=fulfillment_needs_review,
+        preset=preset,
         date_from=date_from,
         date_to=date_to,
         q=q,
@@ -269,6 +373,10 @@ def get_orders_admin_paginated(
     status: Optional[str] = None,
     payment_status: Optional[str] = None,
     requires_deposit: Optional[bool] = None,
+    fulfillment_source: Optional[str] = None,
+    deposit_hold_overdue: Optional[bool] = None,
+    fulfillment_needs_review: Optional[bool] = None,
+    preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -279,6 +387,10 @@ def get_orders_admin_paginated(
         status=status,
         payment_status=payment_status,
         requires_deposit=requires_deposit,
+        fulfillment_source=fulfillment_source,
+        deposit_hold_overdue=deposit_hold_overdue,
+        fulfillment_needs_review=fulfillment_needs_review,
+        preset=preset,
         date_from=date_from,
         date_to=date_to,
         q=q,
@@ -298,38 +410,90 @@ def admin_update_order(
     if not order:
         return None
     
-    update_data = order_update.dict(exclude_unset=True)
+    update_data = order_update.model_dump(exclude_unset=True)
     old_status = getattr(order.status, "value", order.status)
     
+    override_reason = str(update_data.pop("override_reason", "") or "").strip()
+    status_was_overridden = False
+
     # Update status timestamps
     if 'status' in update_data:
         new_status = update_data['status']
+        new_status_val = getattr(new_status, "value", new_status)
+        if new_status_val != old_status:
+            terminal_targets = {
+                OrderStatus.CANCELLED.value,
+                OrderStatus.DELIVERED.value,
+                OrderStatus.COMPLETED.value,
+                OrderStatus.RETURNED.value,
+            }
+            normally_allowed = new_status_val in VALID_ORDER_TRANSITIONS.get(old_status, set())
+            source = (order.fulfillment_source or "vietnam").strip().lower()
+            is_source_routine = new_status_val in SOURCE_ROUTINE_TRANSITIONS.get(
+                source, {}
+            ).get(old_status, set())
+            if new_status_val not in terminal_targets:
+                if not override_reason:
+                    route_hint = (
+                        "dùng nút soạn/đóng gói hoặc nhập EMS"
+                        if source == "vietnam"
+                        else "dùng timeline Trung Quốc/EMS"
+                    )
+                    if not is_source_routine:
+                        route_hint = f"chuyển trạng thái này không thuộc luồng {source}"
+                    raise ValueError(
+                        f"Không đổi trạng thái vận hành trực tiếp; {route_hint}. "
+                        "Nếu thật sự cần ghi đè, phải nhập override_reason."
+                    )
+                status_was_overridden = True
+            elif not normally_allowed and not override_reason:
+                raise ValueError(
+                    f"Không thể chuyển trạng thái từ {old_status or 'trống'} sang {new_status_val}."
+                )
+            elif not normally_allowed:
+                status_was_overridden = True
         now = datetime.now()
         
-        if new_status == OrderStatus.CONFIRMED.value:
+        if new_status_val == OrderStatus.CONFIRMED.value:
             order.confirmed_at = now
-        elif new_status == OrderStatus.SHIPPING.value:
+        elif new_status_val == OrderStatus.SHIPPING.value:
             order.shipped_at = now
-        elif new_status == OrderStatus.DELIVERED.value:
+        elif new_status_val == OrderStatus.DELIVERED.value:
             order.delivered_at = now
-        elif new_status == OrderStatus.COMPLETED.value:
+        elif new_status_val == OrderStatus.COMPLETED.value:
             order.completed_at = now
-        elif new_status == OrderStatus.CANCELLED.value:
+        elif new_status_val == OrderStatus.CANCELLED.value:
             order.cancelled_at = now
-        elif new_status == OrderStatus.RETURNED.value:
+        elif new_status_val == OrderStatus.RETURNED.value:
             order.returned_at = now
     
     # Update fields
     for field, value in update_data.items():
         if hasattr(order, field):
             setattr(order, field, value)
+    if status_was_overridden:
+        audit_note = (
+            f"[Ghi đè trạng thái] {old_status} → {new_status_val}; lý do: {override_reason}"
+        )
+        order.admin_notes = "\n".join(
+            part for part in [order.admin_notes, audit_note] if part
+        )
+        db.add(
+            OrderStatusOverride(
+                order_id=order.id,
+                from_status=old_status or "",
+                to_status=str(new_status_val),
+                admin_id=admin_id,
+                reason=override_reason,
+            )
+        )
     
     order.processed_by = admin_id
     order.updated_at = datetime.now()
 
     commission_confirmed = False
     if 'status' in update_data:
-        new_status_val = update_data['status']
+        new_status_val = getattr(update_data['status'], "value", update_data['status'])
         from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
 
         sync_warehouse_stock_on_status_change(db, order, old_status, new_status_val)

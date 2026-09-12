@@ -151,7 +151,18 @@ export interface OrderResponse {
   status: string;
   customer_phone?: string;
   deposit_amount?: number;
+  requires_deposit?: boolean;
+  fulfillment_source?: 'china' | 'vietnam';
+  checkout_group_id?: string | null;
+  split_index?: number;
   message?: string;
+}
+
+export interface OrderCreateResponse {
+  orders: OrderResponse[];
+  checkout_group_id: string;
+  charged_shipping_fee: number;
+  next_action_order_id?: number | null;
 }
 
 export interface BankAccountInfo {
@@ -595,16 +606,16 @@ class ApiClient {
   }
 
   // ORDER
-  async createOrder(orderData: CreateOrderRequest): Promise<OrderResponse> {
-    return this.fetch<OrderResponse>('/orders/', {
+  async createOrder(orderData: CreateOrderRequest): Promise<OrderCreateResponse> {
+    return this.fetch<OrderCreateResponse>('/orders/', {
       method: 'POST',
       body: JSON.stringify(orderData)
     });
   }
 
   /** Tạo đơn với payload đầy đủ (customer_*, items) - dùng từ giỏ hàng/checkout */
-  async createOrderFull(orderData: OrderCreateRequest): Promise<OrderResponse> {
-    return this.fetch<OrderResponse>('/orders/', {
+  async createOrderFull(orderData: OrderCreateRequest): Promise<OrderCreateResponse> {
+    return this.fetch<OrderCreateResponse>('/orders/', {
       method: 'POST',
       body: JSON.stringify(orderData)
     });
@@ -632,6 +643,8 @@ class ApiClient {
     order_id: number;
     order_code: string;
     order_status: string;
+    fulfillment_source: 'china' | 'vietnam';
+    timeline_variant: 'china_import' | 'vn_domestic';
     tracking_number?: string | null;
     shipping_provider?: string | null;
     footer_note: string;

@@ -687,9 +687,71 @@ def _apply_sepay_deposit_finalize(
         )
         return True, "ok"
     except WarehouseStockError as exc:
+        order_id = int(order.id)
+        payment_id = int(pending_payment.id) if pending_payment and pending_payment.id else None
+        db.rollback()
+        failed_order = db.query(Order).filter(Order.id == order_id).first()
+        if failed_order:
+            failed_order.deposit_exception = True
+            failed_order.deposit_exception_note = (
+                f"SePay đã nhận {amount} nhưng tồn kho Việt Nam không đủ: {exc.message}"
+            )
+            failed_order.admin_notes = "\n".join(
+                part
+                for part in [
+                    failed_order.admin_notes,
+                    f"[Ngoại lệ cọc SePay] {failed_order.deposit_exception_note}",
+                ]
+                if part
+            )
+        failed_payment = (
+            db.query(Payment).filter(Payment.id == payment_id).first()
+            if payment_id
+            else None
+        )
+        if failed_payment:
+            failed_payment.transaction_code = sepay_id_str
+            failed_payment.confirmation_note = "Đã nhận chuyển khoản nhưng hết tồn; chờ admin xử lý"
+            failed_payment.payment_gateway_data = {
+                "source": "sepay",
+                "reference": reference,
+                "payload": data,
+                "exception": "warehouse_out_of_stock",
+            }
+        else:
+            failed_payment = crud_payment.create_payment(
+                db=db,
+                order_id=order_id,
+                amount=amount,
+                payment_method=PaymentMethod.BANK_TRANSFER.value,
+                payment_type="deposit_sepay_exception",
+                transaction_code=sepay_id_str,
+                transfer_date=datetime.now(),
+                payment_status=PaymentStatus.PENDING.value,
+                payment_gateway_data={
+                    "source": "sepay",
+                    "reference": reference,
+                    "payload": data,
+                    "exception": "warehouse_out_of_stock",
+                },
+            )
+            failed_payment.confirmation_note = "Đã nhận chuyển khoản nhưng hết tồn; chờ admin xử lý"
+        db.commit()
+        try:
+            from app.services.email_service import send_order_email
+            from app.core.config import settings
+
+            for recipient in settings.ORDER_DEPOSIT_ALERT_EMAILS:
+                send_order_email(
+                    recipient,
+                    f"[Khẩn] Cọc SePay đơn {getattr(failed_order, 'order_code', order_id)} thiếu tồn",
+                    getattr(failed_order, "deposit_exception_note", exc.message),
+                )
+        except Exception:
+            logger.exception("Không gửi được cảnh báo ngoại lệ cọc order_id=%s", order_id)
         logger.warning(
             "SePay deposit blocked warehouse stock order_id=%s: %s",
-            order.id,
+            order_id,
             exc.message,
         )
         return False, "warehouse_out_of_stock"

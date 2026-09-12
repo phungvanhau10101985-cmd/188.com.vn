@@ -162,8 +162,9 @@ class CartItemCRUD:
     
     def get_user_cart_items(self, db: Session, user_id: int) -> List[CartItem]:
         from sqlalchemy.orm import joinedload
+        from app.services.fulfillment_routing import fulfillment_source_from_url
 
-        return (
+        rows = (
             db.query(CartItem)
             .options(joinedload(CartItem.product))
             .filter(CartItem.user_id == user_id)
@@ -173,6 +174,14 @@ class CartItemCRUD:
             )
             .all()
         )
+        for row in rows:
+            if not row.product:
+                continue
+            data = dict(row.product_data or {})
+            data["link_default"] = row.product.link_default
+            data["fulfillment_source"] = fulfillment_source_from_url(row.product.link_default)
+            row.product_data = data
+        return rows
     
     def create_cart_item(self, db: Session, user_id: int, cart_item: CartItemCreate) -> CartItem:
         # 1. Đảm bảo user có cart record
@@ -285,6 +294,10 @@ class CartItemCRUD:
             "category_id": product.category_id,
             "deposit_require": product.deposit_require,
         }
+        from app.services.fulfillment_routing import fulfillment_source_from_url
+
+        product_data["link_default"] = product.link_default
+        product_data["fulfillment_source"] = fulfillment_source_from_url(product.link_default)
         if is_wh:
             product_data["is_warehouse_clearance"] = True
             product_data["warehouse_clearance_percent"] = wh_pct

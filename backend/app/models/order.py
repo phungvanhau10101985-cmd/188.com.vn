@@ -59,6 +59,20 @@ class Order(Base):
     wallet_amount_used = Column(Numeric(12, 2), default=0)
     total_amount = Column(Numeric(12, 2), default=0)
     referrer_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Tuyến xử lý được snapshot khi checkout; các đơn cùng checkout_group_id
+    # là các phần TQ/VN được tách từ cùng một giỏ hàng.
+    fulfillment_source = Column(String(20), nullable=False, default="vietnam", index=True)
+    fulfillment_needs_review = Column(Boolean, nullable=False, default=False, index=True)
+    checkout_group_id = Column(String(36), nullable=True, index=True)
+    split_index = Column(Integer, nullable=False, default=1)
+    stock_hold_expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    deposit_reminded_at_2h = Column(DateTime(timezone=True), nullable=True)
+    deposit_reminded_at_20h = Column(DateTime(timezone=True), nullable=True)
+    deposit_hold_overdue = Column(Boolean, nullable=False, default=False, index=True)
+    stock_hold_released_at = Column(DateTime(timezone=True), nullable=True)
+    deposit_exception = Column(Boolean, nullable=False, default=False, index=True)
+    deposit_exception_note = Column(Text, nullable=True)
     
     # Thông tin đặt cọc (Enum dùng value trong DB: 'percent_30', 'waiting_deposit', ...)
     _enum_values = lambda x: [e.value for e in x]
@@ -133,6 +147,13 @@ class OrderItem(Base):
     requires_deposit = Column(Boolean, default=False)
     deposit_amount = Column(Numeric(12, 2), default=0)
 
+    # Snapshot nguồn/route để lịch sử đơn không đổi khi sản phẩm bị sửa.
+    fulfillment_source = Column(String(20), nullable=False, default="vietnam", index=True)
+    source_platform = Column(String(20), nullable=True)
+    source_url = Column(Text, nullable=True)
+    product_sku_snapshot = Column(String(100), nullable=True)
+    is_warehouse_item = Column(Boolean, nullable=False, default=False)
+
     # Tồn kho thanh lý: giữ khi đã cọc, trừ khi giao thành công
     warehouse_stock_reserved_at = Column(DateTime(timezone=True), nullable=True)
     warehouse_stock_deducted_at = Column(DateTime(timezone=True), nullable=True)
@@ -154,12 +175,12 @@ class OrderItem(Base):
 
     @property
     def product_sku(self):
-        return self.product.code if self.product else None
+        return self.product_sku_snapshot or (self.product.code if self.product else None)
 
     @property
     def product_url(self):
         """Link nguồn TQ (Excel `product_url` → `link_default`)."""
-        return self.product.link_default if self.product else None
+        return self.source_url or (self.product.link_default if self.product else None)
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -198,3 +219,15 @@ class Payment(Base):
     order = relationship("Order", back_populates="payments")
     admin_confirmer = relationship("AdminUser")
     # ===================================
+
+
+class OrderStatusOverride(Base):
+    __tablename__ = "order_status_overrides"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    from_status = Column(String(40), nullable=False)
+    to_status = Column(String(40), nullable=False)
+    admin_id = Column(Integer, ForeignKey("admin_users.id", ondelete="SET NULL"), nullable=True, index=True)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

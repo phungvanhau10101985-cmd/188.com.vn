@@ -86,7 +86,7 @@ except ImportError:
     print("[INFO] AdminUser model not available")
 
 # 6. Import Order models (phụ thuộc User, Product)
-from app.models.order import Order, OrderItem, Payment
+from app.models.order import Order, OrderItem, Payment, OrderStatusOverride
 print("[OK] Order models loaded")
 
 # 6b. Bank accounts (cài đặt quản trị)

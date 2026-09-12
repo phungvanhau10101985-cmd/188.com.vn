@@ -28,6 +28,8 @@ export interface CartItem {
     is_warehouse_clearance?: boolean;
     warehouse_clearance_percent?: number;
     deposit_require?: boolean;
+    fulfillment_source?: 'china' | 'vietnam';
+    link_default?: string | null;
   };
   unit_price?: number;
   total_price: number;

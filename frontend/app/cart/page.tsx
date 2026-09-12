@@ -256,6 +256,16 @@ export default function CartPage() {
     () => selectedCartItems.filter((i) => isWarehouseCartLine(i)),
     [selectedCartItems],
   );
+  const selectedFulfillmentSources = useMemo(
+    () =>
+      new Set(
+        selectedCartItems.map((item) =>
+          item.product_data?.fulfillment_source === 'china' ? 'china' : 'vietnam',
+        ),
+      ),
+    [selectedCartItems],
+  );
+  const isMixedFulfillment = selectedFulfillmentSources.size > 1;
   const noneSelected = selectedCartItems.length === 0;
   const hasRegularSelection = selectedRegularItems.length > 0;
   const hasWarehouseSelection = selectedWarehouseItems.length > 0;
@@ -531,9 +541,6 @@ export default function CartPage() {
       (item) =>
         item.requires_deposit === true || item.product_data?.deposit_require === true
     ) || false;
-  const depositAmountNow = depositRequiredForSelected
-    ? Math.round(selectedFinalPrice * (DEPOSIT_PERCENT / 100))
-    : 0;
   const paymentMethodLabel = depositRequiredForSelected
     ? `Chuyển khoản cọc ${DEPOSIT_PERCENT}%`
     : 'Thanh toán khi nhận hàng (COD)';
@@ -764,7 +771,7 @@ export default function CartPage() {
     try {
       trackEvent('begin_checkout', { status: 'start', item_count: linesToOrder.length });
       const referralCode = getStoredReferralCode();
-      const order = await apiClient.createOrderFull({
+      const checkout = await apiClient.createOrderFull({
         customer_name: selectedAddress.full_name,
         customer_phone: selectedAddress.phone,
         customer_email: accountEmail,
@@ -791,7 +798,11 @@ export default function CartPage() {
         })),
       });
 
-      const redirectDeposit = shouldRedirectToDepositAfterCreate(order as { requires_deposit?: boolean; status?: string });
+      const order =
+        checkout.orders.find((row) => row.id === checkout.next_action_order_id) ||
+        checkout.orders[0];
+      if (!order) throw new Error('Hệ thống chưa trả về đơn hàng vừa tạo.');
+      const redirectDeposit = shouldRedirectToDepositAfterCreate(order);
       if (!redirectDeposit) {
         trackMetaPurchase({
           items: linesToOrder.map((i) => ({ ...i })),
@@ -854,8 +865,25 @@ export default function CartPage() {
           product_ids: linesToOrder.map((i) => i.product_id),
         });
       }
-      markGoogleCustomerReviewsForOrder(order.id);
-      router.push(redirectDeposit ? `/account/orders/${order.id}/deposit` : `/account/orders/${order.id}`);
+      checkout.orders.forEach((created) => markGoogleCustomerReviewsForOrder(created.id));
+      if (checkout.orders.length > 1) {
+        pushToast({
+          title: 'Đã tách thành 2 đơn hàng',
+          description: `${checkout.orders
+            .map(
+              (created) =>
+                `${created.order_code || `#${created.id}`} (${
+                  created.fulfillment_source === 'china' ? 'Trung Quốc' : 'Việt Nam'
+                })`,
+            )
+            .join(' và ')}. Phí giao hàng chỉ tính một lần.`,
+          variant: 'success',
+          durationMs: 6500,
+        });
+        router.push(`/account/orders?checkout_group=${encodeURIComponent(checkout.checkout_group_id)}`);
+      } else {
+        router.push(redirectDeposit ? `/account/orders/${order.id}/deposit` : `/account/orders/${order.id}`);
+      }
     } catch (err: unknown) {
       const message = (err as Error)?.message || 'Đặt hàng thất bại';
       pushToast({ title: 'Đặt hàng thất bại', description: message, variant: 'error', durationMs: 3500 });
@@ -1601,11 +1629,20 @@ export default function CartPage() {
               </span>
             </div>
 
+            {isMixedFulfillment ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900 md:text-sm">
+                <p className="font-medium">Giỏ hàng gồm hàng Trung Quốc và hàng có sẵn tại Việt Nam.</p>
+                <p className="mt-1">
+                  Hệ thống sẽ tạo 2 mã đơn và có thể giao 2 lần. Phí giao hàng chỉ tính một lần như tổng kết bên trên.
+                </p>
+              </div>
+            ) : null}
+
             {depositRequiredForSelected && selectedCartItems.length > 0 ? (
               <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-[11px] text-blue-900 md:text-sm">
                 <p>
                   Đơn có sản phẩm yêu cầu đặt cọc{' '}
-                  <strong>{DEPOSIT_PERCENT}%</strong> ({formatPrice(depositAmountNow)}) trước khi xử lý. Số còn lại thanh toán khi nhận hàng.
+                  <strong>{DEPOSIT_PERCENT}%</strong> trước khi xử lý. Số tiền chính xác của từng đơn sẽ hiển thị sau khi tách; phần còn lại thanh toán khi nhận hàng.
                 </p>
                 <p className="mt-1">
                   <Link href={PURCHASE_GUIDE_URL} className="text-blue-700 underline font-medium">

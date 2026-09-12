@@ -403,6 +403,34 @@ def send_order_created_email_task(order_id: int) -> None:
         fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
         detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
         deposit_url = f"{fe}/account/orders/{order.id}/deposit" if fe else ""
+        sibling_orders = []
+        if getattr(order, "checkout_group_id", None):
+            sibling_orders = (
+                db.query(Order)
+                .filter(
+                    Order.checkout_group_id == order.checkout_group_id,
+                    Order.id != order.id,
+                )
+                .order_by(Order.split_index.asc(), Order.id.asc())
+                .all()
+            )
+        sibling_text = ""
+        sibling_html = ""
+        if sibling_orders:
+            labels = [
+                f"{row.order_code} ({'Trung Quốc' if row.fulfillment_source == 'china' else 'Việt Nam'})"
+                for row in [order, *sibling_orders]
+            ]
+            sibling_text = (
+                "Lần đặt hàng này được tách thành: "
+                + ", ".join(labels)
+                + ". Phí giao hàng chỉ tính một lần."
+            )
+            sibling_html = (
+                "<p><strong>Đơn được tách theo nguồn hàng:</strong> "
+                + ", ".join(labels)
+                + ". Phí giao hàng chỉ tính một lần.</p>"
+            )
 
         status_val = getattr(order.status, "value", order.status)
         waiting_deposit = bool(order.requires_deposit and status_val == OrderStatus.WAITING_DEPOSIT.value)
@@ -426,6 +454,7 @@ def send_order_created_email_task(order_id: int) -> None:
                 f"Kính gửi {name},",
                 "",
                 gentle,
+                *(["", sibling_text] if sibling_text else []),
                 "",
                 f"Mã đơn hàng: {code}",
                 f"Số tiền cọc: {deposit_vnd} VND",
@@ -468,6 +497,7 @@ def send_order_created_email_task(order_id: int) -> None:
 <div style="font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.55;color:#111827;max-width:560px;">
   <p>Kính gửi <strong>{name}</strong>,</p>
   <p>{gentle}</p>
+  {sibling_html}
   <p>Mã đơn: <strong>{code}</strong><br/>
   Số tiền cọc: <strong>{deposit_vnd} VND</strong><br/>
   Còn lại khi nhận hàng: <strong>{remaining_vnd} VND</strong></p>
@@ -490,6 +520,7 @@ def send_order_created_email_task(order_id: int) -> None:
                     f"Kính gửi {name},",
                     "",
                     "Đơn hàng của bạn đã được tạo thành công. Cảm ơn bạn đã mua sắm tại 188.com.vn.",
+                    *(["", sibling_text] if sibling_text else []),
                     *(["", f"Chi tiết đơn: {detail_url}"] if detail_url else []),
                     "",
                     "Trân trọng,",
@@ -502,6 +533,7 @@ def send_order_created_email_task(order_id: int) -> None:
             html_body = (
                 f"<p>Kính gửi <strong>{name}</strong>,</p>"
                 "<p>Đơn hàng của bạn đã được tạo thành công. Cảm ơn bạn đã mua sắm tại 188.com.vn.</p>"
+                f"{sibling_html}"
                 f"{link_html}"
                 "<p>Trân trọng,<br>188.com.vn</p>"
             )

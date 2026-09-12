@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata = {
   title: 'Hướng dẫn mua hàng - Điều kiện thanh toán',
-  description: 'Hướng dẫn mua hàng, đặt cọc 30% và chuyển khoản tại 188.COM.VN.',
+  description: 'Hướng dẫn mua hàng, yêu cầu đặt cọc theo từng sản phẩm và chuyển khoản tại 188.COM.VN.',
 };
 
 export default function HuongDanMuaHangPage() {
@@ -26,9 +26,9 @@ export default function HuongDanMuaHangPage() {
           Nếu <strong className="text-zinc-800">sản phẩm không vừa</strong>, chúng tôi <strong className="text-zinc-800">hỗ trợ đổi size 1 lần</strong> (không đổi mẫu).
         </p>
         <p>
-          Do hàng hóa được <strong className="text-zinc-800">nhập khẩu từ nước ngoài</strong>, chi phí nhập hàng và vận chuyển cao, nên để đảm bảo quyền lợi hai bên và tránh việc hủy đơn khi hàng đang vận chuyển,{' '}
-          <strong className="text-zinc-800">khách hàng cần thanh toán trước 30% giá trị đơn hàng</strong>. Phần <strong className="text-zinc-800">70% còn lại</strong> sẽ được{' '}
-          <strong className="text-zinc-800">thanh toán khi nhận hàng</strong>.
+          Yêu cầu đặt cọc được quy định <strong className="text-zinc-800">theo từng sản phẩm</strong>, không phụ thuộc sản phẩm ở Trung Quốc hay đã có sẵn tại Việt Nam. Với sản phẩm có nhãn cần đặt cọc, khách hàng thanh toán trước mặc định{' '}
+          <strong className="text-zinc-800">30% giá trị hàng</strong> (hoặc chọn thanh toán trước 100%); phần còn lại và phí giao hàng, nếu có, được{' '}
+          <strong className="text-zinc-800">thanh toán khi nhận hàng</strong>. Sản phẩm không yêu cầu đặt cọc được xử lý ngay sau khi đặt đơn.
         </p>
         <p>
           Khi chuyển khoản đặt cọc, <strong className="text-zinc-800">vui lòng ghi rõ số điện thoại của quý khách</strong> trong nội dung chuyển tiền để thuận tiện cho việc xác minh. 188.COM.VN sẽ{' '}

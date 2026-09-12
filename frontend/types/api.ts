@@ -508,6 +508,8 @@ export interface CartItem {
     original_price?: number;
     available?: number;
     deposit_require?: boolean;
+    fulfillment_source?: 'china' | 'vietnam';
+    link_default?: string | null;
   };
 }
 

@@ -33,6 +33,8 @@ class OrderShipmentTimelineResponse(BaseModel):
     order_id: int
     order_code: str
     order_status: str
+    fulfillment_source: str = "vietnam"
+    timeline_variant: str = "vn_domestic"
     tracking_number: Optional[str] = None
     shipping_provider: Optional[str] = None
     footer_note: str

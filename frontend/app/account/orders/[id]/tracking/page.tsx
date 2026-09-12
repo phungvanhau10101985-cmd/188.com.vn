@@ -25,6 +25,8 @@ type Timeline = {
   order_id: number;
   order_code: string;
   order_status: string;
+  fulfillment_source: 'china' | 'vietnam';
+  timeline_variant: 'china_import' | 'vn_domestic';
   tracking_number?: string | null;
   shipping_provider?: string | null;
   footer_note: string;
@@ -121,7 +123,11 @@ export default function OrderTrackingPage() {
         <Link href={`/account/orders/${orderId}`} className="text-sm text-gray-500 hover:text-gray-800">
           ← Chi tiết đơn hàng
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">Lịch trình đơn hàng</h1>
+        <h1 className="text-xl font-bold text-gray-900">
+          {timeline.timeline_variant === 'vn_domestic'
+            ? 'Đóng gói & giao hàng tại Việt Nam'
+            : 'Lịch trình Trung Quốc → Việt Nam'}
+        </h1>
         <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-medium text-orange-800">
           #{timeline.order_code}
         </span>

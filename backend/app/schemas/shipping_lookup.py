@@ -38,6 +38,8 @@ class ShippingLookupItemResponse(BaseModel):
 class ShippingLookupOrderResponse(BaseModel):
     id: int
     order_code: str
+    fulfillment_source: str = "vietnam"
+    checkout_group_id: Optional[str] = None
     status: str
     status_label: str
     payment_method: Optional[str] = None

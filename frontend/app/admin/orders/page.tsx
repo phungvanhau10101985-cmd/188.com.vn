@@ -198,6 +198,8 @@ export default function AdminOrdersPage() {
   const [appliedSearch, setAppliedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [specialFilter, setSpecialFilter] = useState('');
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<AdminOrder | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -211,7 +213,10 @@ export default function AdminOrdersPage() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [shippingProvider, setShippingProvider] = useState('');
   const [clearCustomsBusy, setClearCustomsBusy] = useState(false);
+  const [startPackingBusy, setStartPackingBusy] = useState(false);
   const [markOutForConfirmBusy, setMarkOutForConfirmBusy] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideBusy, setOverrideBusy] = useState(false);
   const [revenueMode, setRevenueMode] = useState<RevenueReportMode>('day');
   const [revenueFilter, setRevenueFilter] = useState<RevenueFilterState>(() => ({
     ...EMPTY_REVENUE_FILTER,
@@ -248,6 +253,10 @@ export default function AdminOrdersPage() {
       const data = await adminOrderAPI.getAllOrders({
         status: resolveAdminOrderStatusParam(activeTab, statusFilter),
         payment_status: paymentFilter || undefined,
+        fulfillment_source: (sourceFilter || undefined) as 'china' | 'vietnam' | undefined,
+        preset: specialFilter === 'china_no_deposit' ? 'china_no_deposit' : undefined,
+        deposit_hold_overdue: specialFilter === 'deposit_hold_overdue' ? true : undefined,
+        fulfillment_needs_review: specialFilter === 'source_review' ? true : undefined,
         q: appliedSearch || undefined,
         skip,
         limit: listPageSize,
@@ -265,7 +274,7 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, statusFilter, paymentFilter, appliedSearch, listPage, listPageSize]);
+  }, [activeTab, statusFilter, paymentFilter, sourceFilter, specialFilter, appliedSearch, listPage, listPageSize]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -363,7 +372,7 @@ export default function AdminOrdersPage() {
 
   useEffect(() => {
     setListPage(1);
-  }, [activeTab, statusFilter, paymentFilter, listPageSize]);
+  }, [activeTab, statusFilter, paymentFilter, sourceFilter, specialFilter, listPageSize]);
 
   useEffect(() => {
     void adminOrderAPI.getStats({ preset: 'today' }).then(setRevenueReport).catch(() => {});
@@ -488,6 +497,30 @@ export default function AdminOrdersPage() {
     }
   };
 
+  const handleOverrideShipping = async (orderId: number) => {
+    const reason = overrideReason.trim();
+    if (reason.length < 5) {
+      showToast('err', 'Nhập lý do ghi đè ít nhất 5 ký tự');
+      return;
+    }
+    setOverrideBusy(true);
+    try {
+      const updated = await adminOrderAPI.updateOrder(orderId, {
+        status: 'shipping',
+        override_reason: reason,
+      });
+      setSelectedOrder(updated);
+      setOverrideReason('');
+      showToast('ok', 'Đã ghi đè trạng thái và lưu nhật ký');
+      fetchOrders();
+      fetchStats();
+    } catch (err: unknown) {
+      showToast('err', err instanceof Error ? err.message : 'Không thể ghi đè trạng thái');
+    } finally {
+      setOverrideBusy(false);
+    }
+  };
+
   const handleClearCustoms = async () => {
     if (!selectedOrder) return;
     setClearCustomsBusy(true);
@@ -502,6 +535,23 @@ export default function AdminOrdersPage() {
       showToast('err', err instanceof Error ? err.message : 'Không thể cập nhật lịch trình');
     } finally {
       setClearCustomsBusy(false);
+    }
+  };
+
+  const handleStartVietnamPacking = async () => {
+    if (!selectedOrder) return;
+    setStartPackingBusy(true);
+    try {
+      const updated = await adminOrderAPI.startVietnamPacking(selectedOrder.id);
+      showToast('ok', 'Kho Việt Nam: Bắt đầu soạn hàng');
+      setSelectedOrder(updated);
+      void loadShipmentTimeline(updated.id);
+      fetchOrders();
+      fetchStats();
+    } catch (err: unknown) {
+      showToast('err', err instanceof Error ? err.message : 'Không thể bắt đầu đóng gói');
+    } finally {
+      setStartPackingBusy(false);
     }
   };
 
@@ -954,12 +1004,43 @@ export default function AdminOrdersPage() {
               <option value="paid">Đã thanh toán</option>
               <option value="failed">Thanh toán thất bại</option>
             </select>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="border rounded-lg px-3 py-2 w-44"
+              aria-label="Lọc theo nguồn hàng"
+            >
+              <option value="">Tất cả nguồn hàng</option>
+              <option value="vietnam">Có sẵn Việt Nam</option>
+              <option value="china">Hàng Trung Quốc</option>
+            </select>
+            <select
+              value={specialFilter}
+              onChange={(e) => {
+                const value = e.target.value;
+                setSpecialFilter(value);
+                if (value === 'china_no_deposit') {
+                  setActiveTab('all');
+                  setStatusFilter('');
+                  setSourceFilter('china');
+                }
+              }}
+              className="border rounded-lg px-3 py-2 w-48"
+              aria-label="Lọc nghiệp vụ vận hành"
+            >
+              <option value="">Tất cả nghiệp vụ</option>
+              <option value="china_no_deposit">TQ không cọc</option>
+              <option value="deposit_hold_overdue">Quá hạn giữ tồn cọc</option>
+              <option value="source_review">Cần rà soát nguồn</option>
+            </select>
             <button
               onClick={() => {
                 setSearch('');
                 setAppliedSearch('');
                 setStatusFilter('');
                 setPaymentFilter('');
+                setSourceFilter('');
+                setSpecialFilter('');
                 setListPage(1);
               }}
               className="px-3 py-2 border rounded-lg hover:bg-gray-50"
@@ -1007,7 +1088,16 @@ export default function AdminOrdersPage() {
                 <tbody>
                   {orders.map((order) => (
                     <tr key={order.id} className="border-b hover:bg-gray-50">
-                      <td className="p-3 font-mono text-sm">{order.order_code}</td>
+                      <td className="p-3 text-sm">
+                        <div className="font-mono">{order.order_code}</div>
+                        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                          order.fulfillment_source === 'china'
+                            ? 'bg-red-50 text-red-700'
+                            : 'bg-emerald-50 text-emerald-700'
+                        }`}>
+                          {order.fulfillment_source === 'china' ? 'Trung Quốc' : 'Việt Nam'}
+                        </span>
+                      </td>
                       <td className="p-3 text-center">
                         <input
                           type="checkbox"
@@ -1042,6 +1132,25 @@ export default function AdminOrdersPage() {
                         <span className="px-2 py-1 rounded text-sm bg-gray-100">
                           {STATUS_TEXTS[order.status] || order.status}
                         </span>
+                        {order.status === 'waiting_deposit' &&
+                        (order.deposit_hold_overdue ||
+                          (order.stock_hold_expires_at &&
+                            new Date(order.stock_hold_expires_at).getTime() < Date.now())) ? (
+                          <span className="mt-1 block text-xs font-medium text-red-600">Giữ tồn đã quá hạn</span>
+                        ) : null}
+                        {order.fulfillment_needs_review ? (
+                          <span className="mt-1 block text-xs font-medium text-amber-700">Cần rà soát nguồn</span>
+                        ) : null}
+                        {order.deposit_exception ? (
+                          <span className="mt-1 block text-xs font-medium text-red-700" title={order.deposit_exception_note || undefined}>
+                            Cọc đã nhận — thiếu tồn
+                          </span>
+                        ) : null}
+                        {(order.sla_warnings || []).map((warning) => (
+                          <span key={warning} className="mt-1 block text-xs font-medium text-orange-700">
+                            {warning}
+                          </span>
+                        ))}
                       </td>
                       <td className="p-3">
                         <span
@@ -1310,7 +1419,11 @@ export default function AdminOrdersPage() {
                 </table>
               </div>
               <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50/60 p-4">
-                <h3 className="font-semibold text-blue-900 mb-2">Lịch trình 188.com.vn TQ → VN</h3>
+                <h3 className="font-semibold text-blue-900 mb-2">
+                  {shipmentTimeline?.timeline_variant === 'vn_domestic'
+                    ? 'Đóng gói & giao hàng từ kho Việt Nam'
+                    : 'Lịch trình 188.com.vn TQ → VN'}
+                </h3>
                 {shipmentLoading ? (
                   <p className="text-sm text-gray-500">Đang tải lịch trình…</p>
                 ) : shipmentTimeline?.events?.length ? (
@@ -1380,9 +1493,30 @@ export default function AdminOrdersPage() {
                     </button>
                   </div>
                 ) : null}
+                {shipmentTimeline?.timeline_variant === 'vn_domestic' &&
+                shipmentTimeline.current_step_key === 'vn_picking' ? (
+                  <div className="rounded-lg border border-sky-200 bg-white p-3 space-y-3">
+                    <p className="text-sm text-sky-900">Kho Việt Nam: lấy và kiểm tra hàng</p>
+                    <p className="text-xs text-sky-800/80">
+                      Kiểm đúng SKU, size, màu, số lượng và tình trạng sản phẩm trước khi đóng gói.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={startPackingBusy}
+                      onClick={() => void handleStartVietnamPacking()}
+                      className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-60"
+                    >
+                      {startPackingBusy ? 'Đang xử lý…' : 'Bắt đầu soạn hàng'}
+                    </button>
+                  </div>
+                ) : null}
                 {shipmentTimeline?.waiting_admin_domestic_delivery ? (
                   <div className="rounded-lg border border-emerald-200 bg-white p-3 space-y-3">
-                    <p className="text-sm text-emerald-900">Hàng đã về shop — đóng gói & gửi shipper</p>
+                    <p className="text-sm text-emerald-900">
+                      {shipmentTimeline.timeline_variant === 'vn_domestic'
+                        ? 'Hàng đã kiểm tra — đóng gói & gửi shipper'
+                        : 'Hàng đã về shop — đóng gói & gửi shipper'}
+                    </p>
                     <p className="text-xs text-emerald-800/80">
                       Sau khi nhân viên đóng hàng và bàn giao cho shipper, xác nhận bên dưới để mở nút «Đã nhận hàng» cho khách.
                     </p>
@@ -1412,7 +1546,11 @@ export default function AdminOrdersPage() {
                       onClick={() => void handleMarkOutForCustomerConfirm()}
                       className="px-4 py-2 bg-[#ea580c] text-white rounded-lg text-sm font-medium hover:bg-[#c2410c] disabled:opacity-60"
                     >
-                      {markOutForConfirmBusy ? 'Đang xử lý…' : '188.com.vn: Đóng hàng & gửi shipper'}
+                      {markOutForConfirmBusy
+                        ? 'Đang xử lý…'
+                        : shipmentTimeline.timeline_variant === 'vn_domestic'
+                          ? 'Đã đóng gói & bàn giao shipper'
+                          : '188.com.vn: Đóng hàng & gửi shipper'}
                     </button>
                   </div>
                 ) : null}
@@ -1423,10 +1561,27 @@ export default function AdminOrdersPage() {
                     Xác nhận cọc
                   </button>
                 )}
-                {(selectedOrder.status === 'deposit_paid' || selectedOrder.status === 'confirmed' || selectedOrder.status === 'processing') && !shipmentTimeline?.waiting_admin_at_customs ? (
-                  <button onClick={() => handleUpdateStatus(selectedOrder.id, 'shipping')} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">
-                    Chuyển đang giao (thủ công)
-                  </button>
+                {(selectedOrder.status === 'deposit_paid' || selectedOrder.status === 'confirmed' || selectedOrder.status === 'processing') &&
+                !shipmentTimeline?.events?.length ? (
+                  <div className="w-full rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <label className="block text-sm font-medium text-amber-900">
+                      Ghi đè trạng thái khi timeline bị thiếu
+                      <textarea
+                        value={overrideReason}
+                        onChange={(event) => setOverrideReason(event.target.value)}
+                        placeholder="Lý do bắt buộc; nội dung được lưu vào nhật ký đơn"
+                        className="mt-2 min-h-20 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-900"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={overrideBusy}
+                      onClick={() => void handleOverrideShipping(selectedOrder.id)}
+                      className="mt-2 rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-60"
+                    >
+                      {overrideBusy ? 'Đang lưu…' : 'Ghi đè sang đang giao'}
+                    </button>
+                  </div>
                 ) : null}
                 {selectedOrder.status === 'delivered' && (
                   <button onClick={() => handleUpdateStatus(selectedOrder.id, 'completed')} className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]">

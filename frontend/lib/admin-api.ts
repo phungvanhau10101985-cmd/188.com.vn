@@ -318,6 +318,9 @@ export interface AdminOrderItem {
   selected_size?: string | null;
   selected_color?: string | null;
   selected_color_name?: string | null;
+  fulfillment_source?: 'china' | 'vietnam';
+  source_platform?: '1688' | 'taobao' | 'tmall' | null;
+  is_warehouse_item?: boolean;
 }
 
 /** Kết quả gửi email «Đã nhận cọc» khi admin xác nhận cọc. */
@@ -353,6 +356,15 @@ export interface AdminOrder {
   shipping_provider?: string | null;
   created_at: string;
   items: AdminOrderItem[];
+  fulfillment_source: 'china' | 'vietnam';
+  checkout_group_id?: string | null;
+  split_index?: number;
+  stock_hold_expires_at?: string | null;
+  deposit_hold_overdue?: boolean;
+  deposit_exception?: boolean;
+  deposit_exception_note?: string | null;
+  fulfillment_needs_review?: boolean;
+  sla_warnings?: string[];
 }
 
 export interface AdminOrderListPagination {
@@ -2633,6 +2645,10 @@ export const adminOrderAPI = {
   getAllOrders: (params?: {
     status?: string;
     payment_status?: string;
+    fulfillment_source?: 'china' | 'vietnam';
+    deposit_hold_overdue?: boolean;
+    fulfillment_needs_review?: boolean;
+    preset?: 'china_no_deposit';
     q?: string;
     limit?: number;
     skip?: number;
@@ -2640,6 +2656,10 @@ export const adminOrderAPI = {
     const sp = new URLSearchParams();
     if (params?.status) sp.set('status', params.status);
     if (params?.payment_status) sp.set('payment_status', params.payment_status);
+    if (params?.fulfillment_source) sp.set('fulfillment_source', params.fulfillment_source);
+    if (params?.deposit_hold_overdue != null) sp.set('deposit_hold_overdue', String(params.deposit_hold_overdue));
+    if (params?.fulfillment_needs_review != null) sp.set('fulfillment_needs_review', String(params.fulfillment_needs_review));
+    if (params?.preset) sp.set('preset', params.preset);
     if (params?.q?.trim()) sp.set('q', params.q.trim());
     sp.set('limit', String(params?.limit ?? 100));
     sp.set('skip', String(params?.skip ?? 0));
@@ -2673,9 +2693,10 @@ export const adminOrderAPI = {
     staff_consultation_contacted?: boolean;
     tracking_number?: string;
     shipping_provider?: string;
+    override_reason?: string;
   }) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}`, {
-      method: 'PUT',
+      method: 'PATCH',
       body: JSON.stringify(data),
     }),
 
@@ -2684,6 +2705,8 @@ export const adminOrderAPI = {
       order_id: number;
       order_code: string;
       order_status: string;
+      fulfillment_source: 'china' | 'vietnam';
+      timeline_variant: 'china_import' | 'vn_domestic';
       tracking_number?: string | null;
       shipping_provider?: string | null;
       footer_note: string;
@@ -2716,6 +2739,12 @@ export const adminOrderAPI = {
 
   clearCustomsShipment: (orderId: number) =>
     fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/shipment/clear-customs`, {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+
+  startVietnamPacking: (orderId: number) =>
+    fetchAdmin<AdminOrder>(`/orders/admin/${orderId}/shipment/start-vietnam-packing`, {
       method: 'POST',
       body: JSON.stringify({}),
     }),

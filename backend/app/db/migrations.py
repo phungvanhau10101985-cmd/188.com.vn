@@ -5,6 +5,7 @@ Professional migration system for database schema updates - PostgreSQL / SQLite
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any
 from sqlalchemy import inspect, text
@@ -15,7 +16,16 @@ from app.models.pending_bunny_delete import PendingBunnyDelete
 from app.models.category import Category
 from app.models.product_import_draft import ProductImportDraft
 from app.models.listing_import_queue_snapshot import ListingImportQueueRevocation, ListingImportQueueSnapshot
-from app.models.order import Order, OrderItem, OrderStatus, DepositType, PaymentMethod, PaymentStatus, Payment
+from app.models.order import (
+    Order,
+    OrderItem,
+    OrderStatus,
+    DepositType,
+    PaymentMethod,
+    PaymentStatus,
+    Payment,
+    OrderStatusOverride,
+)
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
 from app.models.search_mapping import SearchMapping
@@ -440,6 +450,133 @@ class MigrationManager:
     def migrate_order_items_sync_columns(self) -> bool:
         """Thêm mọi cột thiếu của bảng order_items theo model OrderItem."""
         return self._sync_table_columns("order_items", OrderItem)
+
+    def migrate_order_fulfillment_backfill(self) -> bool:
+        """Snapshot nguồn cho dữ liệu cũ mà không thay đổi timeline lịch sử."""
+        from sqlalchemy import and_, func, or_
+        from sqlalchemy.orm import selectinload
+
+        from app.db.session import SessionLocal
+        from app.services.fulfillment_routing import (
+            FULFILLMENT_CHINA,
+            FULFILLMENT_VIETNAM,
+            classify_legacy_item_source,
+            source_platform_from_url,
+        )
+
+        db = SessionLocal()
+        try:
+            legacy_ids = {
+                row[0]
+                for row in db.query(Order.id)
+                .filter(
+                    or_(
+                        Order.checkout_group_id.is_(None),
+                        Order.checkout_group_id == "",
+                        Order.fulfillment_source.is_(None),
+                        Order.fulfillment_source == "",
+                        Order.fulfillment_needs_review.is_(True),
+                    )
+                )
+                .all()
+            }
+            unknown_ids = {
+                row[0]
+                for row in db.query(OrderItem.order_id)
+                .outerjoin(Product, Product.id == OrderItem.product_id)
+                .filter(
+                    and_(
+                        or_(OrderItem.source_url.is_(None), OrderItem.source_url == ""),
+                        Product.id.is_(None),
+                    )
+                )
+                .distinct()
+                .all()
+            }
+            mixed_ids = {
+                row[0]
+                for row in db.query(OrderItem.order_id)
+                .group_by(OrderItem.order_id)
+                .having(func.count(func.distinct(OrderItem.fulfillment_source)) > 1)
+                .all()
+            }
+            candidate_ids = legacy_ids | unknown_ids | mixed_ids
+            if not candidate_ids:
+                return True
+            orders = (
+                db.query(Order)
+                .options(selectinload(Order.items).selectinload(OrderItem.product))
+                .filter(Order.id.in_(candidate_ids))
+                .all()
+            )
+            for order in orders:
+                sources = set()
+                needs_review = False
+                for item in order.items or []:
+                    source, source_url, item_needs_review = classify_legacy_item_source(
+                        snapshot_url=item.source_url,
+                        product_url=item.product.link_default if item.product else None,
+                        product_exists=item.product is not None,
+                        snapshot_source=item.fulfillment_source,
+                    )
+                    needs_review = needs_review or item_needs_review
+                    if not item.source_url:
+                        item.source_url = source_url or None
+                    if not item.source_platform:
+                        item.source_platform = source_platform_from_url(source_url)
+                    item.fulfillment_source = source
+                    item.product_sku_snapshot = item.product_sku_snapshot or (
+                        item.product.code if item.product else None
+                    )
+                    item.is_warehouse_item = bool(
+                        getattr(item.product, "is_warehouse_clearance", False)
+                    )
+                    sources.add(source)
+                if len(sources) > 1:
+                    needs_review = True
+                if not order.fulfillment_source:
+                    order.fulfillment_source = (
+                        FULFILLMENT_CHINA
+                        if FULFILLMENT_CHINA in sources
+                        else FULFILLMENT_VIETNAM
+                    )
+                order.fulfillment_needs_review = needs_review
+                order.checkout_group_id = order.checkout_group_id or str(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"188.com.vn/order/{order.id}")
+                )
+                order.split_index = int(order.split_index or 1)
+            db.commit()
+            return True
+        except Exception as exc:
+            db.rollback()
+            logger.error("migrate_order_fulfillment_backfill failed: %s", exc)
+            return False
+        finally:
+            db.close()
+
+    def migrate_order_fulfillment_indexes(self) -> bool:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_orders_fulfillment_source "
+                    "ON orders (fulfillment_source)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_orders_checkout_group_id "
+                    "ON orders (checkout_group_id)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_order_items_fulfillment_source "
+                    "ON order_items (fulfillment_source)"
+                ))
+                conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_orders_fulfillment_needs_review "
+                    "ON orders (fulfillment_needs_review)"
+                ))
+            return True
+        except Exception as exc:
+            logger.error("migrate_order_fulfillment_indexes failed: %s", exc)
+            return False
 
     def migrate_ems_shop_return_received_backfill(self) -> bool:
         """Gắn cờ xác nhận hoàn shop cho bản ghi EMS đã có order_status=returned."""
@@ -1125,6 +1262,11 @@ class MigrationManager:
         results['orders_add_order_code'] = self.migrate_orders_add_order_code()
         # 3. Bảng order_items (unit_price, ...)
         results['order_items_sync_columns'] = self.migrate_order_items_sync_columns()
+        results['order_fulfillment_backfill'] = self.migrate_order_fulfillment_backfill()
+        results['order_fulfillment_indexes'] = self.migrate_order_fulfillment_indexes()
+        results['order_status_overrides_create'] = self._create_table_if_not_exists(
+            "order_status_overrides", OrderStatusOverride
+        )
         # 4. Chuẩn hóa enum (tên -> value) để tránh LookupError khi đọc
         results['orders_enum_values'] = self.migrate_orders_enum_values()
         # 5. Bảng product_questions (is_imported, ...)
