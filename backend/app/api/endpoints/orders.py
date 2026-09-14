@@ -104,6 +104,54 @@ def resolve_order_deposit_due(order: models.Order) -> Decimal:
     return Decimal("0")
 
 
+def _coerce_received_deposit_amount(raw: object, *, total: Decimal) -> Decimal:
+    """Số tiền admin nhập khi xác nhận đã nhận cọc."""
+    amount = _dec(raw)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Nhập số tiền đã nhận cọc lớn hơn 0")
+    if amount > total:
+        raise HTTPException(
+            status_code=400,
+            detail="Số tiền đã nhận cọc không được lớn hơn tổng đơn hàng",
+        )
+    return amount.quantize(Decimal("0.01"))
+
+
+def _apply_admin_deposit_received(order: models.Order, received: Decimal) -> None:
+    """Ghi nhận cọc thực nhận và số tiền khách trả khi nhận hàng (total − cọc)."""
+    total = _dec(order.total_amount)
+    remaining = (total - received).quantize(Decimal("0.01"))
+    if remaining < 0:
+        remaining = Decimal("0.00")
+    order.deposit_paid = received
+    order.deposit_paid_at = datetime.now()
+    order.remaining_amount = remaining
+    if remaining <= 0:
+        order.payment_status = PaymentStatusEnum.PAID
+        order.status = OrderStatusEnum.CONFIRMED
+        if not getattr(order, "confirmed_at", None):
+            order.confirmed_at = datetime.now()
+    else:
+        order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
+        order.status = OrderStatusEnum.DEPOSIT_PAID
+
+
+def _append_deposit_confirm_admin_note(
+    order: models.Order,
+    received: Decimal,
+    extra_note: Optional[str] = None,
+    *,
+    manual: bool = False,
+) -> None:
+    label = "Xác nhận cọc thủ công" if manual else "Xác nhận cọc"
+    amount_txt = f"{int(received):,}".replace(",", ".")
+    line = f"\n[{label}] Đã nhận {amount_txt} đ"
+    note = (extra_note or "").strip()
+    if note:
+        line += f" — {note}"
+    order.admin_notes = (order.admin_notes or "") + line
+
+
 router = APIRouter()
 
 # ========== USER ORDER ENDPOINTS ==========
@@ -1295,7 +1343,19 @@ def admin_confirm_deposit(
     """
     Admin: Confirm deposit payment
     """
-    # 1. Confirm payment
+    order = crud.order.get_order(db, order_id=order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    received: Optional[Decimal] = None
+    if payment_data.is_confirmed:
+        if payment_data.received_amount is None:
+            raise HTTPException(status_code=400, detail="Nhập số tiền đã nhận cọc")
+        received = _coerce_received_deposit_amount(
+            payment_data.received_amount,
+            total=_dec(order.total_amount),
+        )
+
     payment = crud.payment.confirm_payment(
         db=db,
         payment_id=payment_data.payment_id,
@@ -1307,29 +1367,10 @@ def admin_confirm_deposit(
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     
-    # 2. Update order status
-    order = crud.order.get_order(db, order_id=order_id)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
-    if payment_data.is_confirmed:
-        # Update deposit paid amount
-        order.deposit_paid = payment.amount
-        order.deposit_paid_at = datetime.now()
-        
-        # If deposit is 100%, mark as fully paid (assign enum, not .value)
-        dt_val = getattr(order.deposit_type, "value", order.deposit_type)
-        if dt_val == DepositTypeEnum.PERCENT_100.value:
-            order.payment_status = PaymentStatusEnum.PAID
-            order.status = OrderStatusEnum.CONFIRMED
-            order.confirmed_at = datetime.now()
-        else:
-            # 30% deposit, update status
-            order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
-            order.status = OrderStatusEnum.DEPOSIT_PAID
-
-        # Update remaining amount
-        order.remaining_amount = order.total_amount - order.deposit_paid
+    if payment_data.is_confirmed and received is not None:
+        payment.amount = received
+        _apply_admin_deposit_received(order, received)
+        _append_deposit_confirm_admin_note(order, received, payment_data.confirmation_note)
         commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
         shipment_svc.ensure_shipment_timeline(db, order)
         from app.services.warehouse_stock import (
@@ -1371,13 +1412,13 @@ def admin_confirm_deposit(
 def admin_confirm_deposit_manual(
     order_id: int,
     background_tasks: BackgroundTasks,
-    body: dict = Body(default={}),
+    body: schemas.ManualDepositConfirm,
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("orders")),
 ):
     """
     Admin: Xác nhận cọc khi chưa có giao dịch trong hệ thống (khách đã chuyển khoản nhưng không gửi form).
-    Body: { "confirmation_note": "..." } (tùy chọn)
+    Body: { "received_amount": 1200000, "confirmation_note": "..." }
     """
     order = crud.order.get_order(db, order_id=order_id)
     if not order:
@@ -1402,21 +1443,19 @@ def admin_confirm_deposit_manual(
             order.deposit_type = DepositTypeEnum.PERCENT_30
             order.deposit_percentage = 30
 
-    order.deposit_paid = amount_due
-    order.deposit_paid_at = datetime.now()
-    order.remaining_amount = (_dec(order.total_amount) - amount_due).quantize(Decimal("0.01"))
-    dt_val_after = getattr(order.deposit_type, "value", order.deposit_type)
-    if dt_val_after == DepositTypeEnum.PERCENT_100.value:
-        order.payment_status = PaymentStatusEnum.PAID
-        order.status = OrderStatusEnum.CONFIRMED
-        order.confirmed_at = datetime.now()
-    else:
-        order.payment_status = PaymentStatusEnum.DEPOSIT_PAID
-        order.status = OrderStatusEnum.DEPOSIT_PAID
+    received = _coerce_received_deposit_amount(
+        body.received_amount,
+        total=_dec(order.total_amount),
+    )
+    _apply_admin_deposit_received(order, received)
+    _append_deposit_confirm_admin_note(
+        order,
+        received,
+        body.confirmation_note,
+        manual=True,
+    )
     commission = affiliate_svc.grant_deposit_commission_for_order(db, order)
     shipment_svc.ensure_shipment_timeline(db, order)
-    if body.get("confirmation_note"):
-        order.admin_notes = (order.admin_notes or "") + "\n[Xác nhận cọc thủ công] " + str(body.get("confirmation_note"))
     from app.services.warehouse_stock import (
         WarehouseStockError,
         reload_order_with_items,

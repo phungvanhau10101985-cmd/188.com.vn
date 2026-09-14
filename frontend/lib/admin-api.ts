@@ -2761,17 +2761,25 @@ export const adminOrderAPI = {
   lookupOrderByCode: (orderCode: string) =>
     fetchAdmin<AdminOrder>(`/orders/admin/lookup-by-code/${encodeURIComponent(orderCode.trim())}`),
 
-  confirmDeposit: (orderId: number, data: { payment_id: number; is_confirmed: boolean; confirmation_note?: string }) =>
+  confirmDeposit: (
+    orderId: number,
+    data: {
+      payment_id: number;
+      is_confirmed: boolean;
+      confirmation_note?: string;
+      received_amount?: number;
+    },
+  ) =>
     fetchAdmin<AdminOrderDepositConfirmResult>(`/orders/admin/${orderId}/confirm-deposit`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
 
   /** Xác nhận cọc khi chưa có giao dịch trong hệ thống (khách đã chuyển khoản) */
-  confirmDepositManual: (orderId: number, data?: { confirmation_note?: string }) =>
+  confirmDepositManual: (orderId: number, data: { received_amount: number; confirmation_note?: string }) =>
     fetchAdmin<AdminOrderDepositConfirmResult>(`/orders/admin/${orderId}/confirm-deposit-manual`, {
       method: 'POST',
-      body: JSON.stringify(data || {}),
+      body: JSON.stringify(data),
     }),
 
   refundDeposit: (orderId: number, data?: { refund_note?: string }) =>

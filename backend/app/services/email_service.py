@@ -1001,6 +1001,12 @@ def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResu
         code = order.order_code
         amt = order.deposit_paid or order.deposit_amount or 0
         vnd = _format_vnd_plain(amt)
+        remain_n = order.remaining_amount
+        try:
+            remain_positive = Decimal(str(remain_n or 0)) > 0
+        except Exception:
+            remain_positive = False
+        remain_vnd = _format_vnd_plain(remain_n or 0)
         fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
         detail_url = f"{fe}/account/orders/{order.id}" if fe else ""
         deposit_url = f"{fe}/account/orders/{order.id}/deposit" if fe else ""
@@ -1045,6 +1051,7 @@ def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResu
                 "Cảm ơn quý khách đã thanh toán đặt cọc.",
                 f"Mã đơn hàng: {code}",
                 f"Số tiền cọc đã nhận: {vnd} VND",
+                *([f"Số tiền thanh toán khi nhận hàng: {remain_vnd} VND"] if remain_positive else []),
                 "",
                 status_msg,
                 *(["", f"Xem chi tiết đơn hàng: {detail_url}"] if detail_url else []),
@@ -1068,7 +1075,9 @@ def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResu
             f"<p>Kính gửi <strong>{html.escape(name)}</strong>,</p>"
             "<p>Cảm ơn quý khách đã <strong>thanh toán đặt cọc</strong>.</p>"
             f"<p>Mã đơn: <strong>{html.escape(str(code))}</strong><br>"
-            f"Số tiền cọc: <strong>{vnd} VND</strong></p>"
+            f"Số tiền cọc: <strong>{vnd} VND</strong>"
+            f"{('<br>Số tiền thanh toán khi nhận hàng: <strong>' + remain_vnd + ' VND</strong>') if remain_positive else ''}"
+            "</p>"
             f"<p>{html.escape(status_msg)}</p>"
             f"{link_html}"
             f"{gcr_html_block}"

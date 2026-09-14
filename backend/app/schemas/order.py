@@ -265,6 +265,17 @@ class PaymentConfirm(BaseModel):
     payment_id: int
     is_confirmed: bool = True
     confirmation_note: Optional[str] = None
+    received_amount: Optional[Decimal] = Field(
+        None,
+        gt=0,
+        description="Số tiền đã nhận cọc; bắt buộc khi xác nhận",
+    )
+
+
+class ManualDepositConfirm(BaseModel):
+    """Xác nhận cọc thủ công (chưa có giao dịch trong hệ thống)."""
+    confirmation_note: Optional[str] = None
+    received_amount: Decimal = Field(..., gt=0, description="Số tiền đã nhận cọc")
 
 class PaymentResponse(BaseModel):
     """Payment response"""

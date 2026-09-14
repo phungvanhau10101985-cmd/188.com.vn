@@ -39,6 +39,18 @@ function formatVnd(n: number | string) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
 }
 
+function formatVndDigits(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  return Math.round(n).toLocaleString('vi-VN');
+}
+
+function parseVndDigits(raw: string): number {
+  const digits = String(raw || '').replace(/[^\d]/g, '');
+  if (!digits) return 0;
+  const n = parseInt(digits, 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
 /** Chuẩn hóa số tiền từ API (number, string, Decimal JSON). */
 function parseMoney(value: unknown): number {
   if (value == null) return 0;
@@ -206,6 +218,8 @@ export default function AdminOrdersPage() {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [orderPayments, setOrderPayments] = useState<PaymentRecord[]>([]);
   const [paymentNote, setPaymentNote] = useState('');
+  const [depositReceivedInput, setDepositReceivedInput] = useState('');
+  const [confirmingDeposit, setConfirmingDeposit] = useState(false);
   const [loadingPayments, setLoadingPayments] = useState(false);
   const [consultSavingId, setConsultSavingId] = useState<number | null>(null);
   const [shipmentTimeline, setShipmentTimeline] = useState<Awaited<ReturnType<typeof adminOrderAPI.getOrderShipmentTimeline>> | null>(null);
@@ -416,15 +430,36 @@ export default function AdminOrdersPage() {
     setPaymentOpen(true);
     setOrderPayments([]);
     setPaymentNote('');
+    setDepositReceivedInput(formatVndDigits(depositRequiredDisplay(order)));
+    setConfirmingDeposit(false);
     setLoadingPayments(true);
     try {
       const payments = await adminOrderAPI.getOrderPayments(order.id);
       setOrderPayments(payments);
+      const pending = payments.find((x) => x.payment_status === 'pending') || payments[0];
+      const paidAmt = pending ? parseMoney(pending.amount) : 0;
+      if (paidAmt > 0) {
+        setDepositReceivedInput(formatVndDigits(paidAmt));
+      }
     } catch {
       showToast('err', 'Không tải được danh sách thanh toán');
     } finally {
       setLoadingPayments(false);
     }
+  };
+
+  const readReceivedDepositAmount = (order: AdminOrder): number | null => {
+    const received = parseVndDigits(depositReceivedInput);
+    const total = Math.round(parseMoney(order.total_amount));
+    if (received <= 0) {
+      showToast('err', 'Nhập số tiền đã nhận cọc');
+      return null;
+    }
+    if (received > total) {
+      showToast('err', 'Số tiền đã nhận cọc không được lớn hơn tổng đơn');
+      return null;
+    }
+    return received;
   };
 
   const depositConfirmToast = (
@@ -444,42 +479,63 @@ export default function AdminOrdersPage() {
     };
   };
 
+  const closePaymentModal = () => {
+    setPaymentOpen(false);
+    setOrderPayments([]);
+    setPaymentNote('');
+    setDepositReceivedInput('');
+    setConfirmingDeposit(false);
+  };
+
   const handleConfirmDeposit = async (orderId: number, paymentId: number, isConfirmed: boolean, note?: string) => {
+    if (!selectedOrder) return;
+    let received: number | undefined;
+    if (isConfirmed) {
+      const parsed = readReceivedDepositAmount(selectedOrder);
+      if (parsed == null) return;
+      received = parsed;
+    }
+    setConfirmingDeposit(true);
     try {
       const res = await adminOrderAPI.confirmDeposit(orderId, {
         payment_id: paymentId,
         is_confirmed: isConfirmed,
         confirmation_note: note || undefined,
+        received_amount: received,
       });
       const t = depositConfirmToast(isConfirmed, res.deposit_email);
       showToast(t.type, t.msg);
-      setPaymentOpen(false);
+      closePaymentModal();
       setSelectedOrder(null);
-      setOrderPayments([]);
-      setPaymentNote('');
       fetchOrders();
       fetchStats();
     } catch (err: any) {
       showToast('err', err.message || 'Lỗi xác nhận cọc');
+    } finally {
+      setConfirmingDeposit(false);
     }
   };
 
   const handleConfirmDepositManual = async () => {
     if (!selectedOrder) return;
+    const received = readReceivedDepositAmount(selectedOrder);
+    if (received == null) return;
+    setConfirmingDeposit(true);
     try {
       const res = await adminOrderAPI.confirmDepositManual(selectedOrder.id, {
+        received_amount: received,
         confirmation_note: paymentNote || undefined,
       });
       const t = depositConfirmToast(true, res.deposit_email);
       showToast(t.type, t.msg);
-      setPaymentOpen(false);
+      closePaymentModal();
       setSelectedOrder(null);
-      setOrderPayments([]);
-      setPaymentNote('');
       fetchOrders();
       fetchStats();
     } catch (err: any) {
       showToast('err', err.message || 'Lỗi xác nhận cọc');
+    } finally {
+      setConfirmingDeposit(false);
     }
   };
 
@@ -627,6 +683,12 @@ export default function AdminOrdersPage() {
     { key: 'returned', label: 'Đơn hoàn đã trả shop', countKey: 'returned_orders' as const },
     { key: 'cancelled', label: 'Đã hủy', countKey: 'cancelled_orders' as const },
   ];
+
+  const depositModalReceived = parseVndDigits(depositReceivedInput);
+  const depositModalTotal = selectedOrder ? Math.round(parseMoney(selectedOrder.total_amount)) : 0;
+  const depositModalRemaining = Math.max(0, depositModalTotal - depositModalReceived);
+  const depositModalAmountInvalid =
+    !selectedOrder || depositModalReceived <= 0 || depositModalReceived > depositModalTotal;
 
   return (
       <div className="p-6">
@@ -1119,7 +1181,10 @@ export default function AdminOrdersPage() {
                           <>
                             Cần: {formatVnd(depositRequiredDisplay(order))}
                             <br />
-                            Đã cọc: {formatVnd(parseMoney(order.deposit_paid))}
+                            Đã cọc:{' '}
+                            <span className={parseMoney(order.deposit_paid) > 0 ? 'font-semibold text-emerald-700' : 'text-gray-600'}>
+                              {formatVnd(parseMoney(order.deposit_paid))}
+                            </span>
                           </>
                         ) : (
                           <span className="text-green-600">Không cần cọc</span>
@@ -1320,7 +1385,9 @@ export default function AdminOrdersPage() {
                       <dd className="font-medium text-gray-900 text-right tabular-nums">
                         <span>Cần: {formatVnd(depositRequiredDisplay(selectedOrder))}</span>
                         <span className="text-gray-400 font-normal mx-1.5">·</span>
-                        <span>Đã cọc: {formatVnd(parseMoney(selectedOrder.deposit_paid))}</span>
+                        <span className={parseMoney(selectedOrder.deposit_paid) > 0 ? 'text-emerald-700' : undefined}>
+                          Đã cọc: {formatVnd(parseMoney(selectedOrder.deposit_paid))}
+                        </span>
                       </dd>
                     </div>
                   ) : (
@@ -1618,59 +1685,139 @@ export default function AdminOrdersPage() {
 
         {/* Modal xác nhận cọc */}
         {paymentOpen && selectedOrder && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPaymentOpen(false)}>
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
-              <h2 className="text-xl font-bold mb-4">Xác nhận đặt cọc</h2>
-              <p className="mb-2">
-                Đơn <strong>{selectedOrder.order_code}</strong>. Số tiền cọc:{' '}
-                <strong className="text-red-600">{formatVnd(depositRequiredDisplay(selectedOrder))}</strong>
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+            onClick={() => {
+              if (!confirmingDeposit) closePaymentModal();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="confirm-deposit-title"
+              className="bg-white rounded-xl shadow-xl max-w-md w-full p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2 id="confirm-deposit-title" className="text-xl font-bold mb-4">Xác nhận đặt cọc</h2>
+              <p className="mb-1">
+                Đơn <strong>{selectedOrder.order_code}</strong>
+              </p>
+              <p className="text-sm text-gray-600 mb-3">
+                Tổng đơn <strong className="text-gray-900 tabular-nums">{formatVnd(depositModalTotal)}</strong>
+                {' · '}
+                Cần cọc <strong className="text-red-600 tabular-nums">{formatVnd(depositRequiredDisplay(selectedOrder))}</strong>
               </p>
               {loadingPayments && <p className="text-gray-500 text-sm">Đang tải...</p>}
               {!loadingPayments && orderPayments.length === 0 && (
-                <p className="text-amber-600 text-sm mb-2">Chưa có giao dịch cọc.</p>
+                <p className="text-amber-700 text-sm mb-3">Chưa có giao dịch cọc. Nhập số tiền khách đã chuyển rồi xác nhận.</p>
               )}
-              {!loadingPayments && orderPayments.length === 0 && (
-                <p className="text-gray-600 text-sm mb-3">Nếu khách đã chuyển khoản, bấm &quot;Xác nhận cọc&quot; bên dưới.</p>
+              {!loadingPayments && orderPayments.length > 0 && (
+                <p className="text-sm text-gray-600 mb-3">Có {orderPayments.length} giao dịch chờ xác nhận.</p>
               )}
-              {!loadingPayments && orderPayments.length > 0 && <p className="text-sm text-gray-600 mb-3">Có {orderPayments.length} giao dịch chờ xác nhận.</p>}
+              <div className="mb-3">
+                <label htmlFor="deposit-received-amount" className="block text-sm font-medium mb-1">
+                  Số tiền đã nhận cọc <span className="text-red-600">*</span>
+                </label>
+                <input
+                  id="deposit-received-amount"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  required
+                  disabled={confirmingDeposit}
+                  autoFocus
+                  value={depositReceivedInput}
+                  onChange={(e) => setDepositReceivedInput(formatVndDigits(parseVndDigits(e.target.value)))}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    if (confirmingDeposit || loadingPayments || depositModalAmountInvalid) return;
+                    if (orderPayments.length === 0) {
+                      void handleConfirmDepositManual();
+                      return;
+                    }
+                    const p = orderPayments.find((x) => x.payment_status === 'pending') || orderPayments[0];
+                    if (p) void handleConfirmDeposit(selectedOrder.id, p.id, true, paymentNote);
+                  }}
+                  placeholder="Ví dụ: 980.250"
+                  className="w-full border rounded-lg px-3 py-2 tabular-nums"
+                  aria-invalid={depositReceivedInput !== '' && depositModalAmountInvalid}
+                />
+                <button
+                  type="button"
+                  disabled={confirmingDeposit || depositRequiredDisplay(selectedOrder) <= 0}
+                  onClick={() => setDepositReceivedInput(formatVndDigits(depositRequiredDisplay(selectedOrder)))}
+                  className="mt-1.5 text-sm font-medium text-blue-700 hover:underline disabled:opacity-50"
+                >
+                  Điền số cần cọc ({formatVnd(depositRequiredDisplay(selectedOrder))})
+                </button>
+              </div>
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-700">Đã nhận cọc</span>
+                  <span className="font-semibold tabular-nums text-emerald-700">{formatVnd(depositModalReceived)}</span>
+                </div>
+                <div className="flex justify-between gap-3 mt-1">
+                  <span className="text-gray-800 font-medium">Cần thanh toán khi nhận hàng</span>
+                  <span className="font-semibold tabular-nums text-red-700">{formatVnd(depositModalRemaining)}</span>
+                </div>
+                {depositReceivedInput !== '' && depositModalReceived > depositModalTotal ? (
+                  <p className="mt-2 text-red-700">Số tiền đã nhận không được lớn hơn tổng đơn.</p>
+                ) : null}
+              </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium mb-1">Ghi chú</label>
+                <label htmlFor="deposit-confirm-note" className="block text-sm font-medium mb-1">Ghi chú</label>
                 <textarea
+                  id="deposit-confirm-note"
                   rows={3}
-                  placeholder="Ghi chú..."
+                  placeholder="Ghi chú (không bắt buộc)"
                   value={paymentNote}
+                  disabled={confirmingDeposit}
                   onChange={(e) => setPaymentNote(e.target.value)}
                   className="w-full border rounded-lg px-3 py-2"
                 />
               </div>
               <div className="flex flex-wrap gap-2 justify-end">
-                <button onClick={() => setPaymentOpen(false)} className="px-4 py-2 border rounded-lg hover:bg-gray-50">Hủy</button>
+                <button
+                  type="button"
+                  disabled={confirmingDeposit}
+                  onClick={closePaymentModal}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Hủy
+                </button>
                 {orderPayments.length === 0 ? (
                   <button
-                    onClick={handleConfirmDepositManual}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                    type="button"
+                    disabled={confirmingDeposit || loadingPayments || depositModalAmountInvalid}
+                    onClick={() => void handleConfirmDepositManual()}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                   >
-                    Xác nhận cọc
+                    {confirmingDeposit ? 'Đang xác nhận…' : 'Xác nhận'}
                   </button>
                 ) : (
                   <>
                     <button
+                      type="button"
+                      disabled={confirmingDeposit || loadingPayments}
                       onClick={() => {
                         const p = orderPayments.find((x) => x.payment_status === 'pending') || orderPayments[0];
-                        if (p) handleConfirmDeposit(selectedOrder.id, p.id, false, paymentNote);
+                        if (p) void handleConfirmDeposit(selectedOrder.id, p.id, false, paymentNote);
                       }}
-                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
                     >
                       Từ chối cọc
                     </button>
                     <button
+                      type="button"
+                      disabled={confirmingDeposit || loadingPayments || depositModalAmountInvalid}
                       onClick={() => {
                         const p = orderPayments.find((x) => x.payment_status === 'pending') || orderPayments[0];
-                        if (p) handleConfirmDeposit(selectedOrder.id, p.id, true, paymentNote);
+                        if (p) void handleConfirmDeposit(selectedOrder.id, p.id, true, paymentNote);
                       }}
-                      className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]"
+                      className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c] disabled:opacity-50"
                     >
-                      Xác nhận đã nhận cọc
+                      {confirmingDeposit ? 'Đang xác nhận…' : 'Xác nhận'}
                     </button>
                   </>
                 )}
