@@ -19,8 +19,14 @@ import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPric
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing, stackedSaleProgramLabel } from '@/lib/site-sale';
 import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
-import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
-import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
+import {
+  applyGoogleAutomatedDiscountToPricing,
+  GOOGLE_SHOPPING_PRICE_LABEL,
+  GOOGLE_SHOPPING_PROGRAM_NAME,
+  googleShoppingDiscountNote,
+  googleShoppingSavingsLine,
+  type GoogleAutomatedDiscountSsrPayload,
+} from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
@@ -425,7 +431,7 @@ export default function ProductInfo({
   return (
     <div className={`md:pb-20 ${compactMobile ? 'space-y-3' : 'space-y-4'}`}>
       <BirthdayPromoBanner
-        active={birthdayDiscount.active}
+        active={birthdayOnPdp}
         percent={birthdayDiscount.percent}
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
         compact
@@ -506,8 +512,8 @@ export default function ProductInfo({
           birthdayActive={birthdayOnPdp}
           birthdayPercent={birthdayDiscount.percent}
           clearanceHighlight={isClearancePdp}
-          promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
-          activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
+          promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? GOOGLE_SHOPPING_PROGRAM_NAME : null}
+          activePriceLabel={googleDiscount ? GOOGLE_SHOPPING_PRICE_LABEL : null}
           suppressSiteSaleBanners={!!googleDiscount}
           isFlashSale={!googleDiscount && pricing.isFlashSale}
           discountCapped={!googleDiscount && pricing.discountCapped}
@@ -515,7 +521,9 @@ export default function ProductInfo({
         />
         {googleDiscount ? (
           <p className="mt-2 text-xs text-emerald-800">
-            Giá ưu đãi từ quảng cáo Google Shopping — áp dụng khi mua trong phiên này.
+            {googleShoppingDiscountNote(
+              pricing.savingsAmount > 0 ? formatPrice(pricing.savingsAmount) : null,
+            )}
           </p>
         ) : googleDiscountError ? (
           <p className="mt-2 text-xs text-red-700">
@@ -581,7 +589,9 @@ export default function ProductInfo({
           <span className="text-lg font-bold text-[#ea580c]">{formatPrice(displayPrice * quantity)}</span>
           {pricing.savingsAmount > 0 || (pricing.sitePhase === 'teaser' && pricing.sitePercent > 0) ? (
             <p className="text-[11px] font-medium text-emerald-600">
-              {pricing.sitePhase === 'teaser'
+              {googleDiscount
+                ? googleShoppingSavingsLine(formatPrice(pricing.savingsAmount * quantity))
+                : pricing.sitePhase === 'teaser'
                 ? `${pricing.siteLabel}: tiết kiệm dự kiến ~${formatPrice(pricing.savingsAmount * quantity)}`
                 : `${stackedSaleProgramLabel({
                     isWarehouse: product.is_warehouse_clearance === true,
@@ -596,7 +606,7 @@ export default function ProductInfo({
       </div>
 
       <BirthdaySavingsCard
-        active={birthdayDiscount.active}
+        active={birthdayOnPdp}
         percent={birthdayDiscount.percent}
         savings={birthdaySavingsAmount * quantity}
         nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}

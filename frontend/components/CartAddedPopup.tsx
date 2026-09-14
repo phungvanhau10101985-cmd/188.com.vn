@@ -8,6 +8,13 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { getOptimizedImage } from '@/lib/image-utils';
 import { resolveCartItemImageUrl } from '@/lib/product-color-variant';
+import { formatPrice } from '@/lib/utils';
+import {
+  getGoogleAutomatedDiscountForProduct,
+  googleDiscountPercentFromPricing,
+  googleShoppingDiscountNote,
+  googleShoppingSavingsLine,
+} from '@/lib/google-automated-discount';
 import {
   markNanoAiCheckoutOnCart,
   releaseNanoAiClickBlockers,
@@ -56,6 +63,24 @@ export default function CartAddedPopup() {
         fallbackStrategy: 'local',
       })
     : getOptimizedImage(undefined, { width: 96, height: 96, fallbackStrategy: 'local' });
+  const googleDiscount = lastAddedItem?.product_data
+    ? getGoogleAutomatedDiscountForProduct(lastAddedItem.product_data)
+    : null;
+  const qty = Math.max(1, lastAddedItem?.quantity ?? 1);
+  const unitPrice = googleDiscount?.price ?? Number(lastAddedItem?.product_data?.price) || 0;
+  const originalPrice = Number(lastAddedItem?.product_data?.original_price);
+  const comparePrice =
+    googleDiscount?.priorPrice != null && googleDiscount.priorPrice > unitPrice
+      ? googleDiscount.priorPrice
+      : Number.isFinite(originalPrice) && originalPrice > unitPrice
+        ? originalPrice
+        : null;
+  const savingsTotal =
+    comparePrice != null && comparePrice > unitPrice ? (comparePrice - unitPrice) * qty : 0;
+  const googlePercent =
+    googleDiscount && comparePrice != null
+      ? googleDiscountPercentFromPricing(comparePrice, unitPrice)
+      : null;
 
   const finishPopup = (opts?: { keepCartCheckoutGuard?: boolean }) => {
     hideAddToCartPopup();
@@ -124,6 +149,12 @@ export default function CartAddedPopup() {
               Đã thêm vào giỏ hàng
             </p>
             <p className="text-xs md:text-sm text-gray-600 truncate">{name}</p>
+            {googleDiscount && savingsTotal > 0 ? (
+              <p className="mt-0.5 text-[11px] font-medium text-emerald-700">
+                {googleShoppingSavingsLine(formatPrice(savingsTotal))}
+                {googlePercent != null ? ` (−${googlePercent}%)` : ''}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -136,6 +167,13 @@ export default function CartAddedPopup() {
             </svg>
           </button>
         </div>
+        {googleDiscount && savingsTotal > 0 ? (
+          <div className="px-3 md:px-4 pb-0">
+            <p className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] font-medium text-emerald-800">
+              {googleShoppingDiscountNote(formatPrice(savingsTotal))}
+            </p>
+          </div>
+        ) : null}
         <div className="p-3 md:p-4 flex flex-col sm:flex-row gap-2">
           <Link
             href="/cart"

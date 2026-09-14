@@ -84,29 +84,25 @@ function depositRequiredDisplay(order: AdminOrder): number {
 }
 
 /**
- * Số tiền khách phải trả khi nhận hàng (COD sau cọc / khi không cọc là cả đơn).
+ * Số tiền khách phải trả khi nhận hàng.
+ * Đã cọc số bất kỳ → còn lại = tổng đơn − đã cọc (không theo %).
+ * Chưa cọc: đơn không cọc = cả đơn; đơn cần cọc = tổng − số cần cọc (chỉ để xem trước).
  */
 function amountDueOnDelivery(order: AdminOrder): number {
   const total = parseMoney(order.total_amount);
   const paidDeposit = parseMoney(order.deposit_paid);
-  const apiRemain = parseMoney(order.remaining_amount);
-  const needDeposit = depositRequiredDisplay(order);
+
+  if (paidDeposit > 0) {
+    return Math.max(0, Math.round(total - paidDeposit));
+  }
 
   if (!adminOrderExpectsDeposit(order)) {
+    const apiRemain = parseMoney(order.remaining_amount);
     if (apiRemain > 0) return Math.max(0, Math.round(apiRemain));
     return Math.max(0, Math.round(total));
   }
 
-  if (paidDeposit <= 0) {
-    return Math.max(0, Math.round(total - needDeposit));
-  }
-
-  if (apiRemain > 0 || paidDeposit >= needDeposit || order.status !== 'waiting_deposit') {
-    const r = apiRemain > 0 ? apiRemain : total - paidDeposit;
-    return Math.max(0, Math.round(r));
-  }
-
-  return Math.max(0, Math.round(total - paidDeposit));
+  return Math.max(0, Math.round(total - depositRequiredDisplay(order)));
 }
 
 /** Link SP public: ưu tiên NEXT_PUBLIC_SITE_URL để admin localhost vẫn mở đúng shop. */

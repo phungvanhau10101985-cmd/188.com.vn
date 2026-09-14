@@ -67,6 +67,8 @@ import type { PromotionVoucherItem } from '@/lib/api-client';
 import {
   getActiveGoogleAutomatedDiscountToken,
   googleDiscountPercentFromPricing,
+  GOOGLE_SHOPPING_PRICE_LABEL,
+  GOOGLE_SHOPPING_PROGRAM_NAME,
   isGoogleDiscountCartLine,
 } from '@/lib/google-automated-discount';
 import {
@@ -1151,7 +1153,7 @@ export default function CartPage() {
                   ? googleDiscountPercentFromPricing(pricing.compareUnitPrice, pricing.displayUnitPrice)
                   : null;
                 const lineProgramName = isGoogleLine
-                  ? 'Google Shopping'
+                  ? GOOGLE_SHOPPING_PROGRAM_NAME
                   : stackedSaleProgramLabel({
                       isWarehouse: isWhLine,
                       isFlash: isFlashLine,
@@ -1202,7 +1204,7 @@ export default function CartPage() {
                                 {item.selected_color && item.product_data?.product_id && ' • '}
                                 {item.product_data?.product_id && `ID: ${item.product_data?.product_id}`}
                                 {isWhLine ? ` • ${WAREHOUSE_SALE_PROGRAM_NAME}` : ''}
-                                {isGoogleLine ? ' • Google Shopping' : ''}
+                                {isGoogleLine ? ` • ${GOOGLE_SHOPPING_PROGRAM_NAME}` : ''}
                               </p>
                             )}
                             <div className="mt-1.5 flex flex-wrap gap-1">
@@ -1229,7 +1231,7 @@ export default function CartPage() {
                               ) : null}
                               {isGoogleLine ? (
                                 <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                                  Google{googleDiscountPercent != null ? ` -${googleDiscountPercent}%` : ''}
+                                  {GOOGLE_SHOPPING_PROGRAM_NAME}{googleDiscountPercent != null ? ` -${googleDiscountPercent}%` : ''}
                                 </span>
                               ) : null}
                               {birthdayLineActive && !isWhLine ? (
@@ -1488,7 +1490,7 @@ export default function CartPage() {
 
             {googleCartSavings > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
-                <span className="text-gray-500">Giá ưu đãi Google Shopping</span>
+                <span className="text-gray-500">{GOOGLE_SHOPPING_PRICE_LABEL}</span>
                 <span className="font-medium text-emerald-600">-{formatPrice(googleCartSavings)}</span>
               </div>
             ) : null}

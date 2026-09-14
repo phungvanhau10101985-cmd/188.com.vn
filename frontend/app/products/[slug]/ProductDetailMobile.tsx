@@ -28,7 +28,12 @@ import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing } from '@/lib/site-sale';
 import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
-import { applyGoogleAutomatedDiscountToPricing } from '@/lib/google-automated-discount';
+import {
+  applyGoogleAutomatedDiscountToPricing,
+  GOOGLE_SHOPPING_PRICE_LABEL,
+  GOOGLE_SHOPPING_PROGRAM_NAME,
+  googleShoppingDiscountNote,
+} from '@/lib/google-automated-discount';
 import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-discount';
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useFlashSale } from '@/lib/use-flash-sale';
@@ -477,7 +482,7 @@ export default function ProductDetailMobile({
 
       <div className="px-4 py-3">
         <BirthdayPromoBanner
-          active={birthdayDiscount.active}
+          active={birthdayOnPdp}
           percent={birthdayDiscount.percent}
           nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
           compact
@@ -516,8 +521,8 @@ export default function ProductDetailMobile({
             birthdayActive={birthdayOnPdp}
             birthdayPercent={birthdayDiscount.percent}
             clearanceHighlight={isClearancePdp}
-            promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? 'Google Shopping' : null}
-            activePriceLabel={googleDiscount ? 'Giá ưu đãi Google' : null}
+            promoLabel={isClearancePdp ? 'Sale thanh lý kho' : googleDiscount ? GOOGLE_SHOPPING_PROGRAM_NAME : null}
+            activePriceLabel={googleDiscount ? GOOGLE_SHOPPING_PRICE_LABEL : null}
             suppressSiteSaleBanners={!!googleDiscount}
             isFlashSale={!googleDiscount && pricing.isFlashSale}
             discountCapped={!googleDiscount && pricing.discountCapped}
@@ -525,7 +530,9 @@ export default function ProductDetailMobile({
           />
           {googleDiscount ? (
             <p className="mt-2 text-xs text-emerald-800">
-              Giá ưu đãi từ quảng cáo Google Shopping.
+              {googleShoppingDiscountNote(
+                pricing.savingsAmount > 0 ? formatPrice(pricing.savingsAmount) : null,
+              )}
             </p>
           ) : googleDiscountError ? (
             <p className="mt-2 text-xs text-red-700">{googleDiscountError}</p>
@@ -533,7 +540,7 @@ export default function ProductDetailMobile({
         </div>
 
         <BirthdaySavingsCard
-          active={birthdayDiscount.active}
+          active={birthdayOnPdp}
           percent={birthdayDiscount.percent}
           savings={birthdaySavingsAmount}
           nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}

@@ -20,6 +20,25 @@ let cachedGoogleDiscountPublicKey: CryptoKey | null | undefined;
 
 export const GOOGLE_AUTOMATED_DISCOUNT_UPDATED_EVENT = '188-google-automated-discount-updated';
 
+/**
+ * Nhãn hiển thị trên web — khớp cách Google Mua sắm trình bày giá chiết khấu
+ * (giá hiện tại, giá gốc gạch, % giảm, số tiền tiết kiệm).
+ * Không dùng «đề xuất / recommended» — Google cấm ngụ ý Google chứng thực sản phẩm.
+ */
+export const GOOGLE_SHOPPING_PROGRAM_NAME = 'Google Mua sắm';
+export const GOOGLE_SHOPPING_PRICE_LABEL = 'Giá chiết khấu Google Mua sắm';
+
+export function googleShoppingDiscountNote(savingsFormatted?: string | null): string {
+  if (savingsFormatted) {
+    return `Giá chiết khấu Google Mua sắm dành cho bạn — tiết kiệm ${savingsFormatted} khi mua trong phiên này.`;
+  }
+  return 'Giá chiết khấu Google Mua sắm dành cho bạn — áp dụng khi mua trong phiên này.';
+}
+
+export function googleShoppingSavingsLine(savingsFormatted: string): string {
+  return `${GOOGLE_SHOPPING_PROGRAM_NAME}: tiết kiệm ${savingsFormatted}`;
+}
+
 function notifyGoogleAutomatedDiscountUpdated(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(GOOGLE_AUTOMATED_DISCOUNT_UPDATED_EVENT));

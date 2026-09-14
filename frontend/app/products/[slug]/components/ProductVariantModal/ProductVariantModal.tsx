@@ -23,6 +23,14 @@ import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProduct
 import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
+import {
+  applyGoogleAutomatedDiscountToPricing,
+  GOOGLE_SHOPPING_PRICE_LABEL,
+  GOOGLE_SHOPPING_PROGRAM_NAME,
+  googleShoppingDiscountNote,
+  googleShoppingSavingsLine,
+} from '@/lib/google-automated-discount';
+import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
 import { warehouseVariantsInStock } from '@/lib/warehouse-clearance';
 
@@ -62,6 +70,7 @@ function VariantModalLineTotal({
   siteLabel,
   isFlashSale,
   birthdayActive,
+  googleDiscount,
   compact,
 }: {
   quantity: number;
@@ -72,18 +81,20 @@ function VariantModalLineTotal({
   siteLabel?: string | null;
   isFlashSale?: boolean;
   birthdayActive?: boolean;
+  googleDiscount?: boolean;
   compact?: boolean;
 }) {
   const subtotal = unitPrice * quantity;
   const savingsTotal = savingsPerUnit * quantity;
   const showSavings =
     savingsTotal > 0 || (sitePhase === 'teaser' && (sitePercent ?? 0) > 0);
-  const programLabel =
-    stackedSaleProgramLabel({
-      isFlash: isFlashSale,
-      siteLabel: siteLabel || null,
-      birthday: birthdayActive,
-    }) || siteLabel || 'Sale';
+  const programLabel = googleDiscount
+    ? GOOGLE_SHOPPING_PROGRAM_NAME
+    : stackedSaleProgramLabel({
+        isFlash: isFlashSale,
+        siteLabel: siteLabel || null,
+        birthday: birthdayActive,
+      }) || siteLabel || 'Sale';
 
   return (
     <div
@@ -102,9 +113,11 @@ function VariantModalLineTotal({
         </span>
         {showSavings ? (
           <p className={`font-medium text-emerald-600 ${compact ? 'text-[10px]' : 'text-[11px]'}`}>
-            {sitePhase === 'teaser'
-              ? `${siteLabel || programLabel}: tiết kiệm dự kiến ~${formatPrice(savingsTotal)}`
-              : `${programLabel}: tiết kiệm ${formatPrice(savingsTotal)}`}
+            {googleDiscount
+              ? googleShoppingSavingsLine(formatPrice(savingsTotal))
+              : sitePhase === 'teaser'
+                ? `${siteLabel || programLabel}: tiết kiệm dự kiến ~${formatPrice(savingsTotal)}`
+                : `${programLabel}: tiết kiệm ${formatPrice(savingsTotal)}`}
           </p>
         ) : null}
       </div>
@@ -225,19 +238,34 @@ export default function ProductVariantModal({
       ),
     [product, siteSaleState, flashById],
   );
-  const pricing = resolveProductDisplayPricing(
-    productForPricing,
-    birthdayDiscount.active && product.is_warehouse_clearance !== true,
-    birthdayDiscount.percent,
+  const { record: googleDiscount } = useGoogleAutomatedDiscount(product.product_id, product);
+  const pricingBase = useMemo(
+    () =>
+      resolveProductDisplayPricing(
+        productForPricing,
+        birthdayDiscount.active && product.is_warehouse_clearance !== true,
+        birthdayDiscount.percent,
+      ),
+    [productForPricing, birthdayDiscount.active, birthdayDiscount.percent, product.is_warehouse_clearance],
+  );
+  const pricing = useMemo(
+    () =>
+      applyGoogleAutomatedDiscountToPricing(
+        product.product_id,
+        pricingBase,
+        product,
+        googleDiscount,
+      ),
+    [product, pricingBase, googleDiscount],
   );
   const displayPrice = pricing.displayPrice;
-  const birthdayOnPdp = birthdayDiscount.active && product.is_warehouse_clearance !== true;
+  const birthdayOnPdp = !googleDiscount && product.is_warehouse_clearance !== true && birthdayDiscount.active;
   const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
-  const promoSavingsAmount = pricing.savingsAmount * effectiveQuantity;
+  const googleSavingsAmount = googleDiscount ? pricing.savingsAmount : 0;
   const loyaltyDiscountPercent = loyaltyStatus?.current_tier?.discount_percent || 0;
   const loyaltyDiscountAmount = applyCatalogStackedDiscount({
     listPrice: pricing.listPrice,
-    afterLinePrograms: pricing.beforeBirthday,
+    afterLinePrograms: googleDiscount ? displayPrice : pricing.beforeBirthday,
     birthdayActive: birthdayOnPdp,
     birthdayPercent: birthdayDiscount.percent,
     loyaltyPercent: loyaltyDiscountPercent,
@@ -442,16 +470,26 @@ export default function ProductVariantModal({
                 compareUnitPrice={pricing.compareUnitPrice}
                 savingsAmount={pricing.savingsAmount}
                 expectedSalePrice={pricing.expectedSalePrice}
-                sitePhase={pricing.sitePhase}
-                sitePercent={pricing.sitePercent}
-                siteLabel={pricing.siteLabel}
-                countdownTo={pricing.countdownTo}
+                sitePhase={googleDiscount ? null : pricing.sitePhase}
+                sitePercent={googleDiscount ? 0 : pricing.sitePercent}
+                siteLabel={googleDiscount ? null : pricing.siteLabel}
+                countdownTo={googleDiscount ? null : pricing.countdownTo}
                 birthdayActive={birthdayOnPdp}
                 birthdayPercent={birthdayDiscount.percent}
-                isFlashSale={pricing.isFlashSale}
-                discountCapped={pricing.discountCapped}
+                isFlashSale={!googleDiscount && pricing.isFlashSale}
+                discountCapped={!googleDiscount && pricing.discountCapped}
+                promoLabel={googleDiscount ? GOOGLE_SHOPPING_PROGRAM_NAME : null}
+                activePriceLabel={googleDiscount ? GOOGLE_SHOPPING_PRICE_LABEL : null}
+                suppressSiteSaleBanners={!!googleDiscount}
                 size="sm"
               />
+              {googleDiscount ? (
+                <p className="mt-1.5 text-[11px] font-medium text-emerald-800">
+                  {googleShoppingDiscountNote(
+                    googleSavingsAmount > 0 ? formatPrice(googleSavingsAmount) : null,
+                  )}
+                </p>
+              ) : null}
               
               {realStock === 0 ? (
                 <p className="text-[11px] font-medium text-red-600 flex items-center gap-1">
@@ -577,11 +615,12 @@ export default function ProductVariantModal({
                     quantity={effectiveQuantity}
                     unitPrice={displayPrice}
                     savingsPerUnit={pricing.savingsAmount}
-                    sitePhase={pricing.sitePhase}
-                    sitePercent={pricing.sitePercent}
-                    siteLabel={pricing.siteLabel}
-                    isFlashSale={pricing.isFlashSale}
+                    sitePhase={googleDiscount ? null : pricing.sitePhase}
+                    sitePercent={googleDiscount ? 0 : pricing.sitePercent}
+                    siteLabel={googleDiscount ? null : pricing.siteLabel}
+                    isFlashSale={!googleDiscount && pricing.isFlashSale}
                     birthdayActive={birthdayOnPdp}
+                    googleDiscount={!!googleDiscount}
                   />
                 ) : null}
               </div>
@@ -611,16 +650,26 @@ export default function ProductVariantModal({
                     compareUnitPrice={pricing.compareUnitPrice}
                     savingsAmount={pricing.savingsAmount}
                     expectedSalePrice={pricing.expectedSalePrice}
-                    sitePhase={pricing.sitePhase}
-                    sitePercent={pricing.sitePercent}
-                    siteLabel={pricing.siteLabel}
-                    countdownTo={pricing.countdownTo}
+                    sitePhase={googleDiscount ? null : pricing.sitePhase}
+                    sitePercent={googleDiscount ? 0 : pricing.sitePercent}
+                    siteLabel={googleDiscount ? null : pricing.siteLabel}
+                    countdownTo={googleDiscount ? null : pricing.countdownTo}
                     birthdayActive={birthdayOnPdp}
                     birthdayPercent={birthdayDiscount.percent}
-                    isFlashSale={pricing.isFlashSale}
-                    discountCapped={pricing.discountCapped}
+                    isFlashSale={!googleDiscount && pricing.isFlashSale}
+                    discountCapped={!googleDiscount && pricing.discountCapped}
+                    promoLabel={googleDiscount ? GOOGLE_SHOPPING_PROGRAM_NAME : null}
+                    activePriceLabel={googleDiscount ? GOOGLE_SHOPPING_PRICE_LABEL : null}
+                    suppressSiteSaleBanners={!!googleDiscount}
                     size="sm"
                   />
+                  {googleDiscount ? (
+                    <p className="mt-1 text-[10px] font-medium text-emerald-800">
+                      {googleShoppingDiscountNote(
+                        googleSavingsAmount > 0 ? formatPrice(googleSavingsAmount) : null,
+                      )}
+                    </p>
+                  ) : null}
                   
                   {realStock === 0 ? (
                     <p className="text-[10px] font-medium text-red-600 flex items-center gap-1">
@@ -755,11 +804,12 @@ export default function ProductVariantModal({
                     quantity={effectiveQuantity}
                     unitPrice={displayPrice}
                     savingsPerUnit={pricing.savingsAmount}
-                    sitePhase={pricing.sitePhase}
-                    sitePercent={pricing.sitePercent}
-                    siteLabel={pricing.siteLabel}
-                    isFlashSale={pricing.isFlashSale}
+                    sitePhase={googleDiscount ? null : pricing.sitePhase}
+                    sitePercent={googleDiscount ? 0 : pricing.sitePercent}
+                    siteLabel={googleDiscount ? null : pricing.siteLabel}
+                    isFlashSale={!googleDiscount && pricing.isFlashSale}
                     birthdayActive={birthdayOnPdp}
+                    googleDiscount={!!googleDiscount}
                     compact
                   />
                 ) : null}
@@ -771,20 +821,27 @@ export default function ProductVariantModal({
         {/* Sticky action buttons */}
         <div className="sticky bottom-0 z-10 bg-white border-t border-gray-200 p-3">
           <BirthdayPromoBanner
-            active={birthdayDiscount.active}
+            active={birthdayOnPdp}
             percent={birthdayDiscount.percent}
             nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
             compact
             className="mb-3 p-3"
           />
           <BirthdaySavingsCard
-            active={birthdayDiscount.active}
+            active={birthdayOnPdp}
             percent={birthdayDiscount.percent}
             savings={birthdaySavingsAmount * effectiveQuantity}
             nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
             compact
             className="mb-3"
           />
+          {googleDiscount && googleSavingsAmount > 0 ? (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mb-3 text-center">
+              <span className="text-xs text-emerald-800 font-medium">
+                {googleShoppingSavingsLine(formatPrice(googleSavingsAmount * effectiveQuantity))}
+              </span>
+            </div>
+          ) : null}
           {/* Loyalty Discount Message */}
           {isAuthenticated && loyaltyDiscountAmount > 0 && (
             <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 mb-3 text-center">
