@@ -67,7 +67,7 @@ export default function CartAddedPopup() {
     ? getGoogleAutomatedDiscountForProduct(lastAddedItem.product_data)
     : null;
   const qty = Math.max(1, lastAddedItem?.quantity ?? 1);
-  const unitPrice = googleDiscount?.price ?? Number(lastAddedItem?.product_data?.price) || 0;
+  const unitPrice = (googleDiscount?.price ?? Number(lastAddedItem?.product_data?.price)) || 0;
   const originalPrice = Number(lastAddedItem?.product_data?.original_price);
   const comparePrice =
     googleDiscount?.priorPrice != null && googleDiscount.priorPrice > unitPrice
