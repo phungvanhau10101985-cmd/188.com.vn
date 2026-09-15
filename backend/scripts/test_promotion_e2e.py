@@ -201,7 +201,9 @@ def main() -> None:
             ok(f"THANKYOU188 granted after first delivery")
 
         # 7. Daily cron (no HTTP — service layer)
-        cron_result = run_daily_promotion_cron(db, include_birthday_emails=False)
+        cron_result = run_daily_promotion_cron(
+            db, include_birthday_emails=False, include_review_reminders=False
+        )
         if "voucher_grants" not in cron_result:
             fail("Cron missing voucher_grants")
         ok(

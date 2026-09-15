@@ -690,6 +690,28 @@ async def startup_event():
         print(f"   ⚠️  EMS tracking refresh worker startup: {_e_ems_r}")
 
     try:
+        from app.services.review_reminder import start_review_reminder_scheduler_if_enabled
+
+        start_review_reminder_scheduler_if_enabled()
+        from app.core.config import settings as _review_reminder_settings
+
+        if getattr(_review_reminder_settings, "REVIEW_REMINDER_ENABLED", True):
+            if getattr(_review_reminder_settings, "REVIEW_REMINDER_INTERNAL_SCHEDULER_ENABLED", True):
+                print(
+                    "   ⭐ REVIEW_REMINDER: nhắc đánh giá đơn giao 3–7 ngày chưa review "
+                    f"(scheduler mỗi {_review_reminder_settings.REVIEW_REMINDER_INTERNAL_INTERVAL_HOURS}h)."
+                )
+            else:
+                print(
+                    "   ⭐ REVIEW_REMINDER: bật, scheduler nội bộ tắt — dùng cron "
+                    "/api/v1/orders/cron/send-review-reminders hoặc /promotions/cron/daily-all."
+                )
+        else:
+            print("   ⭐ REVIEW_REMINDER: tắt (REVIEW_REMINDER_ENABLED=false).")
+    except Exception as _e_rr:
+        print(f"   ⚠️  review reminder scheduler startup: {_e_rr}")
+
+    try:
         from app.services.home_hero_category_startup import start_home_hero_cache_daemon_if_needed
 
         start_home_hero_cache_daemon_if_needed(delay_seconds=4.0)

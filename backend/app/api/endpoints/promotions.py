@@ -352,7 +352,8 @@ def cron_daily_all_promotions(
 ):
     """
     Cron gộp hàng ngày — khuyến nghị 1 dòng crontab duy nhất:
-    voucher grants (cart/comeback/welcome backfill) + email CMSN sinh nhật.
+    voucher grants (cart/comeback/welcome backfill) + email CMSN sinh nhật
+    + nhắc đánh giá đơn đã giao 3–7 ngày chưa review.
     Authorization: Bearer CRON_SECRET
     """
     _require_cron_secret(authorization)
@@ -363,6 +364,7 @@ def cron_daily_all_promotions(
         include_welcome_backfill=True,
         include_birthday_emails=True,
         include_marketing_banners=True,
+        include_review_reminders=True,
     )
     return AdminDailyPromotionCronResponse(**result)
 

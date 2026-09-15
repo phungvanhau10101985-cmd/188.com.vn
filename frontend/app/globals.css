@@ -20,6 +20,14 @@ html {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color-scheme: only light;
+}
+
+@media (max-width: 767px) {
+  /* Nền html cam: status bar trong suốt / overscroll phía trên không lộ xám */
+  html {
+    background-color: #f97316;
+  }
 }
 
 body {

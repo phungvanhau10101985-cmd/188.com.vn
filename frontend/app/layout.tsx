@@ -53,11 +53,18 @@ const CDN_ORIGIN = getCdnPublicBase();
 
 // Fonts: next/font — tối ưu tải, giảm CSS chặn render và CLS so với @fontsource toàn trang.
 
-// Viewport configuration cho PWA ready
+// Viewport: thanh giờ / status bar trùng màu header cam.
+// Cần cả light + dark — Chrome Android dark mode bỏ theme-color sáng nếu thiếu bản dark.
+const STATUS_BAR_COLOR = "#f97316";
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#ea580c",
+  colorScheme: "light",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: STATUS_BAR_COLOR },
+    { media: "(prefers-color-scheme: dark)", color: STATUS_BAR_COLOR },
+  ],
   viewportFit: "cover",
 };
 

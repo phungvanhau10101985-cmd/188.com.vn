@@ -37,6 +37,7 @@ from app.services import shop_return_confirm as shop_return_confirm_svc
 from app.services import ems_import_sample_templates as ems_sample_tpl_svc
 from app.services import checkout_fulfillment as checkout_fulfillment_svc
 from app.services import deposit_sla as deposit_sla_svc
+from app.services import review_reminder as review_reminder_svc
 from app.schemas import order_shipment as shipment_schemas
 
 
@@ -1640,6 +1641,20 @@ def cron_process_deposit_sla(
 ):
     _require_shipment_cron_secret(authorization)
     return deposit_sla_svc.process_deposit_sla(db)
+
+
+@router.get("/cron/send-review-reminders")
+def cron_send_review_reminders(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """
+    Nhắc đánh giá: đơn đã giao 3–7 ngày, còn sản phẩm chưa review, mỗi đơn một lần.
+    Gọi hàng ngày (hoặc gộp trong /promotions/cron/daily-all). Ví dụ:
+      15 9 * * * curl -H "Authorization: Bearer $CRON_SECRET" .../orders/cron/send-review-reminders
+    """
+    _require_shipment_cron_secret(authorization)
+    return review_reminder_svc.run_review_reminder_batch(db)
 
 
 @router.get("/cron/refresh-ems-tracking", response_model=shipment_schemas.EmsTrackingRefreshEnqueueResponse)

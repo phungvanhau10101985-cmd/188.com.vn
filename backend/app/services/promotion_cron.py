@@ -41,8 +41,9 @@ def run_daily_promotion_cron(
     include_welcome_backfill: bool = True,
     include_birthday_emails: bool = True,
     include_marketing_banners: bool = True,
+    include_review_reminders: bool = True,
 ) -> Dict[str, Any]:
-    """Cron gộp: tặng mã ví, email CMSN và chuẩn bị banner AI."""
+    """Cron gộp: tặng mã ví, email CMSN, banner AI, nhắc đánh giá đơn chưa review."""
     out: Dict[str, Any] = {
         "voucher_grants": run_daily_voucher_grants(
             db,
@@ -56,4 +57,8 @@ def run_daily_promotion_cron(
     if include_marketing_banners:
         # Mỗi lần cron chỉ tạo tối đa 1 ảnh Gemini — tránh Cloudflare 524 và kẹt worker.
         out["marketing_banners"] = ensure_daily_banners(db, max_create=1)
+    if include_review_reminders:
+        from app.services.review_reminder import run_review_reminder_batch
+
+        out["review_reminders"] = run_review_reminder_batch(db)
     return out

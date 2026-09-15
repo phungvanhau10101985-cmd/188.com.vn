@@ -41,7 +41,8 @@ export default function AdminPromotionsPage() {
   "http://127.0.0.1:8001/api/v1/promotions/cron/daily-banners"`}
         </pre>
         <p className="text-xs text-gray-500">
-          Endpoint gộp: CARTSAVE188 + COMEBACK10 + backfill WELCOME + email sinh nhật (7 ngày trước SN).
+          Endpoint gộp: CARTSAVE188 + COMEBACK10 + backfill WELCOME + email sinh nhật (7 ngày trước SN)
+          + nhắc đánh giá đơn đã giao 3–7 ngày chưa review.
           Banner AI gọi localhost mỗi 10 phút, mỗi lần tối đa 1 ảnh — tránh timeout Cloudflare 524.
           WELCOME (đăng ký), THANKYOU (giao hàng lần đầu), CMSN giảm giá — chạy tự động trong app, không cần cron.
         </p>

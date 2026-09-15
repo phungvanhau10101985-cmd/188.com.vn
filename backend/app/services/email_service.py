@@ -269,6 +269,86 @@ def send_order_received_confirmed_email_task(order_id: int) -> None:
     send_order_delivered_email_task(order_id, source="customer_confirm")
 
 
+def send_order_review_reminder_email(
+    *,
+    to_email: str,
+    customer_name: str,
+    order_code: str,
+    order_id: int,
+    product_names: Optional[List[str]] = None,
+) -> bool:
+    """Nhắc đánh giá sau khi đã giao hàng — chỉ gọi khi đơn còn sản phẩm chưa review."""
+    to_email = (to_email or "").strip()
+    if not to_email:
+        return False
+
+    name = (customer_name or "Quý khách").strip() or "Quý khách"
+    code = (order_code or "").strip() or f"#{order_id}"
+    fe = (settings.FRONTEND_BASE_URL or "").strip().rstrip("/")
+    review_url = f"{fe}/account/orders/{order_id}/review" if fe else ""
+    detail_url = f"{fe}/account/orders/{order_id}" if fe else ""
+
+    names = [n.strip() for n in (product_names or []) if (n or "").strip()]
+    if len(names) == 1:
+        product_line = f"Sản phẩm: {names[0]}"
+    elif len(names) > 1:
+        shown = ", ".join(names[:3])
+        extra = f" và {len(names) - 3} sản phẩm khác" if len(names) > 3 else ""
+        product_line = f"Sản phẩm: {shown}{extra}"
+    else:
+        product_line = ""
+
+    subject = f"Nhắc đánh giá đơn {code} · 188.com.vn"
+    if settings.EMAIL_SUBJECT_PREFIX:
+        subject = f"{settings.EMAIL_SUBJECT_PREFIX} {subject}"
+
+    hint = (
+        "Bạn đã nhận đơn hàng này cách đây vài ngày. Nếu hài lòng với sản phẩm, "
+        "rất mong bạn dành khoảng một phút đánh giá — ý kiến của bạn giúp khách "
+        "khác chọn hàng và giúp 188.com.vn phục vụ tốt hơn."
+    )
+
+    text_lines = [
+        f"Kính gửi {name},",
+        "",
+        hint,
+        f"Mã đơn hàng: {code}",
+    ]
+    if product_line:
+        text_lines.append(product_line)
+    text_lines.extend(
+        [
+            *(["", f"Đánh giá đơn hàng: {review_url}"] if review_url else []),
+            *(["", f"Xem chi tiết đơn: {detail_url}"] if detail_url else []),
+            "",
+            "Nếu đã đánh giá rồi, xin bỏ qua email này.",
+            "",
+            "Trân trọng,",
+            "188.com.vn",
+        ]
+    )
+    text_body = "\n".join(text_lines)
+
+    review_html = (
+        f'<p><a href="{review_url}">Đánh giá đơn hàng</a></p>' if review_url else ""
+    )
+    detail_html = (
+        f'<p><a href="{detail_url}">Xem chi tiết đơn hàng</a></p>' if detail_url else ""
+    )
+    product_html = f"<p>{html.escape(product_line)}</p>" if product_line else ""
+    html_body = (
+        f"<p>Kính gửi <strong>{html.escape(name)}</strong>,</p>"
+        f"<p>{html.escape(hint)}</p>"
+        f"<p>Mã đơn: <strong>{html.escape(code)}</strong></p>"
+        f"{product_html}"
+        f"{review_html}"
+        f"{detail_html}"
+        "<p>Nếu đã đánh giá rồi, xin bỏ qua email này.</p>"
+        "<p>Trân trọng,<br>188.com.vn</p>"
+    )
+    return bool(send_email(to_email, subject, text_body, html_body))
+
+
 def send_order_shipper_confirmed_email_task(order_id: int) -> None:
     """Email khi shop đóng hàng & gửi shipper — kèm link đơn và nhắc đánh giá sau khi nhận."""
     from sqlalchemy.orm import joinedload

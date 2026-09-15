@@ -107,6 +107,7 @@ class Order(Base):
     confirmed_at = Column(DateTime(timezone=True))
     shipped_at = Column(DateTime(timezone=True))
     delivered_at = Column(DateTime(timezone=True))
+    review_reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True))
     cancelled_at = Column(DateTime(timezone=True))
     returned_at = Column(DateTime(timezone=True))

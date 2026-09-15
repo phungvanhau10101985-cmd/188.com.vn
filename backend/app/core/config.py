@@ -502,6 +502,29 @@ class Settings:
         self.ORDER_SHIPPER_NOTIFY_ENABLED: bool = os.getenv(
             "ORDER_SHIPPER_NOTIFY_ENABLED", "True"
         ).strip().lower() not in ("0", "false", "no", "off")
+        # Mail nhắc đánh giá: đơn đã giao 3–7 ngày, còn sản phẩm chưa review.
+        self.REVIEW_REMINDER_ENABLED: bool = os.getenv(
+            "REVIEW_REMINDER_ENABLED", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
+        self.REVIEW_REMINDER_MIN_DAYS: int = max(
+            1,
+            int(os.getenv("REVIEW_REMINDER_MIN_DAYS", "3") or "3"),
+        )
+        self.REVIEW_REMINDER_MAX_DAYS: int = max(
+            self.REVIEW_REMINDER_MIN_DAYS,
+            int(os.getenv("REVIEW_REMINDER_MAX_DAYS", "7") or "7"),
+        )
+        self.REVIEW_REMINDER_BATCH_SIZE: int = max(
+            1,
+            int(os.getenv("REVIEW_REMINDER_BATCH_SIZE", "40") or "40"),
+        )
+        self.REVIEW_REMINDER_INTERNAL_SCHEDULER_ENABLED: bool = os.getenv(
+            "REVIEW_REMINDER_INTERNAL_SCHEDULER_ENABLED", "True"
+        ).strip().lower() not in ("0", "false", "no", "off")
+        self.REVIEW_REMINDER_INTERNAL_INTERVAL_HOURS: int = max(
+            1,
+            int(os.getenv("REVIEW_REMINDER_INTERNAL_INTERVAL_HOURS", "6") or "6"),
+        )
         self.EMS_TRACKING_STALE_HOURS: int = max(
             1,
             int(os.getenv("EMS_TRACKING_STALE_HOURS", "24") or "24"),
