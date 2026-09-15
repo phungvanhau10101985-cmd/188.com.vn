@@ -378,8 +378,7 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
     !isAdminPage &&
     !isProductDetailPage &&
     !isShopVideoFeedPage &&
-    !isCartAddLandingPage &&
-    !isMobileSearchComposePage;
+    !isCartAddLandingPage;
 
   return (
     <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>

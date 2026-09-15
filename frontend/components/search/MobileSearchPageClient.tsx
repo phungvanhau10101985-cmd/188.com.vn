@@ -174,7 +174,12 @@ export default function MobileSearchPageClient() {
   useEffect(() => {
     const apply = () => {
       const vv = window.visualViewport;
-      setViewportHeight(vv ? Math.round(vv.height) : window.innerHeight);
+      const raw = vv ? Math.round(vv.height) : window.innerHeight;
+      const isDesktop = window.matchMedia('(min-width: 768px)').matches;
+      const keyboardOpen = window.innerHeight - raw > 80;
+      /** Chừa thanh điều hướng đáy (h-12) khi không bị bàn phím che. */
+      const navReserve = !isDesktop && !keyboardOpen ? 48 : 0;
+      setViewportHeight(Math.max(0, raw - navReserve));
     };
     apply();
     const vv = window.visualViewport;
@@ -446,8 +451,8 @@ export default function MobileSearchPageClient() {
 
   return (
       <div
-        className="fixed inset-0 z-[200] flex flex-col bg-gray-50"
-        style={viewportHeight ? { height: viewportHeight } : { height: '100dvh' }}
+        className="fixed inset-x-0 top-0 z-[200] flex flex-col bg-gray-50 bottom-12 md:bottom-0"
+        style={viewportHeight ? { height: viewportHeight } : undefined}
       >
         <header className="shrink-0 border-b border-gray-100 bg-white pt-[env(safe-area-inset-top,0px)]">
           <form
@@ -518,7 +523,7 @@ export default function MobileSearchPageClient() {
           </form>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-50 pb-[max(16px,env(safe-area-inset-bottom))]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-50 pb-4 md:pb-[max(16px,env(safe-area-inset-bottom))]">
           <div className="mx-auto w-full max-w-3xl px-3 pt-3 sm:px-4 md:pt-5">
           {historyError && (
             <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
