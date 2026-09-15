@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { imageUrlToFile, looksLikeHttpUrl } from '@/lib/image-from-url';
 import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
@@ -8,6 +9,8 @@ import { storePendingImageAndNavigate } from '@/lib/nanoai-pending-image';
 interface DesktopImageSearchPopoverProps {
   /** Class cho nút máy ảnh (absolute positioning do form cha xử lý) */
   triggerButtonClassName?: string;
+  triggerIconClassName?: string;
+  wrapperClassName?: string;
   /** z-index cho panel (thanh sticky cần cao hơn header) */
   panelZClass?: string;
   /** Mount sau lazy-load: mở panel ngay (giữ UX một lần bấm máy ảnh). */
@@ -19,30 +22,87 @@ interface DesktopImageSearchPopoverProps {
   triggerPosition?: 'overlay-right' | 'inline-end';
 }
 
+const PANEL_WIDTH_PX = 320;
+const PANEL_VIEWPORT_GAP = 8;
+
+function clampPanelLeft(triggerRight: number, viewportWidth: number): number {
+  const width = Math.min(PANEL_WIDTH_PX, viewportWidth - PANEL_VIEWPORT_GAP * 2);
+  let left = triggerRight - width;
+  if (left < PANEL_VIEWPORT_GAP) left = PANEL_VIEWPORT_GAP;
+  if (left + width > viewportWidth - PANEL_VIEWPORT_GAP) {
+    left = Math.max(PANEL_VIEWPORT_GAP, viewportWidth - width - PANEL_VIEWPORT_GAP);
+  }
+  return left;
+}
+
 /**
- * Desktop: nút máy ảnh mở panel — một khung dán ảnh/link + kéo thả + chọn file.
- * Dùng trong Header và thanh Navigation sticky.
+ * Nút máy ảnh mở panel — một khung dán ảnh/link + kéo thả + chọn file.
+ * Dùng chung header desktop, header mobile và trang /tim-kiem.
  */
 export default function DesktopImageSearchPopover({
   triggerButtonClassName = 'text-gray-500 hover:text-[#ea580c] p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40',
-  panelZClass = 'z-[100]',
+  triggerIconClassName = 'w-5 h-5',
+  wrapperClassName,
+  panelZClass = 'z-[5000]',
   initialOpen = false,
   triggerPosition = 'overlay-right',
 }: DesktopImageSearchPopoverProps) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const lastAutoFetchedUrlRef = useRef<string | null>(null);
   const [open, setOpen] = useState(initialOpen);
   const [panelError, setPanelError] = useState<string | null>(null);
   const [panelBusy, setPanelBusy] = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState('');
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  const wrapClass =
+    wrapperClassName ??
+    (triggerPosition === 'inline-end'
+      ? 'relative inline-flex shrink-0 items-center'
+      : 'absolute right-11 top-1/2 -translate-y-1/2');
+
+  const updatePanelPos = useCallback(() => {
+    const el = anchorRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const width = Math.min(PANEL_WIDTH_PX, vw - PANEL_VIEWPORT_GAP * 2);
+    setPanelPos({
+      top: r.bottom + 8,
+      left: clampPanelLeft(r.right, vw),
+      width,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    updatePanelPos();
+    window.addEventListener('resize', updatePanelPos);
+    window.addEventListener('scroll', updatePanelPos, true);
+    return () => {
+      window.removeEventListener('resize', updatePanelPos);
+      window.removeEventListener('scroll', updatePanelPos, true);
+    };
+  }, [open, updatePanelPos]);
 
   useEffect(() => {
     if (!open) return;
+    let armed = false;
+    const armId = window.setTimeout(() => {
+      armed = true;
+    }, 80);
     const onDoc = (e: MouseEvent) => {
-      if (anchorRef.current?.contains(e.target as Node)) return;
+      if (!armed) return;
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -51,6 +111,7 @@ export default function DesktopImageSearchPopover({
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
     return () => {
+      window.clearTimeout(armId);
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onKey);
     };
@@ -142,7 +203,7 @@ export default function DesktopImageSearchPopover({
     [router]
   );
 
-  const pasteImageFromClipboard = (e: React.ClipboardEvent) => {
+  const pasteImageFromClipboard = (e: { clipboardData: DataTransfer | null; preventDefault: () => void }) => {
     const cd = e.clipboardData;
     if (!cd) return false;
     for (const it of Array.from(cd.items)) {
@@ -165,6 +226,31 @@ export default function DesktopImageSearchPopover({
     return false;
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as Node | null;
+      if (target && panelRef.current?.contains(target)) return;
+      if (pasteImageFromClipboard(e)) return;
+      const ae = document.activeElement as HTMLElement | null;
+      const isOtherFormField =
+        ae &&
+        (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable) &&
+        ae !== urlInputRef.current;
+      if (isOtherFormField) return;
+      const text = e.clipboardData?.getData('text/plain')?.trim() ?? '';
+      if (looksLikeHttpUrl(text)) {
+        e.preventDefault();
+        setImageUrlInput(text);
+        void fetchUrlAndNavigate(text);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pasteImageFromClipboard đóng trên runPendingNavigate
+  }, [open, fetchUrlAndNavigate, runPendingNavigate]);
+
   const onDropZonePaste = (e: React.ClipboardEvent) => {
     if (e.target === urlInputRef.current) return;
     if (pasteImageFromClipboard(e)) return;
@@ -186,6 +272,87 @@ export default function DesktopImageSearchPopover({
     if (f?.type.startsWith('image/')) void runPendingNavigate(f);
   };
 
+  const panel =
+    open &&
+    panelPos &&
+    typeof document !== 'undefined' &&
+    createPortal(
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tìm kiếm bằng ảnh"
+        className={`fixed ${panelZClass} rounded-xl border border-gray-200 bg-white shadow-xl shadow-black/15 p-4 text-left`}
+        style={{ top: panelPos.top, left: panelPos.left, width: panelPos.width }}
+      >
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <h2 className="text-sm font-bold text-gray-900 leading-tight">Tìm theo ảnh</h2>
+          <button
+            type="button"
+            className="text-gray-400 hover:text-gray-700 text-lg leading-none px-1 rounded focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30"
+            aria-label="Đóng"
+            onClick={() => setOpen(false)}
+          >
+            ×
+          </button>
+        </div>
+        <div
+          onPaste={onDropZonePaste}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={onDrop}
+          className="rounded-xl border-2 border-dashed border-[#ea580c]/80 bg-orange-50/50 px-4 py-4 text-center"
+          aria-label="Dán ảnh hoặc kéo thả file ảnh vào đây"
+        >
+          <span className="font-semibold text-sm text-gray-900">Dán ảnh hoặc link</span>
+          <span className="block mt-1.5 text-xs text-gray-600 leading-relaxed">
+            <strong className="font-medium text-gray-800">Ctrl+V</strong> dán ảnh vào khung hoặc{' '}
+            <strong className="font-medium text-gray-800">kéo thả</strong> ảnh — dán link vào ô bên dưới.
+          </span>
+          <input
+            ref={urlInputRef}
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            placeholder="https://…"
+            value={imageUrlInput}
+            disabled={panelBusy}
+            onChange={(e) => {
+              setImageUrlInput(e.target.value);
+              setPanelError(null);
+            }}
+            onPaste={onInputPaste}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                lastAutoFetchedUrlRef.current = null;
+                void fetchUrlAndNavigate(imageUrlInput);
+              }
+            }}
+            className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c] disabled:opacity-50"
+            aria-label="Dán link ảnh https://"
+          />
+          {panelBusy && (
+            <span className="mt-2 inline-block text-xs text-[#ea580c] font-medium">Đang tải ảnh…</span>
+          )}
+          <button
+            type="button"
+            disabled={panelBusy}
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-3 w-full rounded-lg bg-[#ea580c] text-white text-sm font-medium py-2.5 hover:bg-orange-600 disabled:opacity-50"
+          >
+            Chọn ảnh từ máy
+          </button>
+        </div>
+        {panelError && (
+          <p className="mt-2 text-xs text-red-600" role="alert">
+            {panelError}
+          </p>
+        )}
+      </div>,
+      document.body
+    );
+
   return (
     <>
       <input
@@ -196,17 +363,12 @@ export default function DesktopImageSearchPopover({
         aria-hidden
         onChange={onFileChange}
       />
-      <div
-        ref={anchorRef}
-        className={
-          triggerPosition === 'inline-end'
-            ? 'relative inline-flex shrink-0 items-center'
-            : 'absolute right-11 top-1/2 -translate-y-1/2'
-        }
-      >
+      <div ref={anchorRef} className={wrapClass}>
         <button
           type="button"
-          onClick={() => {
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
             setOpen((o) => !o);
             setPanelError(null);
           }}
@@ -216,7 +378,7 @@ export default function DesktopImageSearchPopover({
           aria-haspopup="dialog"
           title="Tìm theo ảnh"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className={triggerIconClassName} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -226,79 +388,8 @@ export default function DesktopImageSearchPopover({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        {open && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Tìm kiếm bằng ảnh"
-            className={`absolute right-0 top-full mt-2 ${panelZClass} w-[min(calc(100vw-2rem),20rem)] rounded-xl border border-gray-200 bg-white shadow-xl shadow-black/15 p-4 text-left`}
-          >
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <h2 className="text-sm font-bold text-gray-900 leading-tight">Tìm theo ảnh</h2>
-              <button
-                type="button"
-                className="text-gray-400 hover:text-gray-700 text-lg leading-none px-1 rounded focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30"
-                aria-label="Đóng"
-                onClick={() => setOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div
-              onPaste={onDropZonePaste}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={onDrop}
-              className="rounded-xl border-2 border-dashed border-[#ea580c]/80 bg-orange-50/50 px-4 py-4 text-center"
-              aria-label="Dán ảnh hoặc kéo thả file ảnh vào đây"
-            >
-              <span className="font-semibold text-sm text-gray-900">Dán ảnh hoặc link</span>
-              <span className="block mt-1.5 text-xs text-gray-600 leading-relaxed">
-                <strong className="font-medium text-gray-800">Ctrl+V</strong> dán ảnh vào khung hoặc{' '}
-                <strong className="font-medium text-gray-800">kéo thả</strong> ảnh — dán link vào ô bên dưới.
-              </span>
-              <input
-                ref={urlInputRef}
-                type="url"
-                inputMode="url"
-                autoComplete="off"
-                placeholder="https://…"
-                value={imageUrlInput}
-                disabled={panelBusy}
-                onChange={(e) => {
-                  setImageUrlInput(e.target.value);
-                  setPanelError(null);
-                }}
-                onPaste={onInputPaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    lastAutoFetchedUrlRef.current = null;
-                    void fetchUrlAndNavigate(imageUrlInput);
-                  }
-                }}
-                className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30 focus:border-[#ea580c] disabled:opacity-50"
-                aria-label="Dán link ảnh https://"
-              />
-              {panelBusy && (
-                <span className="mt-2 inline-block text-xs text-[#ea580c] font-medium">Đang tải ảnh…</span>
-              )}
-              <button
-                type="button"
-                disabled={panelBusy}
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-3 w-full rounded-lg bg-[#ea580c] text-white text-sm font-medium py-2.5 hover:bg-orange-600 disabled:opacity-50"
-              >
-                Chọn ảnh từ máy
-              </button>
-            </div>
-            {panelError && (
-              <p className="mt-2 text-xs text-red-600" role="alert">
-                {panelError}
-              </p>
-            )}
-          </div>
-        )}
       </div>
+      {panel}
     </>
   );
 }

@@ -12,7 +12,7 @@ import {
 } from '@/lib/kho-sale-menu-category';
 import MobileImageSearchButton from '@/components/search/MobileImageSearchButton';
 import ButtonSpinner from '@/components/ui/ButtonSpinner';
-import { buildMobileSearchHref } from '@/lib/mobile-search-path';
+import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
@@ -67,7 +67,6 @@ export default function MobileHeader({
   const { navigate, markPending, push, isNavigating } = useNavigateWithLoading();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [searchTerm, setSearchTerm] = useState('');
   const [isScrolled, setIsScrolled] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   const [openL1, setOpenL1] = useState<Set<string>>(new Set());
@@ -153,17 +152,8 @@ export default function MobileHeader({
   };
 
   useEffect(() => {
-    if (isHome) {
-      const q = searchParams.get('q') ?? '';
-      setSearchTerm(q);
-    }
-  }, [isHome, searchParams]);
-
-  useEffect(() => {
-    router.prefetch(buildMobileSearchHref());
+    router.prefetch(MOBILE_SEARCH_HREF);
   }, [router]);
-
-  const searchComposeHref = buildMobileSearchHref(searchTerm);
 
   /** Vuốt/nút back: nghe popstate khi panel mở */
   useEffect(() => {
@@ -427,7 +417,7 @@ export default function MobileHeader({
               className={`relative z-[60] flex-1 min-w-0 flex items-stretch rounded-xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06] touch-manipulation ${tightToolbar ? 'h-10 min-h-[40px]' : 'h-11'}`}
             >
               <Link
-                href={searchComposeHref}
+                href={MOBILE_SEARCH_HREF}
                 className="flex flex-1 min-w-0 items-center gap-2 pl-2.5 pr-1 text-left"
                 aria-label="Mở trang tìm kiếm"
               >
@@ -437,17 +427,15 @@ export default function MobileHeader({
                   </svg>
                 </span>
                 <span
-                  className={`flex-1 min-w-0 truncate ${
-                    searchTerm.trim() ? 'text-gray-900' : 'text-gray-500'
-                  } ${tightToolbar ? 'text-sm' : 'text-[15px]'}`}
+                  className={`flex-1 min-w-0 truncate text-gray-500 ${
+                    tightToolbar ? 'text-sm' : 'text-[15px]'
+                  }`}
                 >
-                  {searchTerm.trim()
-                    ? searchTerm
-                    : compactHomeChrome
-                      ? 'Tìm trên 188.COM.VN…'
-                      : tightToolbar
-                        ? 'Tìm trên 188…'
-                        : 'Tìm sản phẩm…'}
+                  {compactHomeChrome
+                    ? 'Tìm trên 188.COM.VN…'
+                    : tightToolbar
+                      ? 'Tìm trên 188…'
+                      : 'Tìm sản phẩm…'}
                 </span>
               </Link>
               <div className="flex h-full shrink-0 self-stretch">
@@ -456,7 +444,7 @@ export default function MobileHeader({
                   iconClassName={`block shrink-0 pointer-events-none ${tightToolbar ? 'size-5' : 'size-6'}`}
                 />
                 <Link
-                  href={searchComposeHref}
+                  href={MOBILE_SEARCH_HREF}
                   className={`flex h-full shrink-0 items-center justify-center rounded-r-xl bg-[#ea580c] text-white hover:bg-[#c2410c] active:bg-orange-800 transition-colors ${tightToolbar ? 'w-10' : 'w-11'}`}
                   aria-label="Mở trang tìm kiếm"
                 >

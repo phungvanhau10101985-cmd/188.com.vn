@@ -595,7 +595,7 @@ export default function Navigation({
                 </Link>
                 <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100 pr-1">
                   <LazyDesktopImageSearchPopover
-                    panelZClass="z-[110]"
+                    panelZClass="z-[5000]"
                     triggerPosition="inline-end"
                     triggerButtonClassName="text-gray-500 hover:text-[#ea580c] p-0.5 rounded-md focus:outline-none focus:ring-2 focus:ring-[#ea580c]/40"
                   />

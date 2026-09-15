@@ -14,7 +14,7 @@ import { getOptimizedImage } from '@/lib/image-utils';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { hasClientAuthUser } from '@/lib/client-auth-session';
-import { buildMobileSearchHref } from '@/lib/mobile-search-path';
+import { buildMobileSearchHref, MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 
 const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
   width: 320,
@@ -32,8 +32,6 @@ interface HeaderProps {
 export default function Header({ cartItemsCount, favoriteItemsCount, initialSearchTerm }: HeaderProps) {
   const searchParams = useSearchParams();
   const qFromUrl = searchParams.get('q') ?? '';
-  const displayQuery = (initialSearchTerm ?? qFromUrl).trim();
-  const searchComposeHref = buildMobileSearchHref(displayQuery);
   const [accountOpen, setAccountOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
@@ -105,18 +103,16 @@ export default function Header({ cartItemsCount, favoriteItemsCount, initialSear
       <div className="relative z-[60]">
         <div className="relative flex items-stretch overflow-hidden rounded-xl bg-white shadow-sm">
           <Link
-            href={searchComposeHref}
+            href={MOBILE_SEARCH_HREF}
             className="flex min-w-0 flex-1 items-center py-3 pl-4 pr-2 text-sm"
             aria-label="Mở trang tìm kiếm"
           >
-            <span className={`truncate ${displayQuery ? 'text-gray-800' : 'text-gray-500'}`}>
-              {displayQuery || 'Tìm kiếm sản phẩm, thương hiệu...'}
-            </span>
+            <span className="truncate text-gray-500">Tìm kiếm sản phẩm, thương hiệu...</span>
           </Link>
           <div className="flex shrink-0 items-center gap-0.5 border-l border-gray-100 pr-1.5">
             <LazyDesktopImageSearchPopover triggerPosition="inline-end" />
             <Link
-              href={searchComposeHref}
+              href={MOBILE_SEARCH_HREF}
               className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 hover:text-[#ea580c]"
               aria-label="Mở trang tìm kiếm"
             >

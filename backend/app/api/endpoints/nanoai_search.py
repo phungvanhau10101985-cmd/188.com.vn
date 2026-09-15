@@ -8,7 +8,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services import nanoai_partner_search as nanoai
 from app.services.nanoai_catalog_enrich import enrich_nanoai_response_body
+from app.services.public_image_fetch import PublicImageFetchError, fetch_public_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,10 @@ router = APIRouter()
 class TextSearchBody(BaseModel):
     q: str = Field(..., min_length=2)
     limit: int = Field(50, ge=1, le=100)
+
+
+class FetchImageBody(BaseModel):
+    url: str = Field(..., min_length=8, max_length=2000)
 
 
 class NanoAiCustomerTokenResponse(BaseModel):
@@ -76,6 +81,16 @@ def _not_configured():
         status_code=503,
         detail="Tìm theo ảnh NanoAI chưa cấu hình (NANOAI_PARTNER_ID / NANOAI_BEARER_TOKEN).",
     )
+
+
+@router.post("/fetch-image")
+def fetch_image(body: FetchImageBody):
+    """Tải ảnh từ URL công khai (dán link) — server fetch để tránh CORS trình duyệt."""
+    try:
+        raw, mime = fetch_public_image_bytes(body.url)
+    except PublicImageFetchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=raw, media_type=mime)
 
 
 @router.post("/image-search")
