@@ -117,6 +117,7 @@ def create_order_with_deposit(
     checkout_group_id: Optional[str] = None,
     split_index: int = 1,
     stock_hold_expires_at: Optional[datetime] = None,
+    meta_ads_context: Optional[Dict] = None,
     commit: bool = True,
 ) -> Order:
     """Create new order with deposit calculation"""
@@ -150,6 +151,7 @@ def create_order_with_deposit(
             checkout_group_id=checkout_group_id,
             split_index=split_index,
             stock_hold_expires_at=stock_hold_expires_at,
+            meta_ads_context=meta_ads_context,
             requires_deposit=requires_deposit,
             deposit_type=deposit_type_enum,
             deposit_percentage=deposit_percentage,

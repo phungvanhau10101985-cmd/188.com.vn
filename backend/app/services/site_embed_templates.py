@@ -192,14 +192,38 @@ def expand_facebook_pixel(pixel_id: str) -> List[PlacementHtml]:
         return []
     # Chỉ init — PageView gửi từ SPA (frontend AnalyticsTracker + CAPI) để tránh 2× PageView
     # (snippet chuẩn Meta có PageView inline + tracker đều bắn → cảnh báo Meta Pixel Helper).
-    snippet = (
+    # Ghi _fbc/_fbp trước khi Pixel load — Purchase CAPI sau cọc vẫn cần click ID đã persist.
+    click_id_bootstrap = (
         "<script>"
+        "(function(){try{var d=document,l=location,c=d.cookie||'',"
+        "sec=(l.protocol==='https:'?';Secure':''),"
+        "max=';path=/;max-age=7776000;SameSite=Lax'+sec;"
+        "function setCk(n,v){d.cookie=n+'='+encodeURIComponent(v)+max}"
+        "function hasCk(n){return c.indexOf(n+'=')!==-1}"
+        "function lsGet(k){try{return localStorage.getItem(k)||''}catch(e){return ''}}"
+        "function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}"
+        "var clid='';try{clid=(new URLSearchParams(l.search).get('fbclid')||'').trim()}catch(e){}"
+        "if(!clid)clid=lsGet('188_meta_fbclid');"
+        "if(clid){lsSet('188_meta_fbclid',clid);if(!hasCk('_fbc')){var fbc=lsGet('188_meta_fbc');"
+        "if(!fbc||fbc.indexOf('.'+clid)<0)fbc='fb.1.'+Math.floor(Date.now()/1000)+'.'+clid;"
+        "setCk('_fbc',fbc);lsSet('188_meta_fbc',fbc);c=d.cookie||''}}"
+        "else{var stored=lsGet('188_meta_fbc');if(stored&&!hasCk('_fbc')){setCk('_fbc',stored);c=d.cookie||''}}"
+        "if(!hasCk('_fbp')){var fbp=lsGet('188_meta_fbp');"
+        "if(!fbp)fbp='fb.1.'+Math.floor(Date.now()/1000)+'.'+String(Math.floor(Math.random()*1e16));"
+        "setCk('_fbp',fbp);lsSet('188_meta_fbp',fbp)}"
+        "}catch(e){}})();"
+        "</script>"
+    )
+    snippet = (
+        click_id_bootstrap
+        + "<script>"
         "!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?"
         "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;"
         "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
         "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
         "(window, document,'script','https://connect.facebook.net/en_US/fbevents.js');"
         # autoConfig: false — chỉ ViewContent thủ công (meta-pixel + CAPI, cùng event_id).
+        f"window.__188FbPixelId='{pid}';"
         f"if(!window.__188FbPixelInit){{window.__188FbPixelInit=1;fbq('init','{pid}',{{}},{{autoConfig:false}});}}"
         "</script>"
         f'<noscript><img height="1" width="1" style="display:none" '

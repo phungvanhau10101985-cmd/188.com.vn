@@ -1,5 +1,7 @@
 'use client';
 
+import { getMetaCapiUserData } from '@/lib/meta-attribution';
+
 export type FacebookCapiPayload = {
   event_name: string;
   event_id?: string;
@@ -10,28 +12,6 @@ export type FacebookCapiPayload = {
   custom_data?: Record<string, unknown>;
   user_data?: Record<string, unknown>;
 };
-
-function readCookieRaw(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const hit = document.cookie.split('; ').find((row) => row.startsWith(`${name}=`));
-  if (!hit) return null;
-  const v = hit.slice(name.length + 1);
-  try {
-    return decodeURIComponent(v);
-  } catch {
-    return v;
-  }
-}
-
-/** fbp / fbc tăng khớp Pixel ↔ CAPI */
-function browserMetaCookiesUserData(): Record<string, string> | undefined {
-  const fbp = readCookieRaw('_fbp');
-  const fbc = readCookieRaw('_fbc');
-  const o: Record<string, string> = {};
-  if (fbp) o.fbp = fbp;
-  if (fbc) o.fbc = fbc;
-  return Object.keys(o).length ? o : undefined;
-}
 
 export function newMetaEventId(prefix: string): string {
   const p = prefix.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 16) || 'e';
@@ -46,9 +26,8 @@ export function newMetaEventId(prefix: string): string {
 }
 
 function buildFacebookCapiBody(payload: FacebookCapiPayload): FacebookCapiPayload {
-  const fromCookies = browserMetaCookiesUserData();
   const mergedUser: Record<string, unknown> = {
-    ...(fromCookies || {}),
+    ...getMetaCapiUserData(),
     ...(payload.user_data && typeof payload.user_data === 'object' ? payload.user_data : {}),
   };
   const user_data = Object.keys(mergedUser).length ? mergedUser : undefined;

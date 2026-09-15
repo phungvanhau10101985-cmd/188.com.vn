@@ -161,6 +161,7 @@ router = APIRouter()
 def create_order(
     order_data: schemas.OrderCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
@@ -169,11 +170,23 @@ def create_order(
     Khách chưa đăng nhập: user_id để trống, không áp dụng giảm giá loyalty.
     """
     try:
+        from app.services.facebook_capi import build_meta_ads_context
+
+        meta_ads_context = build_meta_ads_context(
+            fbp=order_data.meta_fbp,
+            fbc=order_data.meta_fbc,
+            province=order_data.shipping_province,
+            district=order_data.shipping_district,
+            address=order_data.customer_address,
+            request=request,
+            user_id=current_user.id if current_user else None,
+        )
         return checkout_fulfillment_svc.create_checkout_fulfillment(
             db=db,
             order_data=order_data,
             current_user=current_user,
             background_tasks=background_tasks,
+            meta_ads_context=meta_ads_context,
         )
     except Exception:
         db.rollback()

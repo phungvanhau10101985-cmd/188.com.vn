@@ -437,7 +437,10 @@ def test_checkout_rolls_back_both_groups_when_stock_reserve_fails(monkeypatch):
             ],
         )
         with pytest.raises(HTTPException):
-            order_endpoints.create_order(payload, BackgroundTasks(), db, None)
+            dummy_request = MagicMock()
+            dummy_request.headers = {}
+            dummy_request.client = None
+            order_endpoints.create_order(payload, BackgroundTasks(), dummy_request, db, None)
         assert db.query(Order).count() == 0
     finally:
         db.close()

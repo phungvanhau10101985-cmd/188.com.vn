@@ -51,6 +51,8 @@ class Order(Base):
     customer_address = Column(Text, nullable=False)
     shipping_address = Column(Text, nullable=True)  # legacy DB column; copy from customer_address when creating
     customer_note = Column(Text)
+    # fbp/fbc/IP/UA/geo lúc checkout — Purchase CAPI (webhook) vẫn khớp click Meta.
+    meta_ads_context = Column(JSON, nullable=True)
     
     # Thông tin đơn hàng
     subtotal = Column(Numeric(12, 2), default=0)

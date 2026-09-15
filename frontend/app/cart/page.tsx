@@ -15,6 +15,7 @@ import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase, trackMetaInitiateCheckout } from '@/lib/meta-pixel';
+import { getMetaAdsCheckoutFields, patchMetaAdvancedMatching } from '@/lib/meta-attribution';
 import {
   trackTikTokCompletePayment,
   trackTikTokInitiateCheckout,
@@ -203,6 +204,8 @@ export default function CartPage() {
       setSelectedAddressId(defaultAddr.id);
     }
   }, [addresses, selectedAddressId]);
+
+  const selectedAddress = addresses.find((a) => a.id === selectedAddressId);
 
   useEffect(() => {
     if (user) {
@@ -501,6 +504,24 @@ export default function CartPage() {
   }, [cartItems, siteSaleState]);
 
   useEffect(() => {
+    if (!selectedAddress) return;
+    patchMetaAdvancedMatching({
+      fullName: selectedAddress.full_name,
+      phone: selectedAddress.phone,
+      city: selectedAddress.district || selectedAddress.ward,
+      state: selectedAddress.province,
+      country: 'vn',
+    });
+  }, [
+    selectedAddress?.id,
+    selectedAddress?.full_name,
+    selectedAddress?.phone,
+    selectedAddress?.district,
+    selectedAddress?.ward,
+    selectedAddress?.province,
+  ]);
+
+  useEffect(() => {
     if (!isAuthenticated || cartItems.length === 0) return;
     trackGoogleAdsCartPageView(cartItems, cartTotalAll);
     trackTikTokInitiateCheckout({ items: cartItems, value: cartTotalAll });
@@ -547,7 +568,6 @@ export default function CartPage() {
     ? `Chuyển khoản cọc ${DEPOSIT_PERCENT}%`
     : 'Thanh toán khi nhận hàng (COD)';
 
-  const selectedAddress = addresses.find((a) => a.id === selectedAddressId);
   const customerAddressLine = selectedAddress
     ? formatAddressLine(selectedAddress)
     : '';
@@ -785,6 +805,9 @@ export default function CartPage() {
         wallet_amount: useWallet && walletUsable > 0 ? walletUsable : undefined,
         referral_code: referralCode || undefined,
         promo_code: appliedPromo?.code,
+        shipping_province: selectedAddress.province || undefined,
+        shipping_district: selectedAddress.district || undefined,
+        ...getMetaAdsCheckoutFields(),
         items: linesToOrder.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,

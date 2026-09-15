@@ -142,6 +142,11 @@ export interface OrderCreateRequest {
   wallet_amount?: number;
   referral_code?: string;
   promo_code?: string;
+  /** Meta CAPI — lưu fbp/fbc vào đơn để Purchase server-side (webhook cọc) vẫn khớp click. */
+  meta_fbp?: string;
+  meta_fbc?: string;
+  shipping_province?: string;
+  shipping_district?: string;
 }
 
 export interface OrderResponse {

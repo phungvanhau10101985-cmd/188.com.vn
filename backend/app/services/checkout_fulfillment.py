@@ -108,6 +108,7 @@ def create_checkout_fulfillment(
     order_data: schemas.OrderCreate,
     current_user: Optional[models.User],
     background_tasks: BackgroundTasks,
+    meta_ads_context: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Tạo một hoặc hai đơn trong cùng transaction; lỗi bất kỳ sẽ rollback toàn bộ."""
     if not order_data.items:
@@ -351,6 +352,7 @@ def create_checkout_fulfillment(
                 if source == FULFILLMENT_VIETNAM and requires_deposit
                 else None
             ),
+            meta_ads_context=meta_ads_context,
             commit=False,
         )
         created_orders.append(order)
