@@ -16,6 +16,7 @@ import logging
 import math
 import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +53,11 @@ def _is_revoked(token: str) -> bool:
                 .first()
             )
             return hit is not None
+        except Exception:
+            from app.db.retry import safe_rollback
+
+            safe_rollback(db)
+            raise
         finally:
             db.close()
     except Exception as exc:
@@ -71,6 +77,11 @@ def _db_load_snapshot_payload(token: str) -> Optional[Dict[str, Any]]:
                 return None
             pl = row.payload_json
             return dict(pl) if isinstance(pl, dict) else json.loads(pl)
+        except Exception:
+            from app.db.retry import safe_rollback
+
+            safe_rollback(db)
+            raise
         finally:
             db.close()
     except Exception as exc:
@@ -226,6 +237,9 @@ def _reconcile_queue_after_worker_loss(q: Dict[str, Any], token: str) -> bool:
             it["message"] = stale_note
         changed = True
 
+    if _requeue_retryable_db_error_items(q):
+        changed = True
+
     if q.get("current_item_id"):
         q["current_item_id"] = None
         changed = True
@@ -322,6 +336,61 @@ def reconcile_all_queues_on_startup() -> None:
         logger.warning("listing_import_queue startup reconcile failed: %s", exc)
 
 
+def listing_import_outcome_is_retryable(out: Optional[Dict[str, Any]]) -> bool:
+    """True khi lỗi hạ tầng DB (session hỏng / SSL / 8s2b) — nên chạy lại cùng draft 1 lần."""
+    from app.db.retry import is_transient_db_message
+
+    if not out:
+        return False
+    parts = [str(out.get("error") or ""), str(out.get("message") or "")]
+    for err in out.get("errors") or []:
+        parts.append(str(err))
+    return is_transient_db_message(" ".join(parts))
+
+
+def _requeue_retryable_db_error_items(q: Dict[str, Any]) -> int:
+    """Đưa item lỗi session DB về pending — tối đa 1 lần/item (sau deploy / bấm Tiếp tục)."""
+    n = 0
+    for it in q.get("items") or []:
+        if it.get("state") != "error":
+            continue
+        try:
+            already = int(it.get("db_retry_count") or 0)
+        except (TypeError, ValueError):
+            already = 0
+        if already >= 1:
+            continue
+        probe = {
+            "ok": False,
+            "error": it.get("message") or "",
+            "message": it.get("message") or "",
+            "errors": [it.get("message") or ""],
+        }
+        if not listing_import_outcome_is_retryable(probe):
+            continue
+        it["state"] = "pending"
+        it["db_retry_count"] = already + 1
+        it["finished_at"] = None
+        it["message"] = "Chạy lại sau lỗi session DB (rollback)."
+        n += 1
+    return n
+
+
+def _draft_outcome_dict(d: Any, job_id: str) -> Dict[str, Any]:
+    msg = d.message or ""
+    errs = list(d.errors or []) if d.errors else []
+    ok = d.status != "error"
+    return {
+        "ok": ok,
+        "job_id": job_id,
+        "draft_id": d.id,
+        "draft_status": d.status,
+        "message": msg,
+        "errors": errs,
+        "error": None if ok else (msg or "Lỗi"),
+    }
+
+
 def _execute_one_import(
     url: str,
     source: Optional[str],
@@ -330,6 +399,7 @@ def _execute_one_import(
 ) -> Dict[str, Any]:
     """Chạy một job import đồng bộ (như POST /jobs nhưng không BackgroundTasks)."""
     from app.crud import product_import_draft as draft_crud
+    from app.db.retry import safe_rollback
     from app.db.session import SessionLocal
     from app.api.endpoints.import_1688 import (  # noqa: PLC0415
         _infer_import_source_for_url,
@@ -356,15 +426,38 @@ def _execute_one_import(
             created_by=admin_id,
             source=src,
         )
-        draft_id = draft.id
         db.commit()
     except Exception as exc:
-        db.rollback()
+        safe_rollback(db)
         return {"ok": False, "error": str(exc)}
     finally:
         db.close()
 
     _run_import_1688_job(job_id, False)
+
+    def _read_outcome() -> Dict[str, Any]:
+        db_read = SessionLocal()
+        try:
+            d = draft_crud.get_by_job_id(db_read, job_id)
+            if not d:
+                return {"ok": False, "job_id": job_id, "error": "Không đọc lại draft sau import."}
+            return _draft_outcome_dict(d, job_id)
+        except Exception as exc:
+            safe_rollback(db_read)
+            return {"ok": False, "job_id": job_id, "error": str(exc)}
+        finally:
+            db_read.close()
+
+    out = _read_outcome()
+    if not out.get("ok") and listing_import_outcome_is_retryable(out):
+        logger.warning(
+            "listing import retry once job=%s… %s",
+            job_id[:12],
+            (out.get("error") or out.get("message") or "")[:180],
+        )
+        time.sleep(1.5)
+        _run_import_1688_job(job_id, False)
+        out = _read_outcome()
 
     db2 = SessionLocal()
     try:
@@ -401,14 +494,13 @@ def _execute_one_import(
             d.product_data = pdata
             db2.add(d)
             db2.commit()
-        return {
-            "ok": d.status != "error",
-            "job_id": job_id,
-            "draft_id": d.id,
-            "draft_status": d.status,
-            "message": d.message or "",
-            "errors": list(d.errors or []) if d.errors else [],
-        }
+        return _draft_outcome_dict(d, job_id)
+    except Exception as exc:
+        safe_rollback(db2)
+        if out.get("ok"):
+            logger.warning("listing import overlay merge failed job=%s…: %s", job_id[:12], exc)
+            return out
+        return {"ok": False, "job_id": job_id, "error": str(exc)}
     finally:
         db2.close()
 
@@ -659,6 +751,7 @@ def resume(token: str, admin_id: Optional[int]) -> Dict[str, Any]:
         if q.get("run_status") == "stopped" or q.get("stop_requested"):
             raise ValueError("Hàng đợi đã dừng hẳn — không thể chạy lại. Hãy thêm link để tạo hàng đợi mới.")
         _reconcile_queue_after_worker_loss(q, token)
+        requeued = _requeue_retryable_db_error_items(q)
         q["pause_requested"] = False
         q["worker_error"] = None
         has_pending = any(it.get("state") == "pending" for it in (q.get("items") or []))
@@ -667,7 +760,10 @@ def resume(token: str, admin_id: Optional[int]) -> Dict[str, Any]:
         save_queue(q)
 
     _ensure_worker_started(token)
-    return {"queue_token": token, "message": "Đã tiếp tục / khởi chạy worker."}
+    msg = "Đã tiếp tục / khởi chạy worker."
+    if requeued:
+        msg = f"Đã tiếp tục — xếp lại {requeued} link lỗi session DB để chạy thêm 1 lần."
+    return {"queue_token": token, "message": msg}
 
 
 def stop_permanent(token: str, admin_id: Optional[int]) -> Dict[str, Any]:

@@ -27,6 +27,12 @@ import {
   getListingDraftPublishBlockers,
   isListingDraftPublishReady,
 } from '@/lib/listing-draft-publish-validation';
+import { useAdminProductExcelImport } from '@/hooks/useAdminProductExcelImport';
+import {
+  AdminProductExcelImportButton,
+  AdminProductExcelImportHiddenInput,
+  AdminProductExcelImportStatus,
+} from '@/components/admin/AdminProductExcelImport';
 
 /** Lưu ô «Tỷ giá» (chuỗi gõ tay) để lần sau không phải nhập lại. */
 const TAOBAO_CARDS_PARSE_VND_PER_CNY_LS_KEY = 'admin.products.taobao_cards_parse.vnd_per_cny';
@@ -700,6 +706,8 @@ export default function TaobaoCardsParsePage() {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4500);
   }, []);
+
+  const productExcelImport = useAdminProductExcelImport({ onToast: showToast });
 
   const parse = useCallback(() => {
     setError(null);
@@ -2690,6 +2698,11 @@ export default function TaobaoCardsParsePage() {
           {toast.msg}
         </div>
       )}
+      <AdminProductExcelImportHiddenInput ctrl={productExcelImport} />
+      {(productExcelImport.importing || productExcelImport.importDetailPanel) &&
+      (queuesPanelCollapsed || trackedQueueTokens.length === 0) ? (
+        <AdminProductExcelImportStatus ctrl={productExcelImport} />
+      ) : null}
 
       {trackedQueueTokens.length === 0 ? (
         <div
@@ -2893,7 +2906,12 @@ export default function TaobaoCardsParsePage() {
                         ? 'Đang tải nháp…'
                         : 'Chọn để đăng web…'}
                     </button>
+                    <AdminProductExcelImportButton ctrl={productExcelImport} />
                   </div>
+
+                  {idx === displayQueueTokens.length - 1 ? (
+                    <AdminProductExcelImportStatus ctrl={productExcelImport} />
+                  ) : null}
 
                   {listingQueueExcelErrByToken[token] ? (
                     <div

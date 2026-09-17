@@ -397,6 +397,13 @@ def load_active_category_triples(db: Session) -> List[Dict[str, str]]:
                 "full_slug": (c3.full_slug or "").strip(),
             }
         )
+    # Đọc xong thì đóng transaction — DeepSeek/HTTP phía sau có thể rất lâu.
+    try:
+        db.commit()
+    except Exception:
+        from app.db.retry import safe_rollback
+
+        safe_rollback(db)
     return out
 
 

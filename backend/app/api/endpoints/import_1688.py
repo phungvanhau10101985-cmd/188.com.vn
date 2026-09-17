@@ -523,6 +523,9 @@ def _apply_deepseek_taxonomy_after_scrape(db: Session, product_data: Dict[str, A
         from app.services.import_link_deepseek_taxonomy import apply_deepseek_taxonomy_to_product_data
         warnings.extend(apply_deepseek_taxonomy_to_product_data(db, product_data))
     except Exception as exc:
+        from app.db.retry import safe_rollback
+
+        safe_rollback(db)
         logger.warning("import link DeepSeek taxonomy: %s", exc)
         warnings.append(f"deepseek_taxonomy: lỗi không mong đợi — {type(exc).__name__}: {exc}")
     apply_import_rating_question_groups_to_product_data(product_data, warnings)
@@ -872,12 +875,40 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _run_import_1688_job(job_id: str, download_images: bool) -> None:
+def _mark_import_job_error(job_id: str, message: str, errors: Optional[List[str]] = None) -> None:
+    """Ghi lỗi draft trên session mới — không dùng lại session đã fail (SQLAlchemy 8s2b)."""
+    from app.db.retry import safe_rollback
+
     db = SessionLocal()
     try:
         draft = draft_crud.get_by_job_id(db, job_id)
         if not draft:
             return
+        draft_crud.mark_error(
+            db,
+            draft,
+            message=(message or "Import draft thất bại")[:2000],
+            errors=(errors or [message])[:40],
+        )
+    except Exception:
+        logger.exception("import job mark_error failed job=%s…", (job_id or "")[:12])
+        safe_rollback(db)
+    finally:
+        db.close()
+
+
+def _prepare_import_job_for_scrape(job_id: str) -> Optional[Tuple[str, str, int]]:
+    """
+    Đọc draft, đánh dấu running, đóng session trước khi Playwright.
+    Trả (source, source_url, draft_id) hoặc None nếu không còn draft.
+    """
+    from app.db.retry import safe_rollback
+
+    db = SessionLocal()
+    try:
+        draft = draft_crud.get_by_job_id(db, job_id)
+        if not draft:
+            return None
 
         norm_url = normalize_product_import_url(draft.source_url or "")
         saved_source = (draft.source or "1688").strip().lower()
@@ -886,7 +917,6 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
         elif saved_source == "vipomall" or is_vipomall_import_url(norm_url):
             source = "vipomall"
         elif saved_source == legacy_draft_source_name() or is_legacy_mirror_url(norm_url):
-            # Legacy drafts / URLs → scrape via Vipomall
             source = "vipomall"
             coerced, cerr = coerce_url_for_excel_batch_import(norm_url, FETCH_TARGET_VIPOMALL)
             if not cerr and coerced:
@@ -898,11 +928,40 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
 
         if source == "pandamall":
             draft_crud.mark_running(db, draft, "scraping", "Đang mở trang PandaMall bằng Playwright...", 15)
-            raw_payload, product_data, warnings = scrape_pandamall_for_import(draft.source_url)
+        elif source == "vipomall":
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Vipomall bằng Playwright...", 15)
+        elif source == "1688" and settings.IMPORT_1688_ENABLED:
+            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang 1688 bằng Playwright...", 15)
+        return source, (draft.source_url or norm_url), int(draft.id)
+    except Exception:
+        safe_rollback(db)
+        raise
+    finally:
+        db.close()
+
+
+def _finish_import_job_after_scrape(
+    job_id: str,
+    draft_id: int,
+    raw_payload: Dict[str, Any],
+    product_data: Dict[str, Any],
+    warnings: List[str],
+    success_message: str,
+) -> None:
+    """Ghi nháp sau scrape; retry 1 lần nếu session/connection DB hỏng."""
+    from app.db.retry import is_transient_db_error, safe_rollback
+
+    last_exc: Optional[BaseException] = None
+    for attempt in range(2):
+        db = SessionLocal()
+        try:
+            draft = draft_crud.get_by_job_id(db, job_id)
+            if not draft:
+                return
             _merge_excel_overlay_for_job(db, job_id, product_data)
             _prefer_excel_chinese_name_for_import_ai(product_data)
             _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
+            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft_id)
             _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
             _finalize_product_data_for_db(product_data)
             draft_crud.mark_done(
@@ -911,82 +970,92 @@ def _run_import_1688_job(job_id: str, download_images: bool) -> None:
                 raw_payload=raw_payload,
                 product_data=product_data,
                 warnings=warnings,
-                success_message="Đã tạo bản nháp từ link PandaMall.",
+                success_message=success_message,
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            safe_rollback(db)
+            if is_transient_db_error(exc) and attempt == 0:
+                logger.warning(
+                    "import job post-scrape DB retry job=%s…: %s",
+                    (job_id or "")[:12],
+                    exc,
+                )
+                time.sleep(1.2)
+                continue
+            raise
+        finally:
+            db.close()
+    if last_exc is not None:
+        raise last_exc
+
+
+def _run_import_1688_job(job_id: str, download_images: bool) -> None:
+    try:
+        prepared = _prepare_import_job_for_scrape(job_id)
+        if not prepared:
+            return
+        source, source_url, draft_id = prepared
+
+        if source == "pandamall":
+            raw_payload, product_data, warnings = scrape_pandamall_for_import(source_url)
+            _finish_import_job_after_scrape(
+                job_id,
+                draft_id,
+                raw_payload,
+                product_data,
+                warnings,
+                "Đã tạo bản nháp từ link PandaMall.",
             )
             return
 
         if source == "vipomall":
-            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang Vipomall bằng Playwright...", 15)
-            raw_payload, product_data, warnings = scrape_vipomall_for_import(draft.source_url)
-            _merge_excel_overlay_for_job(db, job_id, product_data)
-            _prefer_excel_chinese_name_for_import_ai(product_data)
-            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
-            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
-            _finalize_product_data_for_db(product_data)
-            draft_crud.mark_done(
-                db,
-                draft,
-                raw_payload=raw_payload,
-                product_data=product_data,
-                warnings=warnings,
-                success_message="Đã tạo bản nháp từ link Vipomall.",
+            raw_payload, product_data, warnings = scrape_vipomall_for_import(source_url)
+            _finish_import_job_after_scrape(
+                job_id,
+                draft_id,
+                raw_payload,
+                product_data,
+                warnings,
+                "Đã tạo bản nháp từ link Vipomall.",
             )
             return
 
         if source == "1688" and settings.IMPORT_1688_ENABLED:
-            draft_crud.mark_running(db, draft, "scraping", "Đang mở trang 1688 bằng Playwright...", 15)
-            raw_payload, product_data, warnings = scrape_1688_product(draft.source_url)
-            _merge_excel_overlay_for_job(db, job_id, product_data)
-            _prefer_excel_chinese_name_for_import_ai(product_data)
-            _apply_deepseek_taxonomy_after_scrape(db, product_data, warnings)
-            _assign_internal_sku_to_import_product_data(db, product_data, exclude_draft_id=draft.id)
-            _reapply_excel_locale_overlay_for_job(db, job_id, product_data)
-            _finalize_product_data_for_db(product_data)
-            draft_crud.mark_done(
-                db,
-                draft,
-                raw_payload=raw_payload,
-                product_data=product_data,
-                warnings=warnings,
-                success_message="Đã tạo bản nháp từ link 1688 trực tiếp.",
+            raw_payload, product_data, warnings = scrape_1688_product(source_url)
+            _finish_import_job_after_scrape(
+                job_id,
+                draft_id,
+                raw_payload,
+                product_data,
+                warnings,
+                "Đã tạo bản nháp từ link 1688 trực tiếp.",
             )
             return
 
-        draft_crud.mark_error(
-            db,
-            draft,
-            message=(
+        _mark_import_job_error(
+            job_id,
+            (
                 "Import trực tiếp từ 1688 đã tắt. Tạo lại nháp từ link Vipomall, "
                 "PandaMall hoặc CSSBuy."
             ),
-            errors=["import_1688_disabled"],
+            ["import_1688_disabled"],
         )
         return
     except ImportPandamallError as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if draft:
-            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+        _mark_import_job_error(job_id, str(exc), [str(exc)])
     except ImportVipomallError as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if draft:
-            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+        _mark_import_job_error(job_id, str(exc), [str(exc)])
     except (ValueError, RuntimeError) as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
-        if draft:
-            draft_crud.mark_error(db, draft, message=str(exc), errors=[str(exc)])
+        _mark_import_job_error(job_id, str(exc), [str(exc)])
     except Exception as exc:
-        draft = draft_crud.get_by_job_id(db, job_id)
         tb_lines = [ln for ln in traceback.format_exc().splitlines() if ln.strip()][-30:]
-        if draft:
-            draft_crud.mark_error(
-                db,
-                draft,
-                message=f"Import draft thất bại: {exc}",
-                errors=[f"{type(exc).__name__}: {exc}", *tb_lines],
-            )
-    finally:
-        db.close()
+        _mark_import_job_error(
+            job_id,
+            f"Import draft thất bại: {exc}",
+            [f"{type(exc).__name__}: {exc}", *tb_lines],
+        )
 
 
 @router.post("/jobs")

@@ -31,11 +31,21 @@ _TRANSIENT_DB_MARKERS = (
     "pool timeout",
     "timeout expired",
     "timed out",
+    "can't reconnect until invalid transaction",
+    "cannot reconnect until invalid transaction",
+    "pendingrollbackerror",
+    "idle in transaction",
 )
 
 
 class TransientDbError(Exception):
     """Lỗi hạ tầng DB tạm thời — client nên retry (503), không phải 404."""
+
+
+def is_transient_db_message(message: str) -> bool:
+    """True khi chuỗi lỗi (toast/log) là hạ tầng DB, không phải dữ liệu sản phẩm."""
+    msg = (message or "").lower()
+    return any(marker in msg for marker in _TRANSIENT_DB_MARKERS)
 
 
 def is_transient_db_error(exc: BaseException) -> bool:
@@ -45,8 +55,10 @@ def is_transient_db_error(exc: BaseException) -> bool:
     if isinstance(exc, DisconnectionError):
         return True
     try:
-        from sqlalchemy.exc import DBAPIError, TimeoutError
+        from sqlalchemy.exc import DBAPIError, PendingRollbackError, TimeoutError
 
+        if isinstance(exc, PendingRollbackError):
+            return True
         if isinstance(exc, TimeoutError):
             return True
         if isinstance(exc, DBAPIError) and getattr(exc, "connection_invalidated", False):
@@ -54,13 +66,11 @@ def is_transient_db_error(exc: BaseException) -> bool:
     except ImportError:
         pass
     if isinstance(exc, OperationalError):
-        msg = str(exc).lower()
-        return any(marker in msg for marker in _TRANSIENT_DB_MARKERS)
+        return is_transient_db_message(str(exc))
     cause = exc.__cause__
     if cause is not None and cause is not exc:
         return is_transient_db_error(cause)
-    msg = str(exc).lower()
-    return any(marker in msg for marker in _TRANSIENT_DB_MARKERS)
+    return is_transient_db_message(str(exc))
 
 
 def _safe_rollback(db: Session) -> None:
@@ -68,6 +78,11 @@ def _safe_rollback(db: Session) -> None:
         db.rollback()
     except Exception:
         pass
+
+
+def safe_rollback(db: Session) -> None:
+    """Rollback session sau lỗi DB — bắt buộc trước khi query tiếp (SQLAlchemy 8s2b)."""
+    _safe_rollback(db)
 
 
 def _safe_close(db: Session) -> None:
