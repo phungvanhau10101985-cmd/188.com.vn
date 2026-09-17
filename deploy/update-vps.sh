@@ -105,6 +105,18 @@ port_is_listening() {
 }
 
 if [[ "${DEPLOY_STOP_PM2_BEFORE_BUILD}" == "1" ]]; then
+  echo "==> Nginx: trang nâng cấp (trước khi stop PM2 — tránh 502 mặc định)"
+  if [[ -f "${PROJECT_ROOT}/deploy/apply-nginx-upgrade-page.sh" ]]; then
+    if [[ "$(id -u)" -eq 0 ]]; then
+      bash "${PROJECT_ROOT}/deploy/apply-nginx-upgrade-page.sh" || \
+        echo "⚠️  apply-nginx-upgrade-page thất bại — khách vẫn có thể thấy 502 mặc định"
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo bash "${PROJECT_ROOT}/deploy/apply-nginx-upgrade-page.sh" || \
+        echo "⚠️  apply-nginx-upgrade-page thất bại — khách vẫn có thể thấy 502 mặc định"
+    else
+      echo "⚠️  Cần root/sudo để áp trang nâng cấp nginx. Bỏ qua."
+    fi
+  fi
   echo "==> PM2: giải phóng RAM trước deploy (pm2 save + pm2 stop all)"
   # Lưu dump trước stop để pm2 resurrect bật lại thu-do-online, worksheet-worker, … sau build.
   pm2 save 2>/dev/null || true
