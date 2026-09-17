@@ -15,6 +15,7 @@ import requests
 from app.core.config import settings
 from app.services.product_rating_question_groups import (
     RATING_GROUP_ID_WHITELIST,
+    extract_import_group_ids_from_model_text,
     rating_group_catalog_text_for_prompt,
 )
 
@@ -109,13 +110,27 @@ def gemini_fallback_import_groups(
 
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    gen_cfg: Dict[str, Any] = {
+        "maxOutputTokens": 512,
+        "temperature": 0.1,
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingBudget": 0},
+    }
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 180, "temperature": 0.1},
+        "generationConfig": gen_cfg,
     }
 
+    parsed: Optional[Dict[str, Any]] = None
+    content = ""
     try:
         resp = requests.post(url, json=payload, timeout=_TIMEOUT_SEC)
+        if not resp.ok and resp.status_code in {400, 422}:
+            cfg2 = dict(gen_cfg)
+            cfg2.pop("thinkingConfig", None)
+            cfg2.pop("responseMimeType", None)
+            payload["generationConfig"] = cfg2
+            resp = requests.post(url, json=payload, timeout=_TIMEOUT_SEC)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates") or []
@@ -131,7 +146,15 @@ def gemini_fallback_import_groups(
         warns.append(f"gemini_groups: lỗi mạng/API: {exc}")
         return None, None, warns
     except Exception as exc:
-        warns.append(f"gemini_groups: không đọc được JSON — {exc}")
+        loose_r, loose_q = extract_import_group_ids_from_model_text(content)
+        if loose_r is not None:
+            parsed = {"rating_group_id": loose_r, "question_group_id": loose_q}
+        else:
+            warns.append(f"gemini_groups: không đọc được JSON — {exc}")
+            return None, None, warns
+
+    if not parsed:
+        warns.append("gemini_groups: không đọc được JSON object.")
         return None, None, warns
 
     r_id = _pull_int(parsed, ("rating_group_id", "group_rating"))

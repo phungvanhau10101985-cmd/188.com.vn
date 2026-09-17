@@ -11,9 +11,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import requests
 
 from app.core.config import settings
+from app.services.deepseek_http import deepseek_chat_completions, deepseek_message_text
 from app.services.import_link_deepseek_taxonomy import _extract_json_object
 from app.services.product_rating_question_groups import (
     RATING_GROUP_ID_WHITELIST,
+    extract_import_group_ids_from_model_text,
     rating_group_catalog_text_for_prompt,
 )
 
@@ -76,31 +78,56 @@ def deepseek_fallback_import_groups(
     allowed = RATING_GROUP_ID_WHITELIST
 
     try:
-        resp = requests.post(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json={
+        resp = deepseek_chat_completions(
+            {
                 "model": model,
                 "temperature": 0.1,
                 "messages": [{"role": "system", "content": sys}, {"role": "user", "content": usr}],
-                "max_tokens": 220,
+                "max_tokens": 512,
+                "response_format": {"type": "json_object"},
             },
             timeout=_TIMEOUT_SEC,
+            api_url=url,
+            api_key=key,
+            disable_thinking=True,
         )
     except requests.RequestException as exc:
         warns.append(f"deepseek_groups: lỗi mạng: {exc}")
+        return None, None, warns
+    except RuntimeError as exc:
+        warns.append(f"deepseek_groups: {exc}")
         return None, None, warns
 
     if not resp.ok:
         warns.append(f"deepseek_groups: HTTP {resp.status_code} {resp.text[:400]}")
         return None, None, warns
 
+    parsed: Optional[Dict[str, Any]] = None
+    content = ""
     try:
         body: Dict[str, Any] = resp.json()
-        content = (body.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+        content = deepseek_message_text(body)
+        if not content:
+            fr = ""
+            try:
+                fr = str(((body.get("choices") or [{}])[0].get("finish_reason")) or "")
+            except Exception:
+                fr = ""
+            warns.append(
+                f"deepseek_groups: model trả content rỗng (finish_reason={fr or 'n/a'})."
+            )
+            return None, None, warns
         parsed = _extract_json_object(content)
     except (TypeError, ValueError, IndexError, KeyError, Exception) as exc:
-        warns.append(f"deepseek_groups: không đọc được JSON — {exc}")
+        loose_r, loose_q = extract_import_group_ids_from_model_text(content)
+        if loose_r is not None:
+            parsed = {"rating_group_id": loose_r, "question_group_id": loose_q}
+        else:
+            warns.append(f"deepseek_groups: không đọc được JSON — {exc}")
+            return None, None, warns
+
+    if not parsed:
+        warns.append("deepseek_groups: không đọc được JSON object.")
         return None, None, warns
 
     def _pull_int(keys: Tuple[str, ...]) -> Optional[int]:

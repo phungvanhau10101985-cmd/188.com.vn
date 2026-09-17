@@ -125,6 +125,64 @@ def test_apply_import_keeps_rule_match():
     assert pd["group_rating"] == 27
 
 
+def test_dam_om_body_maps_to_lien_than_group_59():
+    ctx = (
+        "Thời trang Nữ Đầm Nữ đầm ôm body nữ "
+        "Đầm nữ ôm body vai trần phối ren quyến rũ"
+    )
+    assert infer_rating_group_id_from_text(ctx) == 59
+    pd = {
+        "name": "Đầm nữ ôm body vai trần phối ren quyến rũ — 咖啡色",
+        "category": "Thời trang Nữ",
+        "subcategory": "Đầm Nữ",
+        "sub_subcategory": "đầm ôm body nữ",
+        "group_rating": 0,
+    }
+    with patch("app.services.product_rating_question_groups._ai_fallback_import_groups") as ai_mock:
+        apply_import_rating_question_groups_to_product_data(pd)
+        ai_mock.assert_not_called()
+    assert pd["group_rating"] == 59
+    assert pd["group_question"] == 88
+
+
+def test_dam_da_hoi_maps_to_party_group_40_not_generic_59():
+    assert infer_rating_group_id_from_text("Đầm nữ dạ hội đen phối lưới tay bồng dáng ôm") == 40
+    pd = {
+        "name": "Đầm dạ hội đen phối lưới tay bồng dáng ôm — Màu đen",
+        "category": "Thời trang Nữ",
+        "subcategory": "Đầm Nữ",
+        "sub_subcategory": "đầm ôm body nữ",
+        "group_rating": 0,
+    }
+    apply_import_rating_question_groups_to_product_data(pd)
+    assert pd["group_rating"] == 40
+
+
+def test_chan_vay_nu_maps_to_group_54_not_dress_59():
+    assert infer_rating_group_id_from_text("Chân váy nữ dáng chữ A xếp ly") == 54
+    pd = {
+        "name": "Chân váy nữ dáng chữ A xếp ly",
+        "category": "Thời trang Nữ",
+        "subcategory": "Chân váy Nữ",
+        "sub_subcategory": "chân váy chữ A nữ",
+        "group_rating": 0,
+    }
+    apply_import_rating_question_groups_to_product_data(pd)
+    assert pd["group_rating"] == 54
+
+
+def test_extract_import_group_ids_from_model_text():
+    from app.services.product_rating_question_groups import extract_import_group_ids_from_model_text
+
+    rid, qid = extract_import_group_ids_from_model_text(
+        'rating_group_id: 59\nquestion_group_id: 88'
+    )
+    assert rid == 59
+    assert qid == 88
+    rid, qid = extract_import_group_ids_from_model_text("")
+    assert rid is None and qid is None
+
+
 def test_apply_import_skips_groups_when_taxonomy_auto_created():
     pd = {
         "name": "Sản phẩm ngành mới nữ",

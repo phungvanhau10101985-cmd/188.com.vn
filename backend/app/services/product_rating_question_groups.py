@@ -4,6 +4,8 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
 
 - rating: ghép ngữ cảnh từ category/sub/sub-sub (và raw_*), slug_seo, JSON product_info.category,
   khach_hang_vi (nếu có), rồi khớp chuỗi con (cụm chính + alias; ưu tiên cụm dài).
+  Không khớp cụm liền → luật họ hàng (vd. đầm ôm body → 59 váy đầm liền thân nữ),
+  ưu tiên nhóm cụ thể (maxi / dự tiệc / hai dây / chân váy) trước nhóm chuẩn.
 
 - question: theo FIND kiểu Excel trên BH2 (= tên sản phẩm):
     IFERROR(IFERROR(IFERROR(
@@ -12,7 +14,7 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
       IF(find("nữ", BH2)>0, 88, "")),
       99)
 
-- Không khớp luật từ-khóa → gọi DeepSeek (rồi Gemini nếu cần) để chọn rating_group_id + question_group_id trong whitelist.
+- Không khớp luật từ-khóa/họ hàng → gọi DeepSeek (rồi Gemini nếu cần) để chọn rating_group_id + question_group_id trong whitelist.
 - Nếu AI cũng không gán được → group_rating = RATING_GROUP_ID_UNASSIGNED (888).
 """
 from __future__ import annotations
@@ -156,6 +158,19 @@ _RATING_ALIASES_RAW: Iterable[Tuple[str, int]] = (
     ("túi đựng gậy golf", 93),
     ("găng tay golf", 91),
     ("thảm cỏ nhân tạo", 89),
+    ("đầm ôm body nữ", 59),
+    ("đầm body nữ", 59),
+    ("đầm ôm nữ", 59),
+    ("đầm liền thân nữ", 59),
+    ("váy liền thân nữ", 59),
+    ("váy ôm body nữ", 59),
+    ("đầm dạ hội nữ", 40),
+    ("đầm dự tiệc nữ", 40),
+    ("váy dự tiệc nữ", 40),
+    ("váy dạ hội nữ", 40),
+    ("chân váy nữ", 54),
+    ("đầm hai dây nữ", 85),
+    ("váy hai dây nữ", 85),
 )
 
 _WS_RE = re.compile(r"\s+")
@@ -279,6 +294,65 @@ _GENERIC_RATING_PHRASES = frozenset({"giày dép nam", "giày dép nữ"})
 # Nếu cụm dài nhất chỉ là "giày dép nam|nữ" nhưng có cụm khác (vd sandal nam) chỉ ngắn hơn vài ký tự → ưu tiên cụm cụ thể.
 _SPECIFICITY_DEBOOST_MAX_GAP = 2
 
+# Họ hàng: bất kỳ trigger + bất kỳ neo loại hàng, không có blocker → gid chuẩn.
+# Cụ thể trước (maxi / dự tiệc / hai dây / chân váy), đầm generic → 59.
+_FAMILY_FALLBACK_RULES: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...], Tuple[str, ...], int], ...] = (
+    (("maxi",), ("đầm", "váy"), ("chân váy",), 6),
+    (("dự tiệc", "dạ hội"), ("đầm", "váy"), ("chân váy",), 40),
+    (("hai dây",), ("đầm", "váy", "áo"), (), 85),
+    (("chân váy",), (), (), 54),
+    (
+        ("đầm", "váy liền thân", "váy ôm body", "váy body", "bodycon", "váy đầm"),
+        (),
+        ("chân váy", "maxi", "dự tiệc", "dạ hội"),
+        59,
+    ),
+)
+
+
+def _hay_has_any(hay: str, needles: Tuple[str, ...]) -> bool:
+    return any(n in hay for n in needles if n)
+
+
+def _family_fallback_rating_group_id(hay: str) -> int:
+    """Nhóm chuẩn nhất khi không khớp cụm catalog liền (vd. «đầm ôm body nữ» → 59)."""
+    if not hay:
+        return 0
+    for triggers, anchors, blockers, gid in _FAMILY_FALLBACK_RULES:
+        if blockers and _hay_has_any(hay, blockers):
+            continue
+        if triggers and not _hay_has_any(hay, triggers):
+            continue
+        if anchors and not _hay_has_any(hay, anchors):
+            continue
+        if gid in RATING_GROUP_ID_WHITELIST:
+            return gid
+    return 0
+
+
+_RATING_ID_IN_TEXT_RE = re.compile(r"""["']?rating_group_id["']?\s*[:=]\s*["']?(\d+)""", re.I)
+_QUESTION_ID_IN_TEXT_RE = re.compile(r"""["']?question_group_id["']?\s*[:=]\s*["']?(\d+)""", re.I)
+
+
+def extract_import_group_ids_from_model_text(content: str) -> Tuple[Optional[int], Optional[int]]:
+    """Bắt id nhóm từ JSON/text model khi parse object thất bại."""
+    text = (content or "").strip()
+    if not text:
+        return None, None
+    rm = _RATING_ID_IN_TEXT_RE.search(text)
+    qm = _QUESTION_ID_IN_TEXT_RE.search(text)
+    rid = int(rm.group(1)) if rm else None
+    qid = int(qm.group(1)) if qm else None
+    if rid is not None and rid not in RATING_GROUP_ID_WHITELIST:
+        rid = None
+    if qid is not None and qid not in {88, 99, 100}:
+        qid = None
+    return rid, qid
+
+
+_DRESS_GENERIC_GID = 59
+_DRESS_SPECIFIC_GIDS = frozenset({6, 40, 54, 85})
+
 
 def infer_rating_group_id_from_text(context: str) -> int:
     hay = _norm_ctx(context)
@@ -288,19 +362,24 @@ def infer_rating_group_id_from_text(context: str) -> int:
     for phrase, gid in _RATING_SORTED:
         if phrase in hay:
             matched.append((phrase, gid))
-    if not matched:
-        return 0
-
-    maxlen = max(len(p) for p, _ in matched)
-    specifics = [(p, g) for p, g in matched if p not in _GENERIC_RATING_PHRASES]
-    if specifics:
-        best_spec_len = max(len(p) for p, _ in specifics)
-        if maxlen - best_spec_len <= _SPECIFICITY_DEBOOST_MAX_GAP:
-            p_best, g_best = max(specifics, key=lambda x: (len(x[0]), x[0]))
-            return g_best
-
-    p_best, g_best = max(matched, key=lambda x: (len(x[0]), x[0]))
-    return g_best
+    exact = 0
+    if matched:
+        maxlen = max(len(p) for p, _ in matched)
+        specifics = [(p, g) for p, g in matched if p not in _GENERIC_RATING_PHRASES]
+        if specifics:
+            best_spec_len = max(len(p) for p, _ in specifics)
+            if maxlen - best_spec_len <= _SPECIFICITY_DEBOOST_MAX_GAP:
+                exact = max(specifics, key=lambda x: (len(x[0]), x[0]))[1]
+            else:
+                exact = max(matched, key=lambda x: (len(x[0]), x[0]))[1]
+        else:
+            exact = max(matched, key=lambda x: (len(x[0]), x[0]))[1]
+    family = _family_fallback_rating_group_id(hay)
+    if exact > 0:
+        if exact == _DRESS_GENERIC_GID and family in _DRESS_SPECIFIC_GIDS:
+            return family
+        return exact
+    return family
 
 
 def infer_rating_group_id(*, name: str, category: str = "", subcategory: str = "", sub_subcategory: str = "") -> int:
