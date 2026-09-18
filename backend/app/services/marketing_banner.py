@@ -711,6 +711,7 @@ def ensure_daily_banners(
         "birthday": _empty_kind_stats(),
         "sale": _empty_kind_stats(),
         "warehouse": _empty_kind_stats(extra={"skipped": 0}),
+        "sale_icons": _empty_kind_stats(extra={"skipped": 0}),
     }
     budget = max(0, int(max_create))
 
@@ -781,4 +782,19 @@ def ensure_daily_banners(
         result["warehouse"]["skipped"] += 1
     else:
         _try_create("warehouse", 0, 0, float(warehouse_pct), "warehouse")
+
+    from app.services.marketing_icon import ensure_daily_sale_icons
+
+    if matching_event:
+        event, event_date = matching_event
+        result["sale_icons"] = ensure_daily_sale_icons(
+            db,
+            day=event_date.day,
+            month=event_date.month,
+            discount_percent=float(event["discount_percent"]),
+            max_create=budget,
+            notify_admin=notify_admin,
+        )
+    else:
+        result["sale_icons"]["skipped"] += 1
     return result

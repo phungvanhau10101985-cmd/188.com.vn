@@ -21,7 +21,8 @@ import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
 import { RateLimitNotice } from "@/components/RateLimitNotice";
 import { getCategoryTreeForLayout } from "@/lib/category-seo";
-import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
+import AppWebIconSync from "@/components/AppWebIconSync";
+import { APP_WEB_ICON_URL, fetchCurrentAppWebIcon } from "@/lib/app-web-icon";
 import { getCdnPublicBase } from "@/lib/site-config";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { getSiteOrigin } from "@/lib/site-origin";
@@ -154,9 +155,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [initialCategoryTree, siteEmbeds] = await Promise.all([
+  const [initialCategoryTree, siteEmbeds, currentAppIcon] = await Promise.all([
     getCategoryTreeForLayout(),
     fetchPublicSiteEmbeds(),
+    fetchCurrentAppWebIcon(),
   ]);
   const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
   const siteOrigin = getSiteOrigin();
@@ -175,6 +177,12 @@ export default async function RootLayout({
         <link rel="dns-prefetch" href="https://img.alicdn.com" />
         <link rel="dns-prefetch" href="https://cbu01.alicdn.com" />
         <SiteEmbedsSsrScripts specs={ssrScripts} />
+        {currentAppIcon.is_sale && currentAppIcon.icon_url ? (
+          <>
+            <link rel="icon" href={currentAppIcon.icon_url} type="image/png" />
+            <link rel="apple-touch-icon" href={currentAppIcon.icon_url} sizes="180x180" />
+          </>
+        ) : null}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
@@ -197,6 +205,7 @@ export default async function RootLayout({
           />
         ) : null}
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
+        <AppWebIconSync />
         <DeferredLayoutFloaters />
         <Suspense fallback={null}>
           <GoogleAutomatedDiscountCapture />

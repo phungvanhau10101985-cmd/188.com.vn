@@ -42,6 +42,20 @@ export interface MarketingBannerCurrentResponse {
   items: MarketingBannerItem[];
 }
 
+export interface CurrentAppWebIconResponse {
+  icon_url: string;
+  default_icon_url: string;
+  is_sale: boolean;
+  kind?: 'sale' | null;
+  campaign_key?: string | null;
+  date_key?: string | null;
+  discount_percent?: number | null;
+  event_date?: string | null;
+  event_label?: string | null;
+  phase?: string | null;
+  version?: number | null;
+}
+
 export interface ProductColor {
   name: string;
   img?: string;

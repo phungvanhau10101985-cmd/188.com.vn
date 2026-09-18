@@ -375,7 +375,7 @@ def cron_daily_banners(
     db: Session = Depends(get_db),
 ):
     """
-    Cron bắt banner AI còn thiếu — mỗi lần tối đa 1 ảnh Gemini.
+    Cron bắt banner / favicon sale AI còn thiếu — mỗi lần tối đa 1 ảnh Gemini.
     Gọi localhost (không qua Cloudflare), lặp mỗi 10 phút cho tới khi pending=0.
     Authorization: Bearer CRON_SECRET
     """

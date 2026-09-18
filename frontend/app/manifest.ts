@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
-import { APP_WEB_ICON_URL } from "@/lib/app-web-icon";
+import { APP_WEB_ICON_URL, resolveAppWebIconUrl } from "@/lib/app-web-icon";
 
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const iconUrl = (await resolveAppWebIconUrl()) || APP_WEB_ICON_URL;
   return {
     name: "188.COM.VN - Xem là thích click là mê",
     short_name: "188",
@@ -17,13 +18,13 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["shopping", "fashion"],
     icons: [
       {
-        src: APP_WEB_ICON_URL,
+        src: iconUrl,
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: APP_WEB_ICON_URL,
+        src: iconUrl,
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",

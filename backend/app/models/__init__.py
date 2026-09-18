@@ -209,6 +209,8 @@ from app.models.email_send_management import EmailSendManagement
 print("[OK] EmailSendManagement model loaded")
 from app.models.marketing_banner import MarketingBannerAsset
 print("[OK] MarketingBannerAsset model loaded")
+from app.models.marketing_icon import MarketingIconAsset
+print("[OK] MarketingIconAsset model loaded")
 
 # 12. Ladipage AI (landing page bán hàng tạo bởi Gemini)
 from app.models.ladipage import Ladipage, LadipageSection
@@ -287,6 +289,7 @@ __all__ = [
     "MarketingEmailSuppression",
     "EmailSendManagement",
     "MarketingBannerAsset",
+    "MarketingIconAsset",
     "Ladipage",
     "LadipageSection",
 ]

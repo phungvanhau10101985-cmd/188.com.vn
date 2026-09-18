@@ -21,6 +21,7 @@ const WEB_PNG_ALLOWLIST = [
   /logo188/i,
   /favicon\.png/i,
   /logo_1x1_/i,
+  /marketing-icons\//i,
   /vietqr\.io/i,
   /\/icon\.png$/i,
   /\/app\/icon/i,

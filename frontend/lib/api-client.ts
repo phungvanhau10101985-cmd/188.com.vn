@@ -1334,6 +1334,10 @@ class ApiClient {
     return this.fetch('/marketing-banners/current', { quiet: true });
   }
 
+  async getCurrentAppWebIcon(): Promise<import('@/types/api').CurrentAppWebIconResponse> {
+    return this.fetch('/marketing-icons/current', { quiet: true });
+  }
+
   async getWelcomePromoEligibility(): Promise<WelcomePromoStatus> {
     return this.fetch('/promotions/welcome-eligibility');
   }

@@ -250,6 +250,12 @@ class Settings:
         self.BUNNY_UPLOAD_PATH_PREFIX: str = (
             os.getenv("BUNNY_UPLOAD_PATH_PREFIX", "site").strip().strip("/") or "site"
         )
+        # Logo vuông mặc định (favicon / PWA / apple-touch). AI icon sale dùng ảnh này làm gốc.
+        self.APP_WEB_ICON_URL: str = os.getenv("APP_WEB_ICON_URL", "").strip()
+        self.APP_WEB_ICON_PATH: str = (
+            os.getenv("APP_WEB_ICON_PATH", "/site/20260502/logo_1x1_0584d3f73e4a.png").strip()
+            or "/site/20260502/logo_1x1_0584d3f73e4a.png"
+        )
         self.BUNNY_WEB_PUBLIC_PREFIX: str = os.getenv("BUNNY_WEB_PUBLIC_PREFIX", "").strip().strip("/")
         self.BUNNY_DELETE_ON_PRODUCT_DELETE: bool = (
             os.getenv("BUNNY_DELETE_ON_PRODUCT_DELETE", "true").strip().lower()

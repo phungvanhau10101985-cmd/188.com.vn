@@ -247,6 +247,7 @@ def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatc
     first = svc.ensure_daily_banners(
         db, today=date(2026, 9, 7), max_create=1, notify_admin=False
     )
+    assert first["sale_icons"]["skipped"] == 1
     assert first["birthday"]["created"] == 1
     assert first["birthday"]["reused"] == 0
     assert first["birthday"]["pending"] == 2

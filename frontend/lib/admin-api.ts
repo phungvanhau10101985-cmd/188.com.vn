@@ -4149,6 +4149,41 @@ export type AdminMarketingBannerAsset = {
   created_at?: string | null;
 };
 
+export type AdminMarketingIconAsset = {
+  id: number;
+  kind: 'sale';
+  campaign_key: string;
+  date_key: string;
+  discount_percent: number;
+  image_url?: string | null;
+  source_image_url?: string | null;
+  aspect_ratio: string;
+  image_width?: number | null;
+  image_height?: number | null;
+  prompt: string;
+  provider: string;
+  model: string;
+  status: 'generating' | 'ready' | 'failed';
+  error_message?: string | null;
+  version: number;
+  is_active: boolean;
+  generated_at?: string | null;
+  created_at?: string | null;
+};
+
+export const adminMarketingIconAPI = {
+  list: () => fetchAdmin<{ items: AdminMarketingIconAsset[] }>('/marketing-icons/admin/assets'),
+  regenerate: (data: { day: number; month: number }) =>
+    fetchAdmin<{ accepted: boolean; message: string }>('/marketing-icons/admin/regenerate', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'sale', ...data }),
+    }),
+  activate: (assetId: number) =>
+    fetchAdmin<AdminMarketingIconAsset>(`/marketing-icons/admin/assets/${assetId}/activate`, {
+      method: 'POST',
+    }),
+};
+
 export const adminMarketingBannerAPI = {
   list: (kind?: AdminMarketingBannerKind) =>
     fetchAdmin<{ items: AdminMarketingBannerAsset[] }>(

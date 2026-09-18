@@ -3,13 +3,19 @@
 import PromoCodesManager from '@/components/admin/PromoCodesManager';
 import SaleCalendarSettingsPanel from '@/components/admin/SaleCalendarSettingsPanel';
 import MarketingBannerManager from '@/components/admin/MarketingBannerManager';
+import MarketingIconManager from '@/components/admin/MarketingIconManager';
 import { useEffect, useState } from 'react';
 import { adminPromotionsAPI, AdminPromotionCode } from '@/lib/admin-api';
 
 export default function AdminPromotionsPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.location.hash === '#site-sale' || window.location.hash === '#flash-sale') {
+    if (
+      window.location.hash === '#site-sale'
+      || window.location.hash === '#flash-sale'
+      || window.location.hash === '#ai-banners'
+      || window.location.hash === '#ai-icons'
+    ) {
       window.requestAnimationFrame(() => {
         document.getElementById(window.location.hash.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       });
@@ -27,6 +33,7 @@ export default function AdminPromotionsPage() {
 
       <SaleCalendarSettingsPanel embedded />
       <MarketingBannerManager />
+      <MarketingIconManager />
 
       <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6 space-y-3">
         <h2 className="text-lg font-bold text-gray-900">Cron tự động (VPS)</h2>
@@ -43,7 +50,7 @@ export default function AdminPromotionsPage() {
         <p className="text-xs text-gray-500">
           Endpoint gộp: CARTSAVE188 + COMEBACK10 + backfill WELCOME + email sinh nhật (7 ngày trước SN)
           + nhắc đánh giá đơn đã giao 3–7 ngày chưa review.
-          Banner AI gọi localhost mỗi 10 phút, mỗi lần tối đa 1 ảnh — tránh timeout Cloudflare 524.
+          Banner / favicon sale AI gọi localhost mỗi 10 phút, mỗi lần tối đa 1 ảnh — tránh timeout Cloudflare 524.
           WELCOME (đăng ký), THANKYOU (giao hàng lần đầu), CMSN giảm giá — chạy tự động trong app, không cần cron.
         </p>
       </div>
