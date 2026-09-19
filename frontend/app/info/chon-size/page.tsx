@@ -34,7 +34,8 @@ export default function InfoChonSizeIndexPage() {
       </ul>
       <h2 className="text-base font-semibold text-zinc-900 mb-2">Nhóm con có bảng riêng</h2>
       <p className="text-xs text-zinc-500 mb-3">
-        Áp dụng khi taxonomy có đủ hai cấp tương ứng; popup PDP hiển thị nội dung các trang dưới nếu khớp taxonomy.
+        Áp dụng khi taxonomy có đủ hai cấp tương ứng; popup trang sản phẩm hiện bảng nhóm con nếu khớp danh mục.
+        Các loại sandal nữ dùng chung cách đo, mỗi trang có lưu ý quai / mũi riêng.
       </p>
       <ul className="grid gap-2 sm:grid-cols-2 list-none p-0 m-0">
         {ALL_CAT2_GUIDE_KEYS.map((key) => (

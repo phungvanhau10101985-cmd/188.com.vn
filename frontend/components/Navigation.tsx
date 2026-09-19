@@ -4,7 +4,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import LoadingLink from '@/components/ui/LoadingLink';
-import Image from 'next/image';
+import AppBrandMark from '@/components/AppBrandMark';
 import { usePathname, useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
@@ -23,7 +23,6 @@ import {
   withKhoSaleMenuCategory,
 } from '@/lib/kho-sale-menu-category';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
-import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import { useClientMounted } from '@/lib/use-client-mounted';
@@ -555,14 +554,7 @@ export default function Navigation({
                 className="flex shrink-0 items-center rounded-md py-0.5 hover:bg-white/10 transition-colors"
                 aria-label="Về trang chủ 188.com.vn"
               >
-                <Image
-                  src={cdnUrl('/logo head 188.png')}
-                  data-allow-png
-                  alt="188.com.vn"
-                  width={140}
-                  height={35}
-                  className="h-7 w-auto max-w-[7rem] sm:max-w-[8.5rem] object-contain object-left"
-                />
+                <AppBrandMark variant="sticky" />
               </Link>
               <div
                 ref={stickyCatalogTriggerWrapRef}

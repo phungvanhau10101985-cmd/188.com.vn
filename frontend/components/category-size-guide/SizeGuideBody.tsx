@@ -290,13 +290,13 @@ function ApparelFemaleTable() {
 
 function KidsTable() {
   const rows = [
-    ['12–18 tháng', '78–83', '9–11', '92–98'],
-    ['2–3 tuổi', '88–93', '12–13', '100–106'],
-    ['4–5 tuổi', '98–109', '16–17', '110–118'],
-    ['6–7 tuổi', '110–122', '19–21', '120–132'],
-    ['8–9 tuổi', '123–134', '22–26', '135–146'],
-    ['10–11 tuổi', '135–144', '28–34', '147–154'],
-    ['12–13 tuổi', '145–158', '36–45', '155–166'],
+    ['12–18 tháng', '78–83', '9–12', '92–98'],
+    ['2–3 tuổi', '88–96', '12–15', '100–106'],
+    ['4–5 tuổi', '98–110', '16–20', '110–118'],
+    ['6–7 tuổi', '110–122', '19–24', '120–132'],
+    ['8–9 tuổi', '123–134', '22–28', '135–146'],
+    ['10–11 tuổi', '135–145', '28–38', '147–154'],
+    ['12–13 tuổi', '145–158', '36–50', '155–166'],
   ];
   return (
     <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse mt-3">
@@ -333,6 +333,70 @@ function Heading({ children, className }: { children: React.ReactNode; className
   );
 }
 
+function GuideTable({
+  headers,
+  rows,
+  headClass = 'bg-gray-50',
+}: {
+  headers: string[];
+  rows: string[][];
+  headClass?: string;
+}) {
+  return (
+    <table className="w-full text-xs sm:text-sm border border-gray-200 border-collapse text-left mt-3">
+      <thead>
+        <tr className={headClass}>
+          {headers.map((h) => (
+            <th key={h} className="p-2 border border-gray-200">
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, idx) => (
+          <tr key={`${r[0]}-${idx}`}>
+            {r.map((c, i) => (
+              <td key={`${r[0]}-${i}`} className="p-2 border border-gray-100">
+                {c}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Cat2Link({ path, children }: { path: string; children: React.ReactNode }) {
+  return (
+    <Link href={`/info/chon-size/${path}`} className="text-[#ea580c] hover:underline">
+      {children}
+    </Link>
+  );
+}
+
+const SOURCE_FIT_CAT1 = new Set([
+  'giay-dep-nam',
+  'giay-dep-nu',
+  'thoi-trang-nam',
+  'thoi-trang-nu',
+  'do-lot-nam',
+  'do-lot-nu',
+  'trang-phuc-bau-hau-san',
+  'thoi-trang-tre-em',
+  'the-thao-da-ngoai',
+]);
+
+function SourceFitNote() {
+  return (
+    <Note>
+      Nhiều lô trên 188.com.vn là form Á / tem nhập: cùng số đo cm thường ôm hơn hàng may sẵn Việt. Giữa hai cỡ hoặc khi bảng shop trống, nên
+      nghiêng lớn hơn 0,5–1 size.
+    </Note>
+  );
+}
+
 function GuideKidsShoes() {
   return (
     <>
@@ -343,8 +407,8 @@ function GuideKidsShoes() {
       </p>
       <ShoeTableKid />
       <Note>
-        Bảng trên là quy đổi tham khảo theo cỡ tem phổ biến ở shop Việt Nam; từng hãng (đặc biệt sneakers) có thể lệch 1 cỡ — luôn đọc
-        bảng kích cỡ trên trang sản phẩm của từng mã và hỏi shop khi không chắc.
+        Một chiều dài chân có thể ra hai cỡ tem (24–25, 31–32…) vì hãng không cùng thang. Ưu tiên cm chân + chừa khoảng 0,5 cm mũi; đừng chọn
+        theo số tuổi trên nhãn.
       </Note>
       <Note>Bé lớn dần hết bảng trên có thể đo chiều dài chân và so với bảng giày nữ cỡ nhỏ (thường từ 35+) trên từng sản phẩm.</Note>
     </>
@@ -367,10 +431,12 @@ function GuideBraFemale() {
         Cup (A/B/C…): là hiệu giữa số đo ngực trọn và ngực dưới (cm), quy chiếu sơ bộ:
       </p>
       <ul className="list-disc list-inside text-sm text-gray-700 mt-2 space-y-1">
-        <li>{'<'} 10 cm: có thể AA hoặc A nhỏ tùy nhãn</li>
-        <li>≈10–13 cm: thường A–B</li>
-        <li>≈13–15 cm: thường C</li>
-        <li>{'>'} 15 cm và form nặng: D trở lên — ưu tiên bảng nhãn từng mặt hàng và thử được thì hay nhất.</li>
+        <li>{'<'} 10 cm: AA hoặc A nhỏ tùy nhãn</li>
+        <li>≈10–12 cm: A</li>
+        <li>≈12–14 cm: B</li>
+        <li>≈14–16 cm: C</li>
+        <li>≈16–18 cm: D</li>
+        <li>{'>'} 18 cm: E trở lên — đối chiếu bảng nhãn từng mặt hàng</li>
       </ul>
       <Note>
         Một nhãn dùng một mã («75B»); khi chỉ có S/M/L hãy ưu tiên bảng cm trên tin bán của shop trên trang sản phẩm.
@@ -403,11 +469,417 @@ function GuideHeelsFemale({ variant }: { variant: 'cao-got' | 'cuoi-tiec' }) {
   );
 }
 
+function PantsMaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-amber-50"
+      headers={[
+        'Cỡ số (hay gặp)',
+        'Cỡ chữ',
+        'Eo (cm)',
+        'Hông (cm)',
+        'Dài ngoài cạp–gấu (cm)',
+        'Inseam mặt trong (cm)',
+      ]}
+      rows={[
+        ['28', 'S', '70–74', '88–94', '98–102', '72–76'],
+        ['29', 'S–M', '74–76', '90–96', '99–103', '73–77'],
+        ['30', 'M', '76–79', '94–100', '100–104', '74–78'],
+        ['31', 'M–L', '79–81', '96–102', '101–105', '75–79'],
+        ['32', 'L', '81–84', '100–106', '102–106', '76–80'],
+        ['33', 'L–XL', '84–86', '102–108', '103–107', '77–81'],
+        ['34', 'XL', '86–90', '106–112', '104–108', '78–82'],
+        ['36', 'XXL', '90–96', '110–118', '105–109', '79–83'],
+        ['38', '3XL', '96–102', '116–126', '106–110', '80–84'],
+      ]}
+    />
+  );
+}
+
+function ShirtMaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-amber-50"
+      headers={['Cỡ', 'Cổ áo (cm)', 'Ngực (cm)', 'Vai (cm)', 'Dài tay (cm)']}
+      rows={[
+        ['S', '37–38', '86–92', '41–43', '57–59'],
+        ['M', '39–40', '92–98', '43–45', '59–61'],
+        ['L', '41–42', '98–104', '45–47', '61–63'],
+        ['XL', '43–44', '104–110', '47–49', '63–65'],
+        ['XXL', '45–46', '110–116', '49–51', '64–66'],
+        ['3XL', '47–48', '116–124', '51–54', '65–67'],
+      ]}
+    />
+  );
+}
+
+function SkirtFemaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-pink-50"
+      headers={['Cỡ', 'Eo (cm)', 'Hông (cm)', 'Dài ngang gối (cm)', 'Dài midi (cm)']}
+      rows={[
+        ['XS', '60–66', '84–90', '42–50', '68–76'],
+        ['S', '66–70', '88–94', '44–52', '70–78'],
+        ['M', '70–74', '92–98', '46–54', '72–80'],
+        ['L', '74–80', '96–104', '48–56', '74–82'],
+        ['XL', '80–86', '102–110', '50–58', '76–84'],
+        ['XXL', '86–94', '108–116', '52–60', '78–86'],
+      ]}
+    />
+  );
+}
+
+function PantsFemaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-pink-50"
+      headers={['Cỡ', 'Eo (cm)', 'Hông (cm)', 'Dài ngoài cạp–gấu (cm)', 'Inseam mặt trong (cm)']}
+      rows={[
+        ['XS', '60–66', '84–90', '90–96', '68–72'],
+        ['S', '66–70', '88–94', '92–98', '70–74'],
+        ['M', '70–74', '92–98', '94–100', '72–76'],
+        ['L', '74–80', '96–104', '96–102', '74–78'],
+        ['XL', '80–86', '102–110', '98–104', '75–79'],
+        ['XXL', '86–94', '108–116', '99–105', '76–80'],
+      ]}
+    />
+  );
+}
+
+function BoxerMaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-slate-50"
+      headers={['Cỡ', 'Eo (cm)', 'Hông (cm)']}
+      rows={[
+        ['S', '70–76', '88–94'],
+        ['M', '76–82', '94–100'],
+        ['L', '82–88', '100–106'],
+        ['XL', '88–94', '106–112'],
+        ['XXL', '94–100', '112–118'],
+        ['3XL', '100–108', '118–126'],
+      ]}
+    />
+  );
+}
+
+function PantyFemaleTable() {
+  return (
+    <GuideTable
+      headClass="bg-pink-50"
+      headers={['Cỡ', 'Eo (cm)', 'Hông (cm)']}
+      rows={[
+        ['XS', '60–66', '84–90'],
+        ['S', '66–70', '88–94'],
+        ['M', '70–74', '92–98'],
+        ['L', '74–80', '96–104'],
+        ['XL', '80–86', '102–110'],
+        ['XXL', '86–94', '108–116'],
+      ]}
+    />
+  );
+}
+
+function MaternityBellyTable() {
+  return (
+    <GuideTable
+      headClass="bg-rose-50"
+      headers={['Giai đoạn', 'Vòng bụng (cm, tham khảo)', 'Gợi ý cỡ so với trước bầu']}
+      rows={[
+        ['Trước bầu / tam cá nguyệt 1', 'Giữ số đo đang mặc', 'Giữ size, ưu tiên vải co giãn'],
+        ['Tuần 13–27', 'Tăng khoảng 8–15 cm', '+1 cỡ hoặc dáng bầu'],
+        ['Tuần 28 trở đi', 'Tăng khoảng 15–25+ cm', '+1 đến +2 cỡ; ưu tiên ô bụng'],
+        ['Sau sinh 0–6 tuần', 'Bụng còn nở', 'Giữ size bầu hoặc −1 so với cuối thai kỳ'],
+      ]}
+    />
+  );
+}
+
+function GuideMaleFootwear({ kind }: { kind: 'sneaker' | 'tay' | 'boot' | 'sandal' }) {
+  const title =
+    kind === 'sneaker'
+      ? 'Sneaker & giày chạy Nam'
+      : kind === 'tay'
+        ? 'Giày tây & công sở Nam'
+        : kind === 'boot'
+          ? 'Boot Nam'
+          : 'Sandal & dép quai Nam';
+  return (
+    <>
+      <Heading>{title} — đo chiều dài chân (cm)</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo từ gót đến ngón dài nhất, hai chân đứng; đo buổi tối, mang đúng loại tất như khi đi. Nếu hai chân lệch, lấy chân dài hơn.
+      </p>
+      <ShoeTableMale />
+      {kind === 'sneaker' ? (
+        <Note>
+          Giày chạy thường cần chừa 0,5–1 cm mũi (không sát ngón). Giữa hai cỡ nên chọn lớn hơn; bàn bè hoặc mu cao tăng 1 size.
+          Sneaker thời trang ôm hơn giày chạy — nếu thích vừa khít có thể giữ đúng cỡ khi chân thon.
+        </Note>
+      ) : null}
+      {kind === 'tay' ? (
+        <Note>
+          Form giày tây / mũi nhọn thường hẹp hơn sneaker. Da mới có thể nới nhẹ theo bề ngang, gần như không dài thêm — căn theo chiều
+          dài chân, không mua chật chờ giãn. Giữa hai cỡ nên nghiêng lớn hơn; mang tất công sở khi đo.
+        </Note>
+      ) : null}
+      {kind === 'boot' ? (
+        <>
+          <p className="text-sm text-gray-700 mt-3">
+            Boot cổ cao: đo thêm bắp chân chỗ to nhất (cm) rồi so với số ống boot trên tin bán. Tất dày hoặc quần bó trong boot nên tăng 1 size
+            chiều dài.
+          </p>
+          <Note>
+            Chelsea / boot ôm cổ nên vừa, tránh quá rộng bị tuột gót. Combat hoặc ống rộng ưu tiên chiều dài chân; bắp to thì đọc kỹ chu vi ống.
+          </Note>
+        </>
+      ) : null}
+      {kind === 'sandal' ? (
+        <Note>
+          Quai chỉnh được: giữ đúng cỡ nếu chân thon. Quai cố định hoặc dép slide: chân bè / mu cao tăng 1 size; quá rộng dễ tuột gót khi bước.
+          Không mang tất khi đo nếu bạn đi dép trần.
+        </Note>
+      ) : null}
+    </>
+  );
+}
+
+function GuideFemaleSneaker() {
+  return (
+    <>
+      <Heading>Sneaker & giày bệt Nữ — đo chiều dài chân (cm)</Heading>
+      <p className="text-sm text-gray-700 mt-2">Đo gót đến ngón dài nhất; đứng, đo buổi tối, mang tất như khi đi sneaker.</p>
+      <ShoeTableFemale />
+      <Note>
+        Sneaker đế dày / chunky thường rộng hơn giày bệt mũi nhọn. Giữa hai cỡ: giày bệt hoặc mũi hẹp nghiêng lớn hơn; sneaker thể thao chừa
+        khoảng 0,5 cm mũi. Chân bè, mu cao tăng 1 size.
+      </Note>
+    </>
+  );
+}
+
+function GuideFemaleBoot() {
+  return (
+    <>
+      <Heading>Boot Nữ — cỡ chân và ống boot</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Căn chiều dài chân như giày bệt. Boot cổ cao / over-knee: đo bắp chân chỗ to nhất và chiều cao ống (nếu mô tả có) để biết có kéo vừa
+        không.
+      </p>
+      <ShoeTableFemale />
+      <Note>
+        Boot mũi nhọn hoặc khóa kéo ôm nên nghiêng lớn hơn 1 size nếu ở giữa hai cỡ. Tất dày, quần trong boot cũng nên tăng 1 size. Bắp to ưu
+        tiên mẫu ống rộng hoặc chất co giãn.
+      </Note>
+    </>
+  );
+}
+
+function GuideFemaleSandal({
+  kind,
+}: {
+  kind: 'dep-sandal-nu' | 'sandal-quai-ngang-nu' | 'sandal-dinh-da-nu' | 'sandal-ho-mui-nu';
+}) {
+  const title =
+    kind === 'sandal-quai-ngang-nu'
+      ? 'Sandal quai ngang Nữ'
+      : kind === 'sandal-dinh-da-nu'
+        ? 'Sandal đính đá Nữ'
+        : kind === 'sandal-ho-mui-nu'
+          ? 'Sandal hở mũi Nữ'
+          : 'Dép sandal Nữ';
+  return (
+    <>
+      <Heading>{title} — cỡ và quai</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo chiều dài chân (cm) như giày bệt. Sandal hở nên vừa, không chật mũi và không quá rộng để gót bị tuột.
+      </p>
+      <ShoeTableFemale />
+      {kind === 'sandal-quai-ngang-nu' ? (
+        <Note>
+          Quai ngang ôm mu chân: nếu mu cao hoặc quai không chỉnh được, tăng 1 size. Chân thon có thể giữ đúng cỡ; kiểm tra vị trí quai không
+          cắt ngón.
+        </Note>
+      ) : null}
+      {kind === 'sandal-dinh-da-nu' ? (
+        <Note>
+          Hạt / đá đính phía trong có thể làm lòng giày chật hơn 0,5 cỡ. Giữa hai cỡ nên chọn lớn hơn; thử cảm giác quai không cấn mu chân.
+        </Note>
+      ) : null}
+      {kind === 'sandal-ho-mui-nu' ? (
+        <Note>
+          Mũi hở: ngón không được tràn khỏi đế. Giữa hai cỡ, chân thon giữ đúng; chân bè tăng 1 size để bề ngang thoáng, không chọn quá dài.
+        </Note>
+      ) : null}
+      {kind === 'dep-sandal-nu' ? (
+        <Note>
+          Dép lê / sandal quai mảnh: chân thon giữ đúng size; chân bè hoặc mu cao tăng 1 size. Quai chỉnh được thì ưu tiên đúng chiều dài chân.
+        </Note>
+      ) : null}
+    </>
+  );
+}
+
+function GuideShirtMale() {
+  return (
+    <>
+      <Heading>Áo sơ mi Nam — cổ, ngực và tay</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng cổ (ôm vừa, không siết), vòng ngực chỗ nở nhất, vai (xương vai này sang xương vai kia) và dài tay từ vai đến cổ tay khi hơi
+        gập khuỷu.
+      </p>
+      <ShirtMaleTable />
+      <Note>
+        Sơ mi slim: nếu bụng / ngực dày hơn vai, tăng 1 cỡ hoặc ưu tiên dáng regular. Cổ áo phải cài được nút trên mà vẫn thở được. Form oversize
+        có thể giảm 1 cỡ nếu muốn gọn.
+      </Note>
+    </>
+  );
+}
+
+function GuidePantsMale() {
+  return (
+    <>
+      <Heading>Quần dài Nam — eo, hông và dài ống</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng eo chỗ thường cài quần (không hóp bụng) và vòng hông chỗ lớn nhất. Dài ngoài: từ cạp xuống gấu. Inseam: từ đáy đũng (đường
+        may giữa hai ống) xuống gấu — chỉ so với cột inseam khi tin bán ghi inseam.
+      </p>
+      <PantsMaleTable />
+      <Note>
+        Cỡ số 28–38 ≈ vòng eo tính theo inch. Nam Việt ~168–175 cm thường khớp dải dài ngoài 100–106 cm (cỡ 30–32). Cao trên 178 cm lấy dải
+        dài hơn trong cùng cỡ eo. Quần âu/jeans ôm: giữa hai cỡ chọn vừa, tránh siết.
+      </Note>
+    </>
+  );
+}
+
+function GuideDressFemale() {
+  return (
+    <>
+      <Heading>Đầm Nữ — ngực, eo, hông và dài đầm</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng ngực (qua điểm nở nhất), eo nhỏ nhất, hông chỗ lớn nhất. Dài đầm: từ vai (hoặc từ eo với đầm hai dây) xuống gấu — so với số
+        trong mô tả (mini / midi / maxi).
+      </p>
+      <ApparelFemaleTable />
+      <Note>
+        Đầm ôm ưu tiên ngực và eo; nếu hông to hơn cùng cỡ thì chọn cỡ theo hông hoặc dáng xòe. Đầm hai dây / cổ đổ: đo thêm vòng trên ngực.
+        Form oversize có thể giảm 1 cỡ nếu muốn gọn.
+      </Note>
+    </>
+  );
+}
+
+function GuideSkirtFemale() {
+  return (
+    <>
+      <Heading>Váy &amp; chân váy Nữ — eo, hông và dài</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng eo chỗ cạp váy và vòng hông chỗ lớn nhất. Dài chân váy đo từ cạp xuống gấu: ngang gối khoảng giữa đùi–gối; midi tới giữa bắp
+        chân (không phải váy ngắn).
+      </p>
+      <SkirtFemaleTable />
+      <Note>
+        Mini thường ngắn hơn cột ngang gối. Maxi gần mắt cá — đọc số cm trên từng sản phẩm, đừng lấy midi. Chân váy ôm căn hông; chân váy xòe
+        căn eo. Eo nhỏ hơn hông nhiều thì chọn theo hông rồi chỉnh cạp (nếu có).
+      </Note>
+    </>
+  );
+}
+
+function GuidePantsFemale() {
+  return (
+    <>
+      <Heading>Quần dài &amp; legging Nữ — eo, hông và dài ống</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng eo thường mặc quần và vòng hông chỗ lớn nhất. Dài ngoài: cạp xuống gấu. Inseam: đáy đũng xuống gấu (thường 70–80 cm — không
+        nhầm với dài ngoài ~90–105 cm). Legging co giãn có thể trùng hai cỡ — ưu tiên ôm vừa, không tụt cạp.
+      </p>
+      <PantsFemaleTable />
+      <Note>
+        Jeans / quần tây ôm: chọn theo hông nếu hông to hơn eo. Legging và quần cạp cao: bụng hơi dày nên tăng 1 cỡ. Cao dưới 155 cm lấy dải
+        inseam ngắn hơn trong cùng cỡ; cao trên 165 cm lấy dải dài hơn.
+      </Note>
+    </>
+  );
+}
+
+function GuideBoxerMale() {
+  return (
+    <>
+      <Heading>Quần lót boxer brief Nam — eo và hông</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng eo chỗ cạp quần lót (ôm vừa) và vòng hông chỗ lớn nhất. Chọn cỡ vừa, không siết eo — vải co giãn sẽ ôm thêm khi mặc.
+      </p>
+      <BoxerMaleTable />
+      <Note>
+        Boxer brief ôm đùi: nếu đùi to, tăng 1 cỡ dù eo còn trong dải. Brief/sịp tam giác thường trùng bảng eo. Giữa hai cỡ chọn vừa, tránh căng
+        cạp.
+      </Note>
+    </>
+  );
+}
+
+function GuidePantyFemale() {
+  return (
+    <>
+      <Heading>Quần lót &amp; bikini lót Nữ — eo và hông</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng eo nhỏ nhất và vòng hông chỗ lớn nhất. Bikini / quần lót ôm nên khớp hông; cạp không cắt da.
+      </p>
+      <PantyFemaleTable />
+      <Note>
+        Nếu hông to hơn eo một bậc, chọn theo hông. Quần lót cotton ít co hơn vải thun — giữa hai cỡ nên tăng 1. Không dùng bảng này cho áo
+        bra (xem trang{' '}
+        <Cat2Link path="do-lot-nu/bra-ao-nguc-nu">Bra áo ngực Nữ</Cat2Link>).
+      </Note>
+    </>
+  );
+}
+
+function GuideMaternityDaily() {
+  return (
+    <>
+      <Heading>Đồ mặc bầu hàng ngày — vòng bụng và cỡ</Heading>
+      <p className="text-sm text-gray-700 mt-2">
+        Đo vòng ngực và vòng bụng chỗ nở nhất (đứng thẳng, thở bình thường). So với size đang mặc trước bầu, rồi đối chiếu giai đoạn:
+      </p>
+      <MaternityBellyTable />
+      <p className="text-sm text-gray-700 mt-3">Bảng ngực–eo–hông nữ (tham khảo dáng trước bầu / đầu thai kỳ):</p>
+      <ApparelFemaleTable />
+      <Note>
+        Ưu tiên chất co giãn và ô bụng. Bụng phát triển lệch bảng thì chọn cỡ lớn hơn, không siết bụng. Đồ công sở bầu hoặc sau sinh có thể
+        cần dáng khác — luôn đọc mô tả từng sản phẩm.
+      </Note>
+    </>
+  );
+}
+
 const CAT2_PAIR = {
   KIDS_SHOES: 'thoi-trang-tre-em/giay-dep-tre-em',
   BRA: 'do-lot-nu/bra-ao-nguc-nu',
   HEELS: 'giay-dep-nu/giay-cao-got-nu',
   WEDDING: 'giay-dep-nu/giay-cuoi-du-tiec-nu',
+  MALE_SNEAKER: 'giay-dep-nam/sneaker-giay-chay-nam',
+  MALE_DRESS: 'giay-dep-nam/giay-tay-cong-so-nam',
+  MALE_BOOT: 'giay-dep-nam/boot-nam',
+  MALE_SANDAL: 'giay-dep-nam/sandal-dep-quai-nam',
+  FEMALE_SNEAKER: 'giay-dep-nu/sneaker-giay-bet-nu',
+  FEMALE_BOOT: 'giay-dep-nu/boot-nu',
+  FEMALE_SANDAL: 'giay-dep-nu/dep-sandal-nu',
+  FEMALE_SANDAL_STRAP: 'giay-dep-nu/sandal-quai-ngang-nu',
+  FEMALE_SANDAL_STONE: 'giay-dep-nu/sandal-dinh-da-nu',
+  FEMALE_SANDAL_OPEN: 'giay-dep-nu/sandal-ho-mui-nu',
+  MALE_SHIRT: 'thoi-trang-nam/ao-so-mi-nam',
+  MALE_PANTS: 'thoi-trang-nam/quan-dai-nam',
+  FEMALE_DRESS: 'thoi-trang-nu/dam-nu',
+  FEMALE_SKIRT: 'thoi-trang-nu/vay-chan-vay-nu',
+  FEMALE_PANTS: 'thoi-trang-nu/quan-dai-legging-nu',
+  MALE_BOXER: 'do-lot-nam/quan-lot-boxer-brief-nam',
+  FEMALE_PANTY: 'do-lot-nu/quan-lot-bikini-lot-nu',
+  MATERNITY_DAILY: 'trang-phuc-bau-hau-san/do-mac-bau-hang-ngay',
 } as const;
 
 /** Nội dung chính: `segments` là [cat1] hoặc [cat1, cat2Override]. */
@@ -423,6 +895,42 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         return <GuideHeelsFemale variant="cao-got" />;
       case CAT2_PAIR.WEDDING:
         return <GuideHeelsFemale variant="cuoi-tiec" />;
+      case CAT2_PAIR.MALE_SNEAKER:
+        return <GuideMaleFootwear kind="sneaker" />;
+      case CAT2_PAIR.MALE_DRESS:
+        return <GuideMaleFootwear kind="tay" />;
+      case CAT2_PAIR.MALE_BOOT:
+        return <GuideMaleFootwear kind="boot" />;
+      case CAT2_PAIR.MALE_SANDAL:
+        return <GuideMaleFootwear kind="sandal" />;
+      case CAT2_PAIR.FEMALE_SNEAKER:
+        return <GuideFemaleSneaker />;
+      case CAT2_PAIR.FEMALE_BOOT:
+        return <GuideFemaleBoot />;
+      case CAT2_PAIR.FEMALE_SANDAL:
+        return <GuideFemaleSandal kind="dep-sandal-nu" />;
+      case CAT2_PAIR.FEMALE_SANDAL_STRAP:
+        return <GuideFemaleSandal kind="sandal-quai-ngang-nu" />;
+      case CAT2_PAIR.FEMALE_SANDAL_STONE:
+        return <GuideFemaleSandal kind="sandal-dinh-da-nu" />;
+      case CAT2_PAIR.FEMALE_SANDAL_OPEN:
+        return <GuideFemaleSandal kind="sandal-ho-mui-nu" />;
+      case CAT2_PAIR.MALE_SHIRT:
+        return <GuideShirtMale />;
+      case CAT2_PAIR.MALE_PANTS:
+        return <GuidePantsMale />;
+      case CAT2_PAIR.FEMALE_DRESS:
+        return <GuideDressFemale />;
+      case CAT2_PAIR.FEMALE_SKIRT:
+        return <GuideSkirtFemale />;
+      case CAT2_PAIR.FEMALE_PANTS:
+        return <GuidePantsFemale />;
+      case CAT2_PAIR.MALE_BOXER:
+        return <GuideBoxerMale />;
+      case CAT2_PAIR.FEMALE_PANTY:
+        return <GuidePantyFemale />;
+      case CAT2_PAIR.MATERNITY_DAILY:
+        return <GuideMaternityDaily />;
       default:
         break;
     }
@@ -442,6 +950,16 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
           Giữa hai cỡ: giày thể thao hoặc giày bít mũi nên chọn cỡ lớn hơn; dép lê/dép quai ngang có thể giữ đúng cỡ nếu
           chân thon. Chân bè, mu chân cao hoặc thích mang tất dày nên tăng 1 size.
         </Note>
+        <Note>
+          Bảng theo form:{' '}
+          <Cat2Link path={CAT2_PAIR.MALE_SNEAKER}>sneaker &amp; giày chạy</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.MALE_DRESS}>giày tây</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.MALE_BOOT}>boot</Cat2Link>
+          {' và '}
+          <Cat2Link path={CAT2_PAIR.MALE_SANDAL}>sandal &amp; dép quai</Cat2Link>.
+        </Note>
       </>
     );
   }
@@ -455,6 +973,18 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         <Note>
           Giày cao gót, mũi nhọn hoặc boot ôm nên nghiêng lớn hơn 1 size nếu ở giữa hai cỡ. Sandal/dép quai mảnh giữ đúng
           size khi chân thon; chân bè hoặc mu cao nên tăng 1 size.
+        </Note>
+        <Note>
+          Bảng theo form:{' '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_SNEAKER}>sneaker &amp; giày bệt</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.HEELS}>cao gót</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.WEDDING}>cưới &amp; tiệc</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_BOOT}>boot</Cat2Link>
+          {' và '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_SANDAL}>dép sandal</Cat2Link>.
         </Note>
       </>
     );
@@ -475,6 +1005,12 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         </p>
         <ApparelMaleHeightWeightTable />
         <Note>Form oversize có thể giảm 1 cỡ nếu thích vừa người; form slim/ôm hoặc bụng lớn nên tăng 1 cỡ.</Note>
+        <Note>
+          Chi tiết hơn:{' '}
+          <Cat2Link path={CAT2_PAIR.MALE_SHIRT}>áo sơ mi (cổ–tay)</Cat2Link>
+          {' và '}
+          <Cat2Link path={CAT2_PAIR.MALE_PANTS}>quần dài (eo–dài ống)</Cat2Link>.
+        </Note>
       </>
     );
   }
@@ -494,18 +1030,45 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         </p>
         <ApparelFemaleHeightWeightTable />
         <Note>Đầm ôm ưu tiên vai–ngực–eo; quần và chân váy ưu tiên eo và hông. Form oversize có thể giảm 1 cỡ nếu muốn gọn.</Note>
+        <Note>
+          Chi tiết hơn:{' '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_DRESS}>đầm</Cat2Link>
+          {', '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_SKIRT}>váy &amp; chân váy</Cat2Link>
+          {' và '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_PANTS}>quần dài &amp; legging</Cat2Link>.
+        </Note>
       </>
     );
   }
 
-  if (key === 'do-lot-nam' || key === 'do-lot-nu') {
+  if (key === 'do-lot-nam') {
     return (
       <>
-        <Heading>Đồ lót — căn vào cm vòng</Heading>
+        <Heading>Đồ lót nam — căn vào cm vòng</Heading>
         <p className="text-sm text-gray-700 mt-2">
           Đo vòng eo thường mặc (cm) và vòng hông chỗ lớn nhất; so với bảng trên từng sản phẩm. Giữa hai cỡ chọn vừa, tránh siết quá eo.
         </p>
-        <Note>Áo bra: xem thêm cỡ vành + cup trong trang «Bra áo ngực Nữ» trong danh sách nhóm con bên info.</Note>
+        <Note>
+          Quần lót boxer/brief: xem bảng eo–hông tại{' '}
+          <Cat2Link path={CAT2_PAIR.MALE_BOXER}>Quần lót boxer brief Nam</Cat2Link>.
+        </Note>
+      </>
+    );
+  }
+
+  if (key === 'do-lot-nu') {
+    return (
+      <>
+        <Heading>Đồ lót nữ — căn vào cm vòng</Heading>
+        <p className="text-sm text-gray-700 mt-2">
+          Đo vòng eo thường mặc (cm) và vòng hông chỗ lớn nhất; so với bảng trên từng sản phẩm. Giữa hai cỡ chọn vừa, tránh siết quá eo.
+        </p>
+        <Note>
+          Áo bra: cỡ vành + cup tại{' '}
+          <Cat2Link path={CAT2_PAIR.BRA}>Bra áo ngực Nữ</Cat2Link>. Quần lót / bikini lót:{' '}
+          <Cat2Link path={CAT2_PAIR.FEMALE_PANTY}>Quần lót &amp; bikini lót Nữ</Cat2Link>.
+        </Note>
       </>
     );
   }
@@ -518,6 +1081,10 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
           Ưu tiên vòng ngực và bụng (cm), chiều cao, giai đoạn bầu hoặc sau sinh. Ưu tiên chất co giãn, dáng ôm vừa.
         </p>
         <Note>Bụng phát triển lệch bảng có thể chọn cỡ lớn hơn hoặc kiểu ô thoáng bụng của shop.</Note>
+        <Note>
+          Bảng theo giai đoạn thai kỳ: xem{' '}
+          <Cat2Link path={CAT2_PAIR.MATERNITY_DAILY}>Đồ mặc bầu hàng ngày</Cat2Link>.
+        </Note>
       </>
     );
   }
@@ -530,7 +1097,8 @@ export function SizeGuideInner({ segments }: { segments: readonly string[] }) {
         <KidsTable />
         <Note>Trẻ lớn nhanh — ưu tiên khớp chiều cao và cân nặng hơn đúng số tuổi trên nhãn.</Note>
         <Note>
-          Riêng <strong>giày dép trẻ em</strong> nên căn chiều dài chân (cm): mở trang riêng cho nhóm con «Giày dép trẻ em» từ index chọn size.
+          Riêng <strong>giày dép trẻ em</strong> nên căn chiều dài chân (cm):{' '}
+          <Cat2Link path={CAT2_PAIR.KIDS_SHOES}>Giày dép trẻ em</Cat2Link>.
         </Note>
       </>
     );
@@ -625,6 +1193,7 @@ export default function SizeGuideBody({
         </p>
       ) : null}
       <SizeGuideInner segments={segments} />
+      {SOURCE_FIT_CAT1.has(segments[0]) ? <SourceFitNote /> : null}
       <p className="text-xs text-gray-500 mt-6 border-t pt-4">
         188.com.vn — thông tin chỉ mang tính tham khảo, không thay cho mô tả và chính sách đổi trả của từng sản phẩm.&nbsp;
         <Link href="/info/chon-size" className="text-[#ea580c] hover:underline">

@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef, useId, useMemo, useCallback } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+import AppBrandMark from '@/components/AppBrandMark';
 import {
   isKhoSaleMenuCategory,
   KHO_SALE_HREF,
@@ -14,7 +14,6 @@ import MobileImageSearchButton from '@/components/search/MobileImageSearchButton
 import ButtonSpinner from '@/components/ui/ButtonSpinner';
 import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import { useNavigateWithLoading } from '@/lib/use-navigate-with-loading';
-import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import {
   PRODUCT_RELATED_TABS,
@@ -349,13 +348,8 @@ export default function MobileHeader({
               className={`block ${isScrolled ? 'pointer-events-none' : ''}`}
               aria-hidden={isScrolled}
             >
-              <Image
-                src={cdnUrl('/logo head 188.png')}
-                data-allow-png
-                alt="188.com.vn"
-                width={200}
-                height={40}
-                className={`w-auto object-contain block ${compactChrome ? 'h-8' : 'h-10 sm:h-11'}`}
+              <AppBrandMark
+                variant={compactChrome ? 'mobileCompact' : 'mobile'}
                 priority={!isScrolled}
               />
             </Link>

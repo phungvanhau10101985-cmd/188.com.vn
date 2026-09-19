@@ -457,11 +457,11 @@ export default function SaleCalendarSettingsPanel({ embedded = false }: SaleCale
             <h2 className="text-lg font-bold text-gray-900">Sale ngày trùng tháng (site-wide)</h2>
             <p className="text-sm text-gray-600 mt-1">
               Bật/tắt từng ngày {`{tháng}/{tháng}`} hoặc đặt sale một ngày bất kỳ. Cộng dồn với mã ví/sinh nhật/hạng
-              — tổng giảm tối đa 15% giá gốc đơn. Favicon / ảnh đại diện web app tự đổi theo{' '}
+              — tổng giảm tối đa 15% giá gốc đơn. Favicon / ảnh đại diện trong app tự đổi theo{' '}
               <a href="#ai-icons" className="font-medium text-amber-800 underline">
                 icon AI vuông
               </a>
-              {' '}khi teaser hoặc đang sale ngày trùng tháng.
+              {' '}khi teaser hoặc đang sale ngày trùng tháng — khách thấy ngay khi mở shop, không cần cài lại.
             </p>
           </>
         ) : (

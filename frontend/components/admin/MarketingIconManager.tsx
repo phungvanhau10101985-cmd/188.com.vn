@@ -81,8 +81,8 @@ export default function MarketingIconManager() {
         <h2 className="text-lg font-bold text-gray-900">Favicon / ảnh đại diện web app AI</h2>
         <p className="mt-1 text-sm text-gray-600">
           Nano Banana chỉnh ảnh logo vuông hiện tại thành icon sale cùng ngày-tháng. Khi sale teaser
-          hoặc đang diễn ra, tab trình duyệt và ảnh đại diện web app trên điện thoại tự đổi sang
-          icon này.
+          hoặc đang diễn ra, logo trên đầu trang (và favicon tab) tự đổi sang icon này — khách mở shop
+          là thấy, không cần cài lại web app. Hết sale tự về logo chữ.
         </p>
       </div>
 

@@ -3,24 +3,16 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { apiClient } from '@/lib/api-client';
+import AppBrandMark from '@/components/AppBrandMark';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
-import { getOptimizedImage } from '@/lib/image-utils';
-import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
 import { hasClientAuthUser } from '@/lib/client-auth-session';
 import { buildMobileSearchHref, MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
-
-const LOGO_URL = getOptimizedImage(cdnUrl('/logo head 188.png'), {
-  width: 320,
-  height: 80,
-  quality: 95,
-});
 
 interface HeaderProps {
   onSearch?: (searchTerm: string) => void;
@@ -145,16 +137,7 @@ export default function Header({ cartItemsCount, favoriteItemsCount, initialSear
         <div className="flex items-center justify-between h-20">
           {/* Logo */}
           <Link href={getStorefrontHomeHref()} className="flex items-center h-full group">
-            <Image
-              src={LOGO_URL}
-              data-allow-png
-              alt="188.com.vn - Xem là thích click là mê"
-              width={320}
-              height={80}
-              priority
-              sizes="(max-width: 768px) 160px, 320px"
-              className="h-full max-h-20 w-auto object-contain transform group-hover:scale-[1.02] transition-transform duration-200"
-            />
+            <AppBrandMark variant="desktop" priority />
           </Link>
 
           {/* Search Bar */}

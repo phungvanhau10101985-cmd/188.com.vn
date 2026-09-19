@@ -36,10 +36,28 @@ export const ALL_SIZE_GUIDE_SLUGS = Object.keys(SIZE_GUIDE_SLUG_TITLES);
  * Cặp slug `cat1/cat2` (khớp 2 segment đầu của Category.full_slug) có nội dung riêng.
  */
 export const SIZE_GUIDE_CAT2_TITLES: Record<string, string> = {
-  'thoi-trang-tre-em/giay-dep-tre-em': 'Giày dép trẻ em',
-  'do-lot-nu/bra-ao-nguc-nu': 'Bra áo ngực Nữ',
+  'giay-dep-nam/sneaker-giay-chay-nam': 'Sneaker & giày chạy Nam',
+  'giay-dep-nam/giay-tay-cong-so-nam': 'Giày tây & công sở Nam',
+  'giay-dep-nam/boot-nam': 'Boot Nam',
+  'giay-dep-nam/sandal-dep-quai-nam': 'Sandal & dép quai Nam',
+  'giay-dep-nu/sneaker-giay-bet-nu': 'Sneaker & giày bệt Nữ',
   'giay-dep-nu/giay-cao-got-nu': 'Giày cao gót Nữ',
   'giay-dep-nu/giay-cuoi-du-tiec-nu': 'Giày cưới & dự tiệc Nữ',
+  'giay-dep-nu/boot-nu': 'Boot Nữ',
+  'giay-dep-nu/dep-sandal-nu': 'Dép sandal Nữ',
+  'giay-dep-nu/sandal-quai-ngang-nu': 'Sandal quai ngang Nữ',
+  'giay-dep-nu/sandal-dinh-da-nu': 'Sandal đính đá Nữ',
+  'giay-dep-nu/sandal-ho-mui-nu': 'Sandal hở mũi Nữ',
+  'thoi-trang-nam/ao-so-mi-nam': 'Áo sơ mi Nam',
+  'thoi-trang-nam/quan-dai-nam': 'Quần dài Nam',
+  'thoi-trang-nu/dam-nu': 'Đầm Nữ',
+  'thoi-trang-nu/vay-chan-vay-nu': 'Váy & chân váy Nữ',
+  'thoi-trang-nu/quan-dai-legging-nu': 'Quần dài & legging Nữ',
+  'do-lot-nam/quan-lot-boxer-brief-nam': 'Quần lót boxer brief Nam',
+  'do-lot-nu/bra-ao-nguc-nu': 'Bra áo ngực Nữ',
+  'do-lot-nu/quan-lot-bikini-lot-nu': 'Quần lót & bikini lót Nữ',
+  'trang-phuc-bau-hau-san/do-mac-bau-hang-ngay': 'Đồ mặc bầu hàng ngày',
+  'thoi-trang-tre-em/giay-dep-tre-em': 'Giày dép trẻ em',
 };
 
 export const ALL_CAT2_GUIDE_KEYS = Object.keys(SIZE_GUIDE_CAT2_TITLES);

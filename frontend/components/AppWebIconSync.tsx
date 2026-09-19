@@ -2,8 +2,8 @@
 
 import { useEffect } from 'react';
 
-import { APP_WEB_ICON_URL, type CurrentAppWebIcon } from '@/lib/app-web-icon';
-import { apiClient } from '@/lib/api-client';
+import { APP_WEB_ICON_URL } from '@/lib/app-web-icon';
+import { useAppWebIconPolling } from '@/lib/use-app-web-icon';
 
 function applyRel(rel: string, href: string, attrs?: Record<string, string>) {
   const links = Array.from(document.head.querySelectorAll<HTMLLinkElement>(`link[rel="${rel}"]`));
@@ -31,26 +31,11 @@ function applyIcon(url: string) {
 }
 
 export default function AppWebIconSync() {
+  const { icon_url: iconUrl } = useAppWebIconPolling();
+
   useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        const current = (await apiClient.getCurrentAppWebIcon()) as CurrentAppWebIcon;
-        if (cancelled) return;
-        applyIcon(current.icon_url || APP_WEB_ICON_URL);
-      } catch {
-        if (!cancelled) applyIcon(APP_WEB_ICON_URL);
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(() => void load(), 5 * 60 * 1000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
+    applyIcon(iconUrl || APP_WEB_ICON_URL);
+  }, [iconUrl]);
 
   return null;
 }
