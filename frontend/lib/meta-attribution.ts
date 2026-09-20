@@ -4,12 +4,14 @@
  */
 
 const COOKIE_MAX_AGE_SEC = 90 * 24 * 60 * 60;
+const META_CLICK_ID_MAX_AGE_MS = COOKIE_MAX_AGE_SEC * 1000;
+const META_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const LS_FBCLID = '188_meta_fbclid';
 const LS_FBC = '188_meta_fbc';
 const LS_FBP = '188_meta_fbp';
 
-const FBP_RE = /^fb\.\d+\.\d+\.\d+$/;
-const FBC_RE = /^fb\.\d+\.\d+\.[A-Za-z0-9_-]+$/;
+const FBP_RE = /^fb\.\d+\.(\d{13})\.\d+$/;
+const FBC_RE = /^fb\.\d+\.(\d{13})\.[A-Za-z0-9_-]+$/;
 
 export type MetaAdvancedMatchingPatch = {
   email?: string | null;
@@ -66,15 +68,35 @@ function writeCookie(name: string, value: string): void {
 }
 
 export function isValidMetaFbp(value: string | null | undefined): value is string {
-  return Boolean(value && FBP_RE.test(value.trim()));
+  return hasValidMetaCreationTime(value, FBP_RE);
 }
 
 export function isValidMetaFbc(value: string | null | undefined): value is string {
-  return Boolean(value && FBC_RE.test(value.trim()) && value.trim().length <= 512);
+  return Boolean(
+    value &&
+      value.trim().length <= 512 &&
+      hasValidMetaCreationTime(value, FBC_RE)
+  );
+}
+
+function hasValidMetaCreationTime(
+  value: string | null | undefined,
+  pattern: RegExp
+): value is string {
+  if (!value) return false;
+  const match = pattern.exec(value.trim());
+  if (!match) return false;
+  const creationTimeMs = Number(match[1]);
+  const now = Date.now();
+  return (
+    Number.isSafeInteger(creationTimeMs) &&
+    creationTimeMs <= now + META_CLOCK_SKEW_MS &&
+    creationTimeMs >= now - META_CLICK_ID_MAX_AGE_MS
+  );
 }
 
 function newFbp(): string {
-  return `fb.1.${Math.floor(Date.now() / 1000)}.${Math.floor(Math.random() * 1e16)}`;
+  return `fb.1.${Date.now()}.${Math.floor(Math.random() * 1e16)}`;
 }
 
 function fbcFromFbclid(fbclid: string, existing?: string | null): string {
@@ -82,7 +104,7 @@ function fbcFromFbclid(fbclid: string, existing?: string | null): string {
   if (existing && isValidMetaFbc(existing) && existing.endsWith(`.${clid}`)) {
     return existing;
   }
-  return `fb.1.${Math.floor(Date.now() / 1000)}.${clid}`;
+  return `fb.1.${Date.now()}.${clid}`;
 }
 
 function bindPixelReady(): void {
@@ -186,24 +208,31 @@ export function persistMetaClickIds(): { fbp?: string; fbc?: string } {
   const params = new URLSearchParams(window.location.search);
   const urlClid = (params.get('fbclid') || '').trim();
   if (urlClid) lsSet(LS_FBCLID, urlClid);
-  const fbclid = urlClid || lsGet(LS_FBCLID);
 
-  let fbc = readCookie('_fbc') || lsGet(LS_FBC) || '';
-  if (fbclid) {
-    fbc = fbcFromFbclid(fbclid, fbc);
+  const cookieFbc = readCookie('_fbc');
+  const storedFbc = lsGet(LS_FBC);
+  let fbc = isValidMetaFbc(cookieFbc)
+    ? cookieFbc
+    : isValidMetaFbc(storedFbc)
+      ? storedFbc
+      : '';
+  if (urlClid) {
+    fbc = fbcFromFbclid(urlClid, fbc);
     writeCookie('_fbc', fbc);
     lsSet(LS_FBC, fbc);
-  } else if (isValidMetaFbc(fbc)) {
+  } else if (fbc) {
+    // Chỉ khôi phục _fbc nguyên bản. Không ghép fbclid cũ với timestamp hiện tại.
     writeCookie('_fbc', fbc);
     lsSet(LS_FBC, fbc);
-  } else {
-    fbc = '';
   }
 
-  let fbp = readCookie('_fbp') || lsGet(LS_FBP) || '';
-  if (!isValidMetaFbp(fbp)) {
-    fbp = newFbp();
-  }
+  const cookieFbp = readCookie('_fbp');
+  const storedFbp = lsGet(LS_FBP);
+  const fbp = isValidMetaFbp(cookieFbp)
+    ? cookieFbp
+    : isValidMetaFbp(storedFbp)
+      ? storedFbp
+      : newFbp();
   writeCookie('_fbp', fbp);
   lsSet(LS_FBP, fbp);
 
@@ -222,10 +251,13 @@ export function readMetaClickIds(): { fbp?: string; fbc?: string } {
   };
 }
 
-export function getMetaCapiUserData(): Record<string, string> {
+export function getMetaCapiUserData(
+  opts?: { includeEmail?: boolean }
+): Record<string, string> {
   persistMetaClickIds();
   const cookies = readMetaClickIds();
   const pii = matchingToPixelParams(matching);
+  if (opts?.includeEmail === false) delete pii.em;
   return {
     country: 'vn',
     ...pii,

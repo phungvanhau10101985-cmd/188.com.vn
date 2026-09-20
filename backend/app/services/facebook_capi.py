@@ -28,9 +28,11 @@ from app.models.order import Order, OrderItem, OrderStatus
 logger = logging.getLogger(__name__)
 
 META_PIXEL_CURRENCY = "VND"
+META_CLICK_ID_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
+META_CLOCK_SKEW_MS = 5 * 60 * 1000
 _SHA256_HEX_RE = re.compile(r"^[a-f0-9]{64}$")
-_FBP_RE = re.compile(r"^fb\.\d+\.\d+\.\d+$")
-_FBC_RE = re.compile(r"^fb\.\d+\.\d+\.[A-Za-z0-9_-]+$")
+_FBP_RE = re.compile(r"^fb\.\d+\.(\d{13})\.\d+$")
+_FBC_RE = re.compile(r"^fb\.\d+\.(\d{13})\.[A-Za-z0-9_-]+$")
 
 # Không hash — Meta yêu cầu plaintext.
 _PLAIN_USER_DATA_KEYS = frozenset(
@@ -199,13 +201,26 @@ def dob_to_meta(raw: Any) -> Optional[str]:
     return digits if len(digits) == 8 else None
 
 
+def _has_valid_meta_creation_time(value: str, pattern: re.Pattern[str]) -> bool:
+    match = pattern.match((value or "").strip())
+    if not match:
+        return False
+    creation_time_ms = int(match.group(1))
+    now_ms = int(time.time() * 1000)
+    return (
+        now_ms - META_CLICK_ID_MAX_AGE_MS
+        <= creation_time_ms
+        <= now_ms + META_CLOCK_SKEW_MS
+    )
+
+
 def is_valid_meta_fbp(value: str) -> bool:
-    return bool(_FBP_RE.match((value or "").strip()))
+    return _has_valid_meta_creation_time(value, _FBP_RE)
 
 
 def is_valid_meta_fbc(value: str) -> bool:
     v = (value or "").strip()
-    return bool(_FBC_RE.match(v)) and len(v) <= 512
+    return len(v) <= 512 and _has_valid_meta_creation_time(v, _FBC_RE)
 
 
 def _valid_ip(value: str) -> Optional[str]:

@@ -1,5 +1,6 @@
 """Unit tests — Meta CAPI Purchase payload (server-side)."""
 import hashlib
+import time
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
@@ -75,6 +76,7 @@ def test_build_purchase_user_data_hashes_email_phone():
 
 
 def test_build_purchase_user_data_includes_click_id_and_geo():
+    now_ms = int(time.time() * 1000)
     order = SimpleNamespace(
         customer_email="a@b.com",
         customer_phone="0901234567",
@@ -83,8 +85,8 @@ def test_build_purchase_user_data_includes_click_id_and_geo():
         user_id=7,
         user=SimpleNamespace(gender="female", date_of_birth=date(1994, 5, 20)),
         meta_ads_context={
-            "fbp": "fb.1.1710000000.1234567890",
-            "fbc": "fb.1.1710000000.IwAR0clickid",
+            "fbp": f"fb.1.{now_ms}.1234567890",
+            "fbc": f"fb.1.{now_ms}.IwAR0clickid",
             "client_ip_address": "203.0.113.10",
             "client_user_agent": "Mozilla/5.0",
             "st": "ho chi minh",
@@ -93,8 +95,8 @@ def test_build_purchase_user_data_includes_click_id_and_geo():
         },
     )
     ud = build_purchase_user_data(order)
-    assert ud["fbc"] == "fb.1.1710000000.IwAR0clickid"
-    assert ud["fbp"] == "fb.1.1710000000.1234567890"
+    assert ud["fbc"] == f"fb.1.{now_ms}.IwAR0clickid"
+    assert ud["fbp"] == f"fb.1.{now_ms}.1234567890"
     assert ud["client_ip_address"] == "203.0.113.10"
     assert ud["fn"] == [_sha("van an")]
     assert ud["ln"] == [_sha("nguyen")]
@@ -117,7 +119,7 @@ def test_normalize_capi_user_data_does_not_rehash_or_keep_invalid_fbc():
     )
     assert out["em"] == [hashed_em]
     assert "fbc" not in out
-    assert out["fbp"] == "fb.1.1.1"
+    assert "fbp" not in out
     assert out["country"] == [_sha("vn")]
 
 
@@ -135,7 +137,10 @@ def test_split_vn_name_and_fold():
 
 
 def test_is_valid_meta_fbc():
-    assert is_valid_meta_fbc("fb.1.1710000000.IwAR0abc-def")
+    now_ms = int(time.time() * 1000)
+    assert is_valid_meta_fbc(f"fb.1.{now_ms}.IwAR0abc-def")
+    assert not is_valid_meta_fbc("fb.1.1710000000.IwAR0abc-def")
+    assert not is_valid_meta_fbc(f"fb.1.{now_ms + 600_000}.IwAR0abc-def")
     assert not is_valid_meta_fbc("IwAR0abc")
 
 

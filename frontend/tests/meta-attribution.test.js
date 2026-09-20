@@ -18,6 +18,8 @@ describe('Meta attribution contract', () => {
   test('persists fbclid into first-party _fbc/_fbp', () => {
     expect(attr).toContain('persistMetaClickIds');
     expect(attr).toContain("params.get('fbclid')");
+    expect(attr).toContain('`fb.1.${Date.now()}.${clid}`');
+    expect(attr).not.toContain('Math.floor(Date.now() / 1000)');
     expect(attr).toContain("writeCookie('_fbc'");
     expect(attr).toContain("writeCookie('_fbp'");
     expect(attr).toContain('getMetaAdsCheckoutFields');
@@ -26,7 +28,9 @@ describe('Meta attribution contract', () => {
 
   test('CAPI client merges click IDs and advanced matching', () => {
     expect(capi).toContain("from '@/lib/meta-attribution'");
-    expect(capi).toContain('getMetaCapiUserData()');
+    expect(capi).toContain('getMetaCapiUserData({ includeEmail:');
+    expect(capi).toContain('includeEmail?: boolean');
+    expect(attr).toContain("if (opts?.includeEmail === false) delete pii.em");
   });
 
   test('route tracker stores click IDs and logged-in PII', () => {

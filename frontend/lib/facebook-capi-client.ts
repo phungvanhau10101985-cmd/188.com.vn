@@ -25,9 +25,12 @@ export function newMetaEventId(prefix: string): string {
   return `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
 }
 
-function buildFacebookCapiBody(payload: FacebookCapiPayload): FacebookCapiPayload {
+function buildFacebookCapiBody(
+  payload: FacebookCapiPayload,
+  opts?: { includeEmail?: boolean }
+): FacebookCapiPayload {
   const mergedUser: Record<string, unknown> = {
-    ...getMetaCapiUserData(),
+    ...getMetaCapiUserData({ includeEmail: opts?.includeEmail !== false }),
     ...(payload.user_data && typeof payload.user_data === 'object' ? payload.user_data : {}),
   };
   const user_data = Object.keys(mergedUser).length ? mergedUser : undefined;
@@ -56,10 +59,10 @@ function postFacebookCapiBeacon(body: FacebookCapiPayload): boolean {
  */
 export async function sendFacebookCapiFromBrowser(
   payload: FacebookCapiPayload,
-  opts?: { keepalive?: boolean; retries?: number }
+  opts?: { keepalive?: boolean; retries?: number; includeEmail?: boolean }
 ): Promise<boolean> {
   if (typeof window === 'undefined') return false;
-  const body = buildFacebookCapiBody(payload);
+  const body = buildFacebookCapiBody(payload, opts);
   const url = `${window.location.origin}/api/facebook-capi`;
   const retries = Math.max(0, opts?.retries ?? 1);
 
