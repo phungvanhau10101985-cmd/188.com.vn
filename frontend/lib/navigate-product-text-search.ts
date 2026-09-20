@@ -1,5 +1,6 @@
 import type { CategoryLevel1 } from '@/types/api';
 import { generateSlug } from '@/lib/utils';
+import { categoryLevel3HrefFromNode } from '@/lib/category-listing-href';
 
 /** Từ khóa → trang kho sale / thanh lý (khớp VPS: không dùng ?q=sale trên trang chủ). */
 const SALE_LISTING_SLUGS = new Set([
@@ -61,9 +62,7 @@ export function navigateProductTextSearch(
             : name3,
         );
         if (target === slug3) {
-          router.push(
-            `/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`,
-          );
+          router.push(categoryLevel3HrefFromNode(slug1, slug2, c3));
           return;
         }
       }

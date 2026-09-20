@@ -3,6 +3,7 @@ import { getCategoryTreeForLayout } from "@/lib/category-seo";
 import type { CategoryLevel1 } from "@/types/api";
 import { INFO_PAGES } from "@/app/info/info-pages.config";
 import { listSeoClusters } from "@/lib/seo-cluster";
+import { isSeoClusterIndexable } from "@/lib/category-listing-href";
 
 /** Không prerender lúc build — generate khi request (tránh timeout khi API/DB bận). */
 export const dynamic = "force-dynamic";
@@ -64,7 +65,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Landing SEO clusters: /c/<slug> — chỉ index những cluster có index_policy=index
   const clusters = await listSeoClusters();
   for (const c of clusters) {
-    if (c.index_policy !== "index") continue;
+    if (!isSeoClusterIndexable(c)) continue;
     entries.push({
       url: `${BASE_URL}/c/${c.slug}`,
       lastModified: now,

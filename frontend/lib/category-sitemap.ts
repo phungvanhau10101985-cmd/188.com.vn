@@ -2,7 +2,7 @@
  * Sinh XML sitemap cho khu SEO danh mục: /danh-muc (+ cây đường dẫn) và tuỳ chọn /c/<cluster>.
  */
 
-import type { CategoryLevel1, CategoryLevel3 } from '@/types/api';
+import type { CategoryLevel1 } from '@/types/api';
 
 /** Đường dẫn route công khai — dùng trong Link và Search Console. */
 export const CATEGORY_SEO_SITEMAP_PATH = '/sitemap-danh-muc-seo';
@@ -27,17 +27,7 @@ export function flattenCategoryTreeForSitemap(tree: CategoryLevel1[]): CategoryS
       const s2 = slugOf(c2);
       const path2 = `${s1}/${s2}`;
       out.push({ level: 2, url: `/danh-muc/${path2}` });
-      for (const c3 of c2.children || []) {
-        const name3 =
-          typeof c3 === 'object' && c3 !== null && 'name' in c3 ? (c3 as CategoryLevel3).name : String(c3);
-        const s3 =
-          typeof c3 === 'object' && c3 !== null && 'slug' in c3
-            ? (c3 as CategoryLevel3).slug || name3
-            : name3;
-        const s3Norm = String(s3).trim().toLowerCase().replace(/\s+/g, '-');
-        const path3 = `${path2}/${s3Norm}`;
-        out.push({ level: 3, url: `/danh-muc/${path3}` });
-      }
+      // Cấp 3 không index trên /danh-muc — landing SEO là /c/<cluster>.
     }
   }
   return out;
@@ -60,8 +50,7 @@ function absLoc(siteBase: string, pathname: string): string {
 
 function priorityForCategoryLevel(level: 1 | 2 | 3): string {
   if (level === 1) return '0.82';
-  if (level === 2) return '0.8';
-  return '0.78';
+  return '0.8';
 }
 
 /**

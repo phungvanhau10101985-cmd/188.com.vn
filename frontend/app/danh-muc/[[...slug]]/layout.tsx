@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { getCategorySeoData, buildCategoryBreadcrumbJsonLd, buildCategoryCollectionJsonLd } from "@/lib/category-seo";
+import { getClusterSlugForCat3 } from "@/lib/seo-cluster";
 import { absolutePublicAssetUrl } from "@/lib/cdn-url";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 
@@ -15,6 +16,20 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const [level1, level2, level3] = slug || [];
+  if (level3) {
+    const clusterSlug = await getClusterSlugForCat3(level3);
+    if (clusterSlug) {
+      return {
+        title: "Đang chuyển tới trang danh mục",
+        robots: { index: false, follow: true },
+        alternates: { canonical: `${SITE_URL}/c/${clusterSlug}` },
+      };
+    }
+    return {
+      title: "Danh mục cấp 3",
+      robots: { index: false, follow: true },
+    };
+  }
   if (!level1) {
     const canonical = `${SITE_URL}/danh-muc`;
     const description =
@@ -141,7 +156,7 @@ async function CategoryJsonLdScripts({
 }) {
   const { slug } = await params;
   const [level1, level2, level3] = slug || [];
-  if (!level1) return null;
+  if (!level1 || level3) return null;
 
   const info = await getCategorySeoData(level1, level2, level3);
   if (!info) return null;

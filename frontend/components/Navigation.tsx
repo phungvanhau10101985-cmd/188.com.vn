@@ -11,8 +11,9 @@ import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPo
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { useCart } from '@/features/cart/hooks/useCart';
-import type { CategoryLevel1, CategoryLevel2 } from '@/types/api';
 import { categorySegmentForUrl } from '@/lib/category-url';
+import { categoryLevel3HrefFromNode } from '@/lib/category-listing-href';
+import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
 import {
   hasRealCategoryTree,
   isKhoSaleMenuCategory,
@@ -130,7 +131,30 @@ export default function Navigation({
 
   // Khi đang ở /danh-muc/... thì highlight theo slug (resolve từ tree)
   const effectiveFilter = useMemo(() => {
-    if (!pathname?.startsWith('/danh-muc/') || !tree.length) return selectedFilter;
+    if (!tree.length) return selectedFilter;
+    if (pathname?.startsWith('/c/')) {
+      const cluster = decodeURIComponent(pathname.replace(/^\/c\/?/, '').split('/')[0] || '');
+      if (!cluster) return selectedFilter;
+      for (const c1 of tree) {
+        for (const c2 of c1.children || []) {
+          for (const c3 of c2.children || []) {
+            const n3 =
+              typeof c3 === 'object' && c3 !== null && 'name' in c3
+                ? (c3 as CategoryLevel3).name
+                : String(c3);
+            const cslug =
+              typeof c3 === 'object' && c3 !== null && 'cluster_slug' in c3
+                ? (c3 as CategoryLevel3).cluster_slug
+                : null;
+            if (cslug && slugNorm(cslug) === slugNorm(cluster)) {
+              return { category: c1.name, subcategory: c2.name, sub_subcategory: n3 };
+            }
+          }
+        }
+      }
+      return selectedFilter;
+    }
+    if (!pathname?.startsWith('/danh-muc/')) return selectedFilter;
     const parts = pathname.replace(/^\/danh-muc\/?/, '').split('/').filter(Boolean);
     if (parts.length === 0) return selectedFilter;
     const [s1, s2, s3] = parts;
@@ -319,7 +343,7 @@ export default function Navigation({
 
   const prefetchCategoryHref = useCallback(
     (href: string) => {
-      if (!href.startsWith('/danh-muc/')) return;
+      if (!href.startsWith('/danh-muc/') && !href.startsWith('/c/')) return;
       const seen = prefetchedCategoryHrefsRef.current;
       if (seen.has(href)) return;
       seen.add(href);
@@ -507,7 +531,7 @@ export default function Navigation({
                           return (
                             <LoadingLink
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                              href={categoryLevel3HrefFromNode(slug1, slug2, level3 as CategoryLevel3 | string)}
                               onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
@@ -833,7 +857,7 @@ export default function Navigation({
                           return (
                             <LoadingLink
                               key={level3ReactKey(slug2, slug3 || undefined, name3)}
-                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                              href={categoryLevel3HrefFromNode(slug1, slug2, level3 as CategoryLevel3 | string)}
                               onMouseEnter={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               onFocus={(e) => prefetchCategoryHref(e.currentTarget.pathname)}
                               onClick={() => setOpenLevel1(null)}

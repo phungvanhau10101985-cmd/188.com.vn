@@ -113,7 +113,13 @@ def read_category_catalog_tiles(
             db.close()
 
     try:
-        return ttl_cache.get_or_fetch(cache_key, _catalog_tiles_ttl(), _fetch)
+        from app.services.seo_cluster_index import with_cluster_slugs_on_tiles
+
+        payload = ttl_cache.get_or_fetch(cache_key, _catalog_tiles_ttl(), _fetch)
+        tiles = payload.get("tiles") if isinstance(payload, dict) else None
+        if isinstance(payload, dict) and isinstance(tiles, list):
+            return {**payload, "tiles": with_cluster_slugs_on_tiles(tiles)}
+        return payload
     except Exception:
         _log.exception("GET /categories/from-products/catalog-tiles failed (limit=%s)", limit)
         return {"tiles": []}

@@ -10,6 +10,7 @@ import { buildFaqPageJsonLd, faqItemsFromSections } from "@/lib/ladipage-seo";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { displayableBrandOrOrigin, displayableBrandWithDefault } from "@/lib/utils";
 import { productPublicPdpUrl } from "@/lib/product-path-slug";
+import { getClusterSlugForCat3 } from "@/lib/seo-cluster";
 
 const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ||
@@ -114,7 +115,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-function buildBreadcrumbJsonLd(product: { 
+async function buildBreadcrumbJsonLd(product: { 
   name: string; 
   slug: string;
   category?: string;
@@ -154,11 +155,17 @@ function buildBreadcrumbJsonLd(product: {
 
   // Thêm danh mục cấp 3 nếu có
   if (product.sub_subcategory && categoryLevel1 && categoryLevel2) {
+    const slug1 = categoryLevel1.toLowerCase().replace(/\s+/g, '-');
+    const slug2 = categoryLevel2.toLowerCase().replace(/\s+/g, '-');
+    const slug3 = product.sub_subcategory.toLowerCase().replace(/\s+/g, '-');
+    const clusterSlug = await getClusterSlugForCat3(slug3);
     breadcrumbItems.push({
       "@type": "ListItem",
       position: position++,
       name: product.sub_subcategory,
-      item: `${SITE_URL}/danh-muc/${categoryLevel1.toLowerCase().replace(/\s+/g, '-')}/${categoryLevel2.toLowerCase().replace(/\s+/g, '-')}/${product.sub_subcategory.toLowerCase().replace(/\s+/g, '-')}`,
+      item: clusterSlug
+        ? `${SITE_URL}/c/${clusterSlug}`
+        : `${SITE_URL}/danh-muc/${slug1}/${slug2}/${slug3}`,
     });
   }
 
@@ -182,7 +189,7 @@ async function ProductStructuredData({ params }: Pick<Props, "params">) {
   const product = await getProductBySlugForSeo(slug);
   const ladipage = product?.id ? await getPublishedLadipageForProductRecord(product) : null;
   const productJsonLd = product ? buildProductJsonLd(product) : null;
-  const breadcrumbJsonLd = product ? buildBreadcrumbJsonLd(product) : null;
+  const breadcrumbJsonLd = product ? await buildBreadcrumbJsonLd(product) : null;
   const faqJsonLd =
     product && ladipage
       ? buildFaqPageJsonLd(faqItemsFromSections(ladipage.sections), productPublicPdpUrl(product.slug, SITE_URL))

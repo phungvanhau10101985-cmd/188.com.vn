@@ -360,8 +360,10 @@ def get_cached_home_hero_payload(
     if not subtitle:
         subtitle = "Nhóm & chi tiết — vuốt xem thêm"
 
+    from app.services.seo_cluster_index import with_cluster_slugs_on_tiles
+
     return {
-        "tiles": display,
+        "tiles": with_cluster_slugs_on_tiles(display),
         "gender_label": gl,
         "heading": heading,
         "subtitle": subtitle,

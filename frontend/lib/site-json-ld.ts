@@ -63,23 +63,46 @@ export function buildWebSiteJsonLd(origin: string = getSiteOrigin()): object {
   };
 }
 
-export function buildClusterBreadcrumbJsonLd(
-  clusterName: string,
-  clusterSlug: string,
-  origin: string = getSiteOrigin()
-): object {
+export function buildClusterBreadcrumbJsonLd(args: {
+  clusterName: string;
+  clusterSlug: string;
+  origin?: string;
+  level1Name?: string | null;
+  level1Url?: string | null;
+  level2Name?: string | null;
+  level2Url?: string | null;
+}): object {
+  const origin = args.origin ?? getSiteOrigin();
+  const items: Array<{ "@type": string; position: number; name: string; item: string }> = [
+    { "@type": "ListItem", position: 1, name: "Trang chủ", item: origin },
+  ];
+  let position = 2;
+  if (args.level1Name && args.level1Url) {
+    items.push({
+      "@type": "ListItem",
+      position: position++,
+      name: args.level1Name,
+      item: args.level1Url,
+    });
+  }
+  if (args.level2Name && args.level2Url) {
+    items.push({
+      "@type": "ListItem",
+      position: position++,
+      name: args.level2Name,
+      item: args.level2Url,
+    });
+  }
+  items.push({
+    "@type": "ListItem",
+    position,
+    name: args.clusterName,
+    item: `${origin}/c/${args.clusterSlug}`,
+  });
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Trang chủ", item: origin },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: clusterName,
-        item: `${origin}/c/${clusterSlug}`,
-      },
-    ],
+    itemListElement: items,
   };
 }
 

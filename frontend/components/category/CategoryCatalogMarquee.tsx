@@ -5,17 +5,10 @@ import LoadingLink from '@/components/ui/LoadingLink';
 import { useRouter } from 'next/navigation';
 import { LISTING_CARD_IMAGE } from '@/lib/image-utils';
 import CdnFillImage from '@/components/CdnFillImage';
-import { categorySegmentForUrl } from '@/lib/category-url';
+import { categoryTileHref } from '@/lib/category-listing-href';
 import type { HeroCategoryTile } from '@/types/api';
 
-export function categoryTileHref(tile: HeroCategoryTile): string {
-  const s1 = categorySegmentForUrl(tile.category);
-  if (!s1) return '/';
-  const s2 = categorySegmentForUrl(tile.subcategory || tile.name);
-  if (tile.level === 2) return `/danh-muc/${s1}/${s2}`;
-  const s3 = categorySegmentForUrl(tile.sub_subcategory || tile.name);
-  return `/danh-muc/${s1}/${s2}/${s3}`;
-}
+export { categoryTileHref } from '@/lib/category-listing-href';
 
 export function tileTitle(tile: HeroCategoryTile): string {
   const raw = (tile.short_name || tile.name || '').trim();

@@ -24,6 +24,7 @@ import ProductGallery from '@/components/product-detail/ProductGallery';
 import ProductInfo from '@/components/product-detail/ProductInfo';
 import ProductTabs from '@/components/product-detail/ProductTabs';
 import RelatedProducts from '@/components/product-detail/RelatedProducts';
+import { categorySegmentForUrl } from '@/lib/category-url';
 
 function extractProductIdFromSlug(slug: string): string | null {
   const slugParts = slug.split('-');
@@ -289,7 +290,6 @@ export default function ProductDetailPage() {
   const subcategory = product.raw_subcategory ?? product.subcategory;
   const subcategorySlug = subcategory ? subcategory.toLowerCase().replace(/\s+/g, '-') : '';
   const subSubcategory = product.sub_subcategory;
-  const subSubcategorySlug = subSubcategory ? subSubcategory.toLowerCase().replace(/\s+/g, '-') : '';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -330,7 +330,7 @@ export default function ProductDetailPage() {
               <>
                 <span>/</span>
                 <Link 
-                  href={`/danh-muc/${categorySlug}/${subcategorySlug}/${subSubcategorySlug}`}
+                  href={`/c/${categorySegmentForUrl(subSubcategory)}`}
                   className="hover:text-blue-600 transition-colors"
                 >
                   {subSubcategory}

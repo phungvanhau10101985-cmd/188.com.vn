@@ -51,6 +51,7 @@ export class ApiRequestError extends Error {
 interface TaxonomyTreeV2Node {
   name: string;
   slug?: string;
+  cluster_slug?: string | null;
   children?: TaxonomyTreeV2Node[];
 }
 
@@ -59,6 +60,10 @@ function taxonomyTreeV2ToCategoryLevel1(raw: unknown): CategoryLevel1[] {
   const mapL3 = (n: TaxonomyTreeV2Node): CategoryLevel3 => ({
     name: String(n?.name ?? '').trim(),
     slug: n?.slug != null && String(n.slug).trim() ? String(n.slug).trim() : undefined,
+    cluster_slug:
+      n?.cluster_slug != null && String(n.cluster_slug).trim()
+        ? String(n.cluster_slug).trim()
+        : null,
   });
   const mapL2 = (n: TaxonomyTreeV2Node): CategoryLevel2 => ({
     name: String(n?.name ?? '').trim(),

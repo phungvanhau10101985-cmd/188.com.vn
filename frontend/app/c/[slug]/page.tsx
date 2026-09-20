@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 
 import {
   getSeoClusterDetail,
@@ -15,6 +16,14 @@ import { productPathSlugFromApi } from "@/lib/product-path-slug";
 import SeoClusterFiltersClient from "./SeoClusterFiltersClient";
 import RelatedLadipagesStrip from "@/components/ladipage/RelatedLadipagesStrip";
 import { listRelatedPublishedLadipages } from "@/lib/ladipage-public";
+import { isSeoClusterIndexable, categoryLevel1Href, categoryLevel2Href } from "@/lib/category-listing-href";
+import {
+  buildCategoryCanonicalWithFilters,
+  buildCategoryFilterMetaParts,
+  categoryListingHasSeoDimensions,
+} from "@/lib/filtered-listing-metadata";
+import { getListingFreshnessMonthLabel } from "@/lib/listing-freshness-label";
+import { linkifySeoBody, type InternalLinkItem } from "@/lib/internal-links";
 
 const PAGE_SIZE = 48;
 
@@ -64,6 +73,37 @@ function serializeSearchParams(sp: Record<string, string | string[] | undefined>
   return p.toString();
 }
 
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const sp = await searchParams;
+  if (!categoryListingHasSeoDimensions(sp)) return {};
+
+  const cluster = await getSeoClusterDetail(slug);
+  if (!cluster) return {};
+
+  const isIndex = isSeoClusterIndexable(cluster);
+  const canonical = buildCategoryCanonicalWithFilters(`/c/${cluster.slug}`, sp);
+  const filterBits = buildCategoryFilterMetaParts(sp);
+  const month = getListingFreshnessMonthLabel();
+  const filterStr = filterBits.join(" · ");
+  const title = filterStr
+    ? `${cluster.name} — ${filterStr} — ${month} | ${cluster.product_count}+ mẫu`
+    : `${cluster.name} — ${month} | ${cluster.product_count}+ mẫu`;
+  const baseDesc =
+    cluster.seo_description ||
+    `${cluster.name} - ${cluster.product_count} sản phẩm. Mua sắm tại 188.com.vn.`;
+  const description = `${baseDesc} ${filterStr ? `Đang lọc: ${filterStr}. ` : ""}Cập nhật ${month}.`.slice(
+    0,
+    160,
+  );
+  return {
+    title,
+    description,
+    alternates: { canonical },
+    robots: { index: isIndex, follow: true },
+  };
+}
+
 function hasClusterFilters(filters: SeoClusterListingFilters): boolean {
   return Boolean(
     filters.minPrice != null ||
@@ -111,18 +151,44 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
     return q ? `/c/${cluster.slug}?${q}` : `/c/${cluster.slug}`;
   };
 
+  const monthLabel = getListingFreshnessMonthLabel();
+  const l1Href = cluster.level1?.slug ? categoryLevel1Href(cluster.level1.slug) : "/danh-muc";
+  const l2Href =
+    cluster.level1?.slug && cluster.level2?.slug
+      ? categoryLevel2Href(cluster.level1.slug, cluster.level2.slug)
+      : l1Href;
+  const siblingLinks: InternalLinkItem[] = (cluster.siblings || [])
+    .filter((s) => s.cluster_slug && s.name)
+    .map((s) => ({ anchor: s.name, url: `/c/${encodeURIComponent(s.cluster_slug)}` }));
+  const seoBody = (cluster.seo_body || "").trim();
+
   return (
     <main className="max-w-7xl mx-auto px-4 py-6">
       <nav className="text-xs text-gray-500 mb-3" aria-label="Breadcrumb">
         <Link href="/" className="hover:underline">Trang chủ</Link>
+        {cluster.level1 ? (
+          <>
+            <span className="mx-1">/</span>
+            <Link href={l1Href} className="hover:underline">{cluster.level1.name}</Link>
+          </>
+        ) : null}
+        {cluster.level2 ? (
+          <>
+            <span className="mx-1">/</span>
+            <Link href={l2Href} className="hover:underline">{cluster.level2.name}</Link>
+          </>
+        ) : null}
         <span className="mx-1">/</span>
         <span className="text-gray-700">{cluster.name}</span>
       </nav>
 
       <header className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-900">{cluster.name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {cluster.name} mới nhất {monthLabel} | {total.toLocaleString("vi-VN")} sản phẩm
+        </h1>
         <p className="mt-1 text-sm text-gray-600">
-          Tổng {total.toLocaleString("vi-VN")} sản phẩm — landing SEO của 188.COM.VN.
+          {cluster.seo_description ||
+            `${cluster.name} — landing SEO long-tail tại 188.COM.VN.`}
         </p>
       </header>
 
@@ -178,6 +244,33 @@ export default async function SeoClusterLandingPage({ params, searchParams }: Pr
             );
           })}
         </nav>
+      ) : null}
+
+      {siblingLinks.length > 0 ? (
+        <nav className="mt-8 text-sm text-gray-700" aria-label="Danh mục liên quan">
+          <p className="mb-2 font-medium text-gray-800">Cùng nhóm {cluster.level2?.name || "danh mục"}</p>
+          <ul className="flex flex-wrap gap-2">
+            {siblingLinks.map((item) => (
+              <li key={item.url}>
+                <Link
+                  href={item.url}
+                  className="inline-block rounded-full border border-gray-200 bg-white px-3 py-1 text-gray-700 hover:border-orange-300 hover:text-[#ea580c]"
+                >
+                  {item.anchor}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ) : null}
+
+      {seoBody ? (
+        <section className="mt-12 pt-8 border-t border-gray-200" aria-label="Giới thiệu danh mục">
+          <div
+            className="prose prose-gray max-w-none text-gray-600 text-sm leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: linkifySeoBody(seoBody, siblingLinks) }}
+          />
+        </section>
       ) : null}
 
       {cluster.notes ? (

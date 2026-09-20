@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useId, useMemo, useCallback } from 'react'
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from '@/types/api';
+import { categoryLevel3HrefFromNode } from '@/lib/category-listing-href';
 import AppBrandMark from '@/components/AppBrandMark';
 import {
   isKhoSaleMenuCategory,
@@ -696,8 +697,7 @@ export default function MobileHeader({
                               {hasL3 && isOpenL2 && c2.children && (
                                 <div className="bg-gray-100/80 border-t border-gray-100">
                                   {(c2.children as CategoryLevel3[]).map((c3) => {
-                                    const slug3 = c3.slug || slugOf(c3.name);
-                                    const l3Href = `/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`;
+                                    const l3Href = categoryLevel3HrefFromNode(slug1, slug2, c3);
                                     const l3Loading = isNavigating(l3Href);
                                     return (
                                       <button

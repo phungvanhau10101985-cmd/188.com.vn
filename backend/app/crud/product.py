@@ -5187,10 +5187,12 @@ def _build_menu_tree_session(is_active: bool) -> List[Dict[str, Any]]:
 
 def get_cached_menu_category_tree(is_active: bool = True) -> List[Dict[str, Any]]:
     """Cây danh mục menu: RAM → Redis → DB JSON (stale-first). Prune chỉ chạy nền."""
+    from app.services.seo_cluster_index import with_cluster_slugs_on_menu_tree
     from app.utils.ttl_cache import cache as ttl_cache
 
     key = _CATEGORY_MENU_TREE_KEY_ACTIVE if is_active else _CATEGORY_MENU_TREE_KEY_ALL
-    return ttl_cache.get_or_fetch(key, _category_menu_tree_ttl_sec(), lambda: _build_menu_tree_session(is_active))
+    tree = ttl_cache.get_or_fetch(key, _category_menu_tree_ttl_sec(), lambda: _build_menu_tree_session(is_active))
+    return with_cluster_slugs_on_menu_tree(tree)
 
 
 def get_category_by_path(

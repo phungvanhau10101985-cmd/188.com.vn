@@ -20,6 +20,7 @@ export interface SeoClusterListItem {
   canonical_path: string;
   index_policy: "index" | "noindex" | string;
   product_count: number;
+  indexable?: boolean;
 }
 
 export interface SeoClusterCategorySummary {
@@ -47,15 +48,32 @@ export interface SeoClusterProductCard {
   brand_name: string | null;
 }
 
+export interface SeoClusterParentRef {
+  name: string;
+  slug: string;
+}
+
+export interface SeoClusterSibling {
+  name: string;
+  cluster_slug: string;
+}
+
 export interface SeoClusterDetail {
   id: number;
   slug: string;
   name: string;
   canonical_path: string;
   index_policy: "index" | "noindex" | string;
+  indexable?: boolean;
   source: string | null;
   notes: string | null;
   categories: SeoClusterCategorySummary[];
+  level1?: SeoClusterParentRef | null;
+  level2?: SeoClusterParentRef | null;
+  siblings?: SeoClusterSibling[];
+  seo_description?: string | null;
+  seo_body?: string | null;
+  images?: string[];
   product_count: number;
   products_sample: SeoClusterProductCard[];
 }

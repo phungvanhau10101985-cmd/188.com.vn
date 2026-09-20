@@ -184,12 +184,20 @@ def _slugify(name: str) -> str:
 
 def get_category_seo_status(db: Session, category_path: str) -> Dict[str, Any]:
     """
-    TRẠNG THÁI SEO ĐƠN GIẢN (ĐÃ BỎ CHUYỂN HƯỚNG):
-    - Theo yêu cầu mới: tất cả trang danh mục đều được SEO (indexable).
-    - Không còn dùng mapping để 301 redirect hay noindex.
-    - Hàm này luôn trả về: không redirect, được SEO.
+    Cấp 1/2: index trên `/danh-muc/...`.
+    Cấp 3: 301 sang `/c/<cluster>` (landing SEO) — không index URL `/danh-muc/.../<cat3>`.
+    Không dùng mapping ý định cũ để gộp cấp 1/2.
     """
-    logger.info("get_category_seo_status simplified: no redirect, always SEO indexable for %s", category_path)
+    from app.services.seo_cluster_index import cat3_cluster_canonical_path
+
+    cluster_path = cat3_cluster_canonical_path(db, category_path)
+    if cluster_path:
+        return {
+            "should_redirect": True,
+            "redirect_to": cluster_path,
+            "seo_indexable": False,
+            "canonical_url": cluster_path,
+        }
     return {
         "should_redirect": False,
         "redirect_to": None,

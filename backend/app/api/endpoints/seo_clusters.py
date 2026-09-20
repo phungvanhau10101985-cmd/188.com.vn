@@ -18,15 +18,17 @@ from sqlalchemy.orm import Session
 from app.crud import product as product_crud
 from app.db.session import SessionLocal, get_db
 from app.models.category import Category
+from app.models.category_seo import CategorySeoMeta
 from app.models.product import Product
 from app.models.seo_cluster import SeoCluster
+from app.services.seo_cluster_index import cluster_is_indexable, cluster_parent_chain
 from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
 
 _LIST_TTL = 60.0
 _DETAIL_TTL = 60.0
-_LIST_KEY = "seo_clusters_v1:list"
+_LIST_KEY = "seo_clusters_v2:list"
 
 
 # ---------- helpers ----------
@@ -100,17 +102,21 @@ def _fetch_clusters_list() -> List[Dict[str, Any]]:
         for cid, _pid in rows:
             counts[cid] = counts.get(cid, 0) + 1
 
-        return [
-            {
-                "id": c.id,
-                "slug": c.slug,
-                "name": c.name,
-                "canonical_path": c.canonical_path,
-                "index_policy": c.index_policy,
-                "product_count": counts.get(c.id, 0),
-            }
-            for c in clusters
-        ]
+        out: List[Dict[str, Any]] = []
+        for c in clusters:
+            count = counts.get(c.id, 0)
+            out.append(
+                {
+                    "id": c.id,
+                    "slug": c.slug,
+                    "name": c.name,
+                    "canonical_path": c.canonical_path,
+                    "index_policy": c.index_policy,
+                    "product_count": count,
+                    "indexable": cluster_is_indexable(c.index_policy, count),
+                }
+            )
+        return out
     finally:
         db.close()
 
@@ -133,6 +139,45 @@ def _fetch_cluster_detail(slug: str, sample_limit: int = 24) -> Dict[str, Any]:
             for c in cats
         ]
 
+        primary = cats[0] if cats else None
+        level1 = None
+        level2 = None
+        siblings: List[Dict[str, str]] = []
+        seo_description = None
+        seo_body = None
+        images: List[str] = []
+        if primary:
+            parent, grand = cluster_parent_chain(db, primary)
+            if parent:
+                level2 = {"name": parent.name, "slug": parent.slug}
+            if grand:
+                level1 = {"name": grand.name, "slug": grand.slug}
+            if parent:
+                sib_rows = (
+                    db.query(Category, SeoCluster.slug)
+                    .outerjoin(SeoCluster, Category.seo_cluster_id == SeoCluster.id)
+                    .filter(
+                        Category.parent_id == parent.id,
+                        Category.level == 3,
+                        Category.id != primary.id,
+                    )
+                    .all()
+                )
+                for sib, sib_cluster in sib_rows:
+                    if not sib_cluster or sib_cluster == cluster.slug:
+                        continue
+                    siblings.append({"name": sib.name, "cluster_slug": sib_cluster})
+            path = (primary.full_slug or "").strip().lower()
+            meta = (
+                db.query(CategorySeoMeta).filter(CategorySeoMeta.category_path == path).first()
+                if path
+                else None
+            )
+            if meta:
+                seo_description = (meta.seo_description or "").strip() or None
+                seo_body = (getattr(meta, "seo_body", None) or "").strip() or None
+                images = [u for u in [meta.image_1, meta.image_2, meta.image_3, meta.image_4] if u]
+
         total = 0
         sample_products: List[Dict[str, Any]] = []
         if cat_ids:
@@ -147,15 +192,37 @@ def _fetch_cluster_detail(slug: str, sample_limit: int = 24) -> Dict[str, Any]:
                 .limit(sample_limit)
                 .all()
             ]
+            if not images:
+                for p in sample_products[:4]:
+                    img = p.get("main_image") or (p.get("images") or [None])[0]
+                    if img:
+                        images.append(img)
+
+        if not seo_body:
+            parent_bit = f" thuộc {level2['name']}" if level2 else ""
+            grand_bit = f" trong {level1['name']}" if level1 else ""
+            seo_body = (
+                f"{cluster.name} tại 188.com.vn{parent_bit}{grand_bit}. "
+                f"Hiện có {total}+ mẫu đang bán — lọc size, màu và mức giá để chọn sản phẩm phù hợp. "
+                f"Cập nhật liên tục, giao nhanh toàn quốc."
+            )
+
         return {
             "id": cluster.id,
             "slug": cluster.slug,
             "name": cluster.name,
             "canonical_path": cluster.canonical_path,
             "index_policy": cluster.index_policy,
+            "indexable": cluster_is_indexable(cluster.index_policy, total),
             "source": cluster.source,
             "notes": cluster.notes,
             "categories": cat_summaries,
+            "level1": level1,
+            "level2": level2,
+            "siblings": siblings,
+            "seo_description": seo_description,
+            "seo_body": seo_body,
+            "images": images[:4],
             "product_count": total,
             "products_sample": sample_products,
         }
@@ -176,7 +243,7 @@ def get_seo_cluster(slug: str) -> Dict[str, Any]:
     """
     Chi tiết cluster + sample 24 sản phẩm đầu (để Next render đầu landing nhanh).
     """
-    key = f"seo_clusters_v1:detail:{slug}"
+    key = f"seo_clusters_v2:detail:{slug}"
     return ttl_cache.get_or_fetch(key, _DETAIL_TTL, lambda: _fetch_cluster_detail(slug))
 
 

@@ -6,6 +6,7 @@ import {
   flattenCategoryTreeForSitemap,
 } from '@/lib/category-sitemap';
 import { listSeoClusters } from '@/lib/seo-cluster';
+import { isSeoClusterIndexable } from '@/lib/category-listing-href';
 
 export const dynamic = "force-dynamic";
 export const revalidate = 3600;
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
   const categories = flattenCategoryTreeForSitemap(tree);
   const clusters = await listSeoClusters();
   const indexedClusterUrls = clusters
-    .filter((c) => c.index_policy === 'index' && c.slug)
+    .filter((c) => isSeoClusterIndexable(c) && c.slug)
     .map(
       (c) =>
         `${siteBase}/c/${encodeURIComponent(String(c.slug).replace(/^\/+|\/+$/g, ''))}`,

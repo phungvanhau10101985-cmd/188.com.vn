@@ -11,6 +11,7 @@ import {
   triggerDownloadXml,
 } from '@/lib/category-sitemap';
 import { generateSlug } from '@/lib/utils';
+import { isSeoClusterIndexable } from '@/lib/category-listing-href';
 import type { CategoryLevel1, CategoryLevel3 } from '@/types/api';
 
 /** Phân tách cặp l2/l3 trong key multi-select */
@@ -999,10 +1000,15 @@ export default function AdminDanhMucSeoPage() {
           headers: { 'Content-Type': 'application/json', ...ngrokFetchHeaders() },
         });
         if (res.ok) {
-          const data = (await res.json()) as Array<{ slug?: string; index_policy?: string }>;
+          const data = (await res.json()) as Array<{
+            slug?: string;
+            index_policy?: string;
+            product_count?: number;
+            indexable?: boolean;
+          }>;
           if (Array.isArray(data)) {
             for (const c of data) {
-              if (!c.slug || c.index_policy !== 'index') continue;
+              if (!c.slug || !isSeoClusterIndexable(c)) continue;
               indexedClusterUrls.push(
                 `${siteBase}/c/${encodeURIComponent(String(c.slug).replace(/^\/+|\/+$/g, ''))}`
               );

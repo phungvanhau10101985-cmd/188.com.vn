@@ -4,6 +4,7 @@
  */
 
 import type { CategoryLevel1, CategoryLevel2, CategoryLevel3 } from "@/types/api";
+import { categoryLevel3HrefFromNode } from "@/lib/category-listing-href";
 
 function getSlug(node: { slug?: string; name: string }): string {
   if (node.slug && node.slug.trim()) return node.slug.trim();
@@ -52,8 +53,6 @@ export function buildInternalLinkMap(
   );
   if (!l2) return out;
 
-  const base2 = `${base1}/${encodeURIComponent(level2Slug)}`;
-
   // Trang cấp 2: link tới các cấp 2 cùng cha (level1)
   if (!level3Slug) {
     (l1.children as CategoryLevel2[]).forEach((c) => {
@@ -72,7 +71,7 @@ export function buildInternalLinkMap(
     if (norm(getSlug(c)) === norm(level3Slug)) return;
     out.push({
       anchor: c.name,
-      url: `${base2}/${encodeURIComponent(getSlug(c))}`,
+      url: categoryLevel3HrefFromNode(level1Slug, level2Slug, c),
     });
   });
 

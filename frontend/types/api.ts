@@ -360,6 +360,8 @@ export interface HeroCategoryTile {
   image_url?: string | null;
   col_span?: number;
   row_span?: number;
+  /** Cấp 3: slug cluster `/c/...` nếu đã gắn taxonomy. */
+  cluster_slug?: string | null;
 }
 
 export interface HeroCategoryTilesResponse {
@@ -431,6 +433,8 @@ export interface HomeRecommendationSnapshotResponse {
 export interface CategoryLevel3 {
   name: string;
   slug?: string;
+  /** Landing SEO `/c/<slug>` — menu/tile link thẳng, không qua `/danh-muc/.../cat3`. */
+  cluster_slug?: string | null;
 }
 
 /** Danh mục cấp 2 (cột AC) */

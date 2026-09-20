@@ -18,6 +18,7 @@ import {
 } from '@/lib/product-related-tabs';
 import { cdnUrl } from '@/lib/cdn-url';
 import { getStorefrontHomeHref } from '@/lib/admin-origin';
+import { categoryLevel3HrefFromNode } from '@/lib/category-listing-href';
 import { MOBILE_SEARCH_HREF } from '@/lib/mobile-search-path';
 import LazyDesktopImageSearchPopover from '@/components/LazyDesktopImageSearchPopover';
 import ProductHeader from './ProductHeader/ProductHeader';
@@ -194,11 +195,10 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
                                       <div className="mt-1 flex flex-col gap-1">
                                         {level2.children.map((level3) => {
                                           const name3 = level3.name;
-                                          const slug3 = level3.slug || level3.name;
                                           return (
                                             <Link
                                               key={name3}
-                                              href={`/danh-muc/${encodeURIComponent(slug1)}/${encodeURIComponent(slug2)}/${encodeURIComponent(slug3)}`}
+                                              href={categoryLevel3HrefFromNode(slug1, slug2, level3)}
                                               className="text-[11px] text-gray-600 hover:text-[#ea580c] truncate"
                                             >
                                               {name3}
