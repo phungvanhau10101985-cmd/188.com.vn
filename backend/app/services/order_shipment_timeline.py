@@ -6,9 +6,13 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.order import Order, OrderStatus
 from app.models.order_shipment import EmsShippingRecord, OrderShipmentEvent
 from app.services import ems_tracking as ems_tracking_svc
+from app.services.optimized_fulfillment_feature import (
+    select_optimized_fulfillment_outcome,
+)
 from app.utils.display_timeline import to_utc_aware
 
 logger = logging.getLogger(__name__)
@@ -115,6 +119,25 @@ def _step_defs(deposit_flow: bool, source: str = "china") -> list[dict[str, Any]
     ]
 
 
+def _step_defs_for_tenant(
+    tenant_id: str,
+    deposit_flow: bool,
+    source: str = "china",
+) -> list[dict[str, Any]]:
+    """Select only the pure timeline plan; callers apply mutations exactly once."""
+    steps, _decision = select_optimized_fulfillment_outcome(
+        tenant_id=tenant_id,
+        operation="shipping",
+        legacy=lambda: _step_defs(deposit_flow, source),
+        optimized=lambda: _step_defs(deposit_flow, source),
+    )
+    return steps
+
+
+def _runtime_step_defs(deposit_flow: bool, source: str = "china") -> list[dict[str, Any]]:
+    return _step_defs_for_tenant(settings.SERVER_NAME, deposit_flow, source)
+
+
 def _order_status_value(order: Order) -> str:
     return getattr(order.status, "value", order.status) or ""
 
@@ -146,7 +169,7 @@ def ensure_shipment_timeline(db: Session, order: Order, *, force: bool = False) 
         db.query(OrderShipmentEvent).filter(OrderShipmentEvent.order_id == order.id).delete()
 
     now = _utc_now()
-    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
+    steps = _runtime_step_defs(_deposit_flow(order), _fulfillment_source(order))
     for idx, step in enumerate(steps):
         db.add(
             OrderShipmentEvent(
@@ -183,7 +206,7 @@ def ensure_shipment_timeline(db: Session, order: Order, *, force: bool = False) 
 
 
 def _activate_next(db: Session, order: Order, events: list[OrderShipmentEvent], current_idx: int) -> None:
-    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
+    steps = _runtime_step_defs(_deposit_flow(order), _fulfillment_source(order))
     if current_idx + 1 >= len(events):
         return
     nxt = events[current_idx + 1]
@@ -234,7 +257,7 @@ def advance_auto_milestones(db: Session, order_id: int) -> int:
 
     advanced = _activate_due_pending(events)
 
-    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
+    steps = _runtime_step_defs(_deposit_flow(order), _fulfillment_source(order))
     step_by_key = {s["key"]: s for s in steps}
     now = _utc_now()
 
@@ -454,10 +477,6 @@ def admin_mark_out_for_customer_confirm(
 
     db.flush()
 
-    from app.services import order_shipper_notify as shipper_notify_svc
-
-    shipper_notify_svc.schedule_customer_shipper_confirmed_notify(order.id)
-
     return order
 
 
@@ -525,7 +544,10 @@ def get_timeline_payload(db: Session, order: Order) -> dict[str, Any]:
             break
 
     source = _fulfillment_source(order)
-    step_titles = {s["key"]: s["title"] for s in _step_defs(_deposit_flow(order), source)}
+    step_titles = {
+        s["key"]: s["title"]
+        for s in _runtime_step_defs(_deposit_flow(order), source)
+    }
     tracking_number = getattr(order, "tracking_number", None)
     shipping_provider = getattr(order, "shipping_provider", None)
     if not (tracking_number or "").strip():
@@ -621,8 +643,6 @@ EMS_IMPORT_SYNC_PHASES = frozenset({
 
 EMS_IMPORT_DELIVERED_PHASES = frozenset({
     "delivered",
-    "cod_collected",
-    "cod_settled",
 })
 
 
@@ -638,7 +658,7 @@ def _force_complete_auto_steps_until_pause(db: Session, order: Order) -> None:
     if not should_have_timeline(order):
         return
     ensure_shipment_timeline(db, order)
-    steps = _step_defs(_deposit_flow(order), _fulfillment_source(order))
+    steps = _runtime_step_defs(_deposit_flow(order), _fulfillment_source(order))
     step_by_key = {s["key"]: s for s in steps}
     now = _utc_now()
 
@@ -733,8 +753,15 @@ def apply_ems_import_shipping_sync(
             ems_status_description=ems_status_description,
         )
         if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
-            order.status = OrderStatus.DELIVERED.value
-            mark_delivered_on_timeline(db, order, admin_id=admin_id)
+            from app.services.order_delivery import mark_order_delivered
+
+            mark_order_delivered(
+                db,
+                order,
+                source="ems_auto",
+                admin_id=admin_id,
+                previous_status=OrderStatus.SHIPPING.value,
+            )
         db.flush()
         return True, (
             "EMS đã phát — đơn Việt Nam cập nhật đã giao."
@@ -787,8 +814,15 @@ def apply_ems_import_shipping_sync(
     )
 
     if ems_phase in EMS_IMPORT_DELIVERED_PHASES:
-        order.status = OrderStatus.DELIVERED.value
-        mark_delivered_on_timeline(db, order, admin_id=admin_id)
+        from app.services.order_delivery import mark_order_delivered
+
+        mark_order_delivered(
+            db,
+            order,
+            source="ems_auto",
+            admin_id=admin_id,
+            previous_status=OrderStatus.SHIPPING.value,
+        )
         messages.append("EMS đã phát — đơn shop cập nhật đã giao.")
 
     db.flush()

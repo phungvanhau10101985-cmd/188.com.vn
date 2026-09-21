@@ -149,16 +149,19 @@ def submit_review(
             detail="Chỉ khách hàng đã mua và nhận hàng mới được đánh giá sản phẩm này.",
         )
     user_name = getattr(current_user, "full_name", None) or getattr(current_user, "phone", None) or "Khách"
-    review = crud.product_review.create_customer_review(
-        db,
-        product_id=data.product_id,
-        user_name=user_name,
-        star=data.star,
-        content=data.content.strip(),
-        title=data.title.strip() if data.title else "",
-        images=data.images or [],
-        user_id=current_user.id,
-    )
+    try:
+        review = crud.product_review.create_customer_review(
+            db,
+            product_id=data.product_id,
+            user_name=user_name,
+            star=data.star,
+            content=data.content.strip(),
+            title=data.title.strip() if data.title else "",
+            images=data.images or [],
+            user_id=current_user.id,
+        )
+    except crud.product_review.DuplicateCustomerReviewError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     # Khi khách đánh giá 1 sản phẩm trong đơn → cập nhật đơn sang "đã đánh giá"
     crud.order.mark_order_completed_if_reviewed(db, current_user.id, data.product_id)
     now = datetime.now(timezone.utc)

@@ -1,0 +1,336 @@
+{
+  "contract_id": "shared-order-fulfillment",
+  "contract_version": "1.2.0",
+  "fixture_schema_version": 1,
+  "currency": "VND",
+  "timezone": "Asia/Ho_Chi_Minh",
+  "scenarios": [
+    {
+      "id": "checkout_vn_cn_split",
+      "topic": "checkout",
+      "input": {
+        "lines": [
+          {
+            "source": "vietnam",
+            "subtotal": 400000,
+            "deposit_required": true,
+            "warehouse_item": false
+          },
+          {
+            "source": "china",
+            "subtotal": 600000,
+            "deposit_required": true,
+            "warehouse_item": false
+          }
+        ],
+        "discount": 100000,
+        "shipping_fee": 30000,
+        "deposit_mode": "percent",
+        "deposit_percent": 30
+      },
+      "expected": {
+        "atomic": true,
+        "shared_checkout_group": true,
+        "order_sources": [
+          "vietnam",
+          "china"
+        ],
+        "groups": [
+          {
+            "source": "vietnam",
+            "subtotal": 400000,
+            "discount": 40000,
+            "amount_after_discount": 360000,
+            "shipping_fee": 30000,
+            "required_deposit": 108000
+          },
+          {
+            "source": "china",
+            "subtotal": 600000,
+            "discount": 60000,
+            "amount_after_discount": 540000,
+            "shipping_fee": 0,
+            "required_deposit": 162000
+          }
+        ],
+        "shipping_charged_once": true,
+        "shipping_preferred_source": "vietnam",
+        "deposit_base_excludes_shipping": true
+      }
+    },
+    {
+      "id": "concurrent_sku_reservation",
+      "topic": "stock_concurrency",
+      "input": {
+        "sku": "GOLDEN-SKU-ONE",
+        "physical_stock": 1,
+        "warehouse_reserved": 0,
+        "parallel_requests": [
+          { "checkout": "A", "quantity": 1 },
+          { "checkout": "B", "quantity": 1 }
+        ]
+      },
+      "expected": {
+        "lock_scope": "sku_row",
+        "successful_reservations": 1,
+        "rejected_reservations": 1,
+        "warehouse_reserved": 1,
+        "oversold": false
+      }
+    },
+    {
+      "id": "mixed_checkout_rollback",
+      "topic": "checkout_atomicity",
+      "input": {
+        "groups": ["vietnam", "china"],
+        "failure": "china_reservation_conflict"
+      },
+      "expected": {
+        "transaction_rolled_back": true,
+        "persisted_orders": 0,
+        "vietnam_reservation_delta": 0,
+        "china_reservation_delta": 0,
+        "notifications": 0,
+        "affiliate_grants": 0
+      }
+    },
+    {
+      "id": "cod_stock_reserve",
+      "topic": "stock_reservation",
+      "input": {
+        "source": "vietnam",
+        "payment_method": "cod",
+        "warehouse_item": true,
+        "quantity": 2
+      },
+      "expected": {
+        "reserve_before_confirmation": true,
+        "warehouse_reserved_delta": 2,
+        "physical_stock_delta": 0,
+        "deduct_on_delivered": true,
+        "release_on_cancel": true
+      }
+    },
+    {
+      "id": "deposit_sla",
+      "topic": "deposit",
+      "input": {
+        "status": "waiting_deposit",
+        "age_hours": 25
+      },
+      "expected": {
+        "reminder_hours": [
+          2,
+          20
+        ],
+        "reminders_once_each": true,
+        "vietnam_stock_release_hour": 24,
+        "vietnam_stock_release_once": true,
+        "china_stock_release": false,
+        "auto_cancel_vietnam": false,
+        "auto_cancel_china": false
+      }
+    },
+    {
+      "id": "late_deposit_after_release",
+      "topic": "deposit",
+      "input": {
+        "source": "vietnam",
+        "age_hours": 25,
+        "stock_released": true,
+        "payment_event": "deposit_received"
+      },
+      "expected": {
+        "accepted": false,
+        "order_confirmed": false,
+        "requires_stock_recheck": true,
+        "manual_review": true,
+        "paid_amount_increment": 0,
+        "customer_refund_or_resolution_required": true
+      }
+    },
+    {
+      "id": "sepay_replay",
+      "topic": "payment",
+      "input": {
+        "transaction_id": "SEPAY-GOLDEN-0001",
+        "amount": 270000,
+        "events": [
+          "first_delivery",
+          "same_transaction_replay"
+        ]
+      },
+      "expected": {
+        "first_delivery": "applied",
+        "same_transaction_replay": "acknowledged_duplicate",
+        "payment_mutations": 1,
+        "paid_amount_increments": 1,
+        "payment_events": 1,
+        "customer_notifications": 1,
+        "owner_notifications": 1,
+        "affiliate_grants": 1,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "ems_event_replay",
+      "topic": "shipment_replay",
+      "input": {
+        "tracking_number": "GOLDEN-EMS-0001",
+        "provider_event_id": "EMS-EVENT-DELIVERED-1",
+        "events": ["first_delivery", "same_event_replay"]
+      },
+      "expected": {
+        "first_delivery": "applied",
+        "same_event_replay": "acknowledged_duplicate",
+        "shipment_mutations": 1,
+        "timeline_transitions": 1,
+        "terminal_side_effect_runs": 1,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "ems_at_customs_stop",
+      "topic": "shipment",
+      "input": {
+        "source": "china",
+        "elapsed_hours": 128,
+        "active_step": "at_customs"
+      },
+      "expected": {
+        "timeline_steps": [
+          "confirmed",
+          "tq_preparing",
+          "tq_warehouse",
+          "international_shipping",
+          "at_customs",
+          "domestic_shipping",
+          "awaiting_confirm"
+        ],
+        "active_step": "at_customs",
+        "cron_advances": false,
+        "customer_can_confirm_received": false,
+        "advance_requires": [
+          "admin_clear_customs",
+          "ems_shipping_update"
+        ]
+      }
+    },
+    {
+      "id": "ems_delivered_side_effects",
+      "topic": "shipment_terminal",
+      "input": {
+        "shipping_status": "delivered",
+        "source": "vietnam",
+        "warehouse_item": true
+      },
+      "expected": {
+        "shipping_status": "delivered",
+        "delivered_at": "set_once",
+        "timeline_awaiting_confirm": "completed",
+        "warehouse_stock": "deduct_once",
+        "affiliate_commission": "confirm_once",
+        "customer_delivery_notification": "send_once",
+        "review_invitation": "send_once",
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "cancel_before_deduct_stock",
+      "topic": "stock_terminal",
+      "input": {
+        "warehouse_item": true,
+        "quantity": 2,
+        "stock_markers": ["reserved"],
+        "events": ["cancel", "cancel_replay"]
+      },
+      "expected": {
+        "reservation_release_count": 1,
+        "stock_restore_count": 0,
+        "physical_stock_delta": 0,
+        "warehouse_reserved_delta": -2,
+        "terminal_transition_count": 1,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "return_before_deduct_stock",
+      "topic": "stock_terminal",
+      "input": {
+        "warehouse_item": true,
+        "quantity": 2,
+        "stock_markers": ["reserved"],
+        "events": ["return", "return_replay"]
+      },
+      "expected": {
+        "reservation_release_count": 1,
+        "stock_restore_count": 0,
+        "physical_stock_delta": 0,
+        "warehouse_reserved_delta": -2,
+        "terminal_transition_count": 1,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "return_after_delivered_stock",
+      "topic": "stock_terminal",
+      "input": {
+        "warehouse_item": true,
+        "quantity": 2,
+        "stock_markers": ["reserved", "deducted"],
+        "events": ["delivered", "return", "return_replay"]
+      },
+      "expected": {
+        "reservation_release_count": 0,
+        "stock_restore_count": 1,
+        "physical_stock_delta": 0,
+        "warehouse_reserved_delta": 0,
+        "terminal_transition_count": 2,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "ems_returned_side_effects",
+      "topic": "shipment_terminal",
+      "input": {
+        "ems_reported_return": true,
+        "shop_confirmed_received_return": true,
+        "source": "vietnam",
+        "warehouse_item": true
+      },
+      "expected": {
+        "shipping_status": "returned",
+        "returned_at": "set_once",
+        "timeline_non_completed_steps": "skipped",
+        "warehouse_stock": "restore_once",
+        "affiliate_commission": "cancel_once",
+        "affiliate_wallet_refund": false,
+        "shop_confirmation_required": true,
+        "replay_is_noop": true
+      }
+    },
+    {
+      "id": "affiliate_lifecycle",
+      "topic": "affiliate",
+      "input": {
+        "events": [
+          "deposit_paid",
+          "deposit_replay",
+          "delivered",
+          "delivered_replay",
+          "returned",
+          "returned_replay"
+        ],
+        "wallet_used": 50000
+      },
+      "expected": {
+        "grant_on_deposit": 1,
+        "confirm_on_delivered": 1,
+        "cancel_on_return": 1,
+        "wallet_refund_on_return": 0,
+        "commission_balance_after_return": 0,
+        "all_replays_noop": true
+      }
+    }
+  ]
+}

@@ -332,6 +332,7 @@ def download_deposit_qr_image(
 def pay_deposit(
     order_id: int,
     payment_data: schemas.PaymentCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -382,8 +383,10 @@ def pay_deposit(
     db.commit()
     db.refresh(payment)
     
-    # 8. Send notification to admin
-    # crud.notification.create_admin_notification(...)
+    # 8. Alert admins after commit; webhook/SePay automatic confirmations are separate.
+    from app.services.manual_transfer_notify import notify_admin_manual_transfer
+
+    background_tasks.add_task(notify_admin_manual_transfer, payment.id)
     
     return payment
 
@@ -1336,6 +1339,12 @@ def admin_update_order(
         ):
             schedule_deposit_confirmed_email(order_id)
             schedule_meta_purchase_capi_for_order(order_id)
+        if str(new_status_val) == OrderStatusEnum.DELIVERED.value:
+            background_tasks.add_task(
+                shipper_notify_svc.notify_customer_delivered_with_review,
+                order_id,
+                source="admin",
+            )
         recipient = order.customer_email or (order.user.email if order.user else None)
         if recipient:
             background_tasks.add_task(
@@ -1606,6 +1615,7 @@ def admin_mark_out_for_customer_confirm(
         )
         db.commit()
         db.refresh(order)
+        shipper_notify_svc.schedule_customer_shipper_confirmed_notify(order.id)
         return order
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -2018,6 +2018,16 @@ class ApiClient {
     return this.fetch<any[]>(`/notifications/?skip=${skip}&limit=${limit}`);
   }
 
+  async getMyNotificationsPage(skip = 0, limit = 20): Promise<{
+    items: any[];
+    total: number;
+    skip: number;
+    limit: number;
+    has_more: boolean;
+  }> {
+    return this.fetch(`/notifications/page?skip=${skip}&limit=${limit}`);
+  }
+
   async subscribeNewsletter(email: string): Promise<{ ok: boolean; message: string }> {
     return this.fetch<{ ok: boolean; message: string }>('/newsletter/subscribe', {
       method: 'POST',

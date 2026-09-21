@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import logging
 
+from app.core.config import settings
 from app.models.order import (
     Order,
     OrderItem,
@@ -19,60 +20,12 @@ from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
+from app.services.fulfillment_transition_contract import (
+    SOURCE_ROUTINE_TRANSITIONS,
+    transition_is_allowed_for_tenant,
+)
 
 logger = logging.getLogger(__name__)
-
-VALID_ORDER_TRANSITIONS = {
-    OrderStatus.PENDING.value: {
-        OrderStatus.WAITING_DEPOSIT.value,
-        OrderStatus.CONFIRMED.value,
-        OrderStatus.CANCELLED.value,
-    },
-    OrderStatus.WAITING_DEPOSIT.value: {
-        OrderStatus.DEPOSIT_PAID.value,
-        OrderStatus.CONFIRMED.value,
-        OrderStatus.CANCELLED.value,
-    },
-    OrderStatus.DEPOSIT_PAID.value: {
-        OrderStatus.PROCESSING.value,
-        OrderStatus.SHIPPING.value,
-        OrderStatus.CANCELLED.value,
-    },
-    OrderStatus.CONFIRMED.value: {
-        OrderStatus.PROCESSING.value,
-        OrderStatus.SHIPPING.value,
-        OrderStatus.CANCELLED.value,
-    },
-    OrderStatus.PROCESSING.value: {
-        OrderStatus.SHIPPING.value,
-        OrderStatus.CANCELLED.value,
-    },
-    OrderStatus.SHIPPING.value: {
-        OrderStatus.DELIVERED.value,
-        OrderStatus.RETURNED.value,
-    },
-    OrderStatus.DELIVERED.value: {
-        OrderStatus.COMPLETED.value,
-        OrderStatus.RETURNED.value,
-    },
-    OrderStatus.COMPLETED.value: {OrderStatus.RETURNED.value},
-    OrderStatus.RETURNED.value: set(),
-    OrderStatus.CANCELLED.value: set(),
-}
-
-# Các bước vận hành hợp lệ theo nguồn, nhưng phải đi qua endpoint nghiệp vụ tương ứng
-# (timeline/EMS với TQ; soạn/đóng gói với VN), không đi qua PATCH admin chung.
-SOURCE_ROUTINE_TRANSITIONS = {
-    "vietnam": {
-        OrderStatus.CONFIRMED.value: {OrderStatus.PROCESSING.value},
-        OrderStatus.PROCESSING.value: {OrderStatus.SHIPPING.value},
-    },
-    "china": {
-        OrderStatus.DEPOSIT_PAID.value: {OrderStatus.PROCESSING.value},
-        OrderStatus.CONFIRMED.value: {OrderStatus.PROCESSING.value},
-        OrderStatus.PROCESSING.value: {OrderStatus.SHIPPING.value},
-    },
-}
 
 def generate_order_code(db: Session) -> str:
     """Mã đơn hàng ngắn: DH001, DH002, ... (2 chữ + 3 số)"""
@@ -429,7 +382,11 @@ def admin_update_order(
                 OrderStatus.COMPLETED.value,
                 OrderStatus.RETURNED.value,
             }
-            normally_allowed = new_status_val in VALID_ORDER_TRANSITIONS.get(old_status, set())
+            normally_allowed = transition_is_allowed_for_tenant(
+                settings.SERVER_NAME,
+                old_status,
+                new_status_val,
+            )
             source = (order.fulfillment_source or "vietnam").strip().lower()
             is_source_routine = new_status_val in SOURCE_ROUTINE_TRANSITIONS.get(
                 source, {}
@@ -461,7 +418,7 @@ def admin_update_order(
         elif new_status_val == OrderStatus.SHIPPING.value:
             order.shipped_at = now
         elif new_status_val == OrderStatus.DELIVERED.value:
-            order.delivered_at = now
+            pass
         elif new_status_val == OrderStatus.COMPLETED.value:
             order.completed_at = now
         elif new_status_val == OrderStatus.CANCELLED.value:
@@ -498,17 +455,24 @@ def admin_update_order(
         new_status_val = getattr(update_data['status'], "value", update_data['status'])
         from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
 
-        sync_warehouse_stock_on_status_change(db, order, old_status, new_status_val)
-        commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, new_status_val)
         if new_status_val == OrderStatus.DELIVERED.value:
-            shipment_svc.mark_delivered_on_timeline(db, order, admin_id=admin_id)
-            if order.user_id:
-                try:
-                    from app.services import promotion_grants as grant_svc
+            from app.services.order_delivery import mark_order_delivered
 
-                    grant_svc.process_first_delivered_grants(db, order.user_id)
-                except Exception:
-                    pass
+            mark_order_delivered(
+                db,
+                order,
+                source="admin",
+                admin_id=admin_id,
+                previous_status=old_status,
+            )
+            commission_confirmed = bool(
+                getattr(order, "_delivery_commission_confirmed", False)
+            )
+        else:
+            sync_warehouse_stock_on_status_change(db, order, old_status, new_status_val)
+            commission_confirmed = affiliate_svc.handle_order_status_change(
+                db, order, old_status, new_status_val
+            )
     if 'payment_status' in update_data:
         affiliate_svc.handle_order_payment_status_change(db, order, update_data['payment_status'])
     
@@ -574,24 +538,14 @@ def confirm_received(
         return None
     if not shipment_svc.can_customer_confirm_received(db, order):
         return None
-    old_status = status_val
-    order.status = OrderStatus.DELIVERED.value
-    order.delivered_at = datetime.now()
-    order.updated_at = datetime.now()
-    from app.services.warehouse_stock import sync_warehouse_stock_on_status_change
+    from app.services.order_delivery import mark_order_delivered
 
-    sync_warehouse_stock_on_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
-    commission_confirmed = affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.DELIVERED.value)
-    shipment_svc.mark_delivered_on_timeline(db, order)
+    mark_order_delivered(db, order, source="customer_confirm")
+    commission_confirmed = bool(
+        getattr(order, "_delivery_commission_confirmed", False)
+    )
     db.commit()
     db.refresh(order)
-    if order.user_id:
-        try:
-            from app.services import promotion_grants as grant_svc
-
-            grant_svc.process_first_delivered_grants(db, order.user_id)
-        except Exception:
-            pass
     if commission_confirmed:
         affiliate_svc.notify_referrer_commission_confirmed_task(order.id)
     return order

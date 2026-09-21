@@ -13,6 +13,8 @@ class Notification(Base):
     content = Column(Text, nullable=False)
     type = Column(String(50), default="general") # general, order, system, promotion
     is_read = Column(Boolean, default=False)
+    # Stable event identity for retry-safe order/fulfillment notifications.
+    dedupe_key = Column(String(160), nullable=True, unique=True, index=True)
     
     # Thời điểm dự kiến gửi (hiển thị cho user từ lúc này)
     scheduled_at = Column(DateTime(timezone=True), server_default=func.now())

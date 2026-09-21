@@ -14,6 +14,8 @@ export default function MyNotificationsPage() {
   const { user, isAuthenticated } = useAuth();
   const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -21,14 +23,18 @@ export default function MyNotificationsPage() {
     }
   }, [isAuthenticated]);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (append = false) => {
     try {
-      const data = await apiClient.getMyNotifications();
-      setNotifications(data);
+      if (append) setLoadingMore(true);
+      const skip = append ? notifications.length : 0;
+      const data = await apiClient.getMyNotificationsPage(skip, 20);
+      setNotifications(prev => append ? [...prev, ...data.items] : data.items);
+      setHasMore(data.has_more);
     } catch (error) {
       console.error('Failed to fetch notifications', error);
     } finally {
-      setLoading(false);
+      if (append) setLoadingMore(false);
+      else setLoading(false);
     }
   };
 
@@ -114,6 +120,16 @@ export default function MyNotificationsPage() {
               </p>
             </div>
           ))}
+          {hasMore && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => fetchNotifications(true)}
+              className="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-blue-700 disabled:opacity-60"
+            >
+              {loadingMore ? 'Đang tải thêm...' : 'Xem thêm thông báo'}
+            </button>
+          )}
         </div>
       )}
     </div>

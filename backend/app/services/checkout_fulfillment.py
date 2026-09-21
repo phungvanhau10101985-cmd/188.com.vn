@@ -28,6 +28,9 @@ from app.services.fulfillment_routing import (
 )
 from app.services.order_discounts import calculate_order_discounts
 from app.services import promotion_grants as grant_svc
+from app.services.optimized_fulfillment_feature import (
+    select_optimized_fulfillment_outcome,
+)
 
 
 def _dec(value: Any) -> Decimal:
@@ -41,6 +44,20 @@ def group_checkout_items(items: list[dict[str, Any]]) -> dict[str, list[dict[str
         for source in (FULFILLMENT_VIETNAM, FULFILLMENT_CHINA)
         if (rows := [row for row in items if row["fulfillment_source"] == source])
     }
+
+
+def group_checkout_items_for_tenant(
+    tenant_id: str,
+    items: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Pure rollout boundary; shadow compares plans and never repeats checkout writes."""
+    grouped, _decision = select_optimized_fulfillment_outcome(
+        tenant_id=tenant_id,
+        operation="checkout",
+        legacy=lambda: group_checkout_items(items),
+        optimized=lambda: group_checkout_items(items),
+    )
+    return grouped
 
 
 def allocate_group_wallet(
@@ -102,7 +119,7 @@ def _serialize_order(db: Session, order: models.Order) -> schemas.OrderResponse:
     )
 
 
-def create_checkout_fulfillment(
+def _create_checkout_fulfillment(
     *,
     db: Session,
     order_data: schemas.OrderCreate,
@@ -267,7 +284,7 @@ def create_checkout_fulfillment(
 
     after_discount = max(Decimal("0"), regular_subtotal - total_discount) + warehouse_subtotal
     charged_shipping_fee = Decimal("30000") if after_discount < Decimal("500000") else Decimal("0")
-    grouped = group_checkout_items(items)
+    grouped = group_checkout_items_for_tenant(settings.SERVER_NAME, items)
     sources = list(grouped)
     checkout_group_id = str(uuid.uuid4())
 
@@ -440,4 +457,26 @@ def create_checkout_fulfillment(
         "charged_shipping_fee": charged_shipping_fee,
         "next_action_order_id": next_action,
     }
+
+
+def create_checkout_fulfillment(
+    *,
+    db: Session,
+    order_data: schemas.OrderCreate,
+    current_user: Optional[models.User],
+    background_tasks: BackgroundTasks,
+    meta_ads_context: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Public transaction boundary: a split checkout either commits every group or none."""
+    try:
+        return _create_checkout_fulfillment(
+            db=db,
+            order_data=order_data,
+            current_user=current_user,
+            background_tasks=background_tasks,
+            meta_ads_context=meta_ads_context,
+        )
+    except Exception:
+        db.rollback()
+        raise
 

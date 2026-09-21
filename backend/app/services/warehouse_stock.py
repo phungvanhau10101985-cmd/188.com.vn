@@ -136,6 +136,7 @@ def reserve_warehouse_stock_for_order(db: Session, order: Order) -> None:
             0, int(getattr(product, "warehouse_reserved", 0) or 0) + qty
         )
         item.warehouse_stock_reserved_at = now
+        item.warehouse_stock_additive = True
     order.stock_hold_released_at = None
     order.deposit_hold_overdue = False
     if st := getattr(order.status, "value", order.status):

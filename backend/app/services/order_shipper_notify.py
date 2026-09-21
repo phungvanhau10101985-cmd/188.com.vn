@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
-import time
 
 from sqlalchemy.orm import joinedload
 
@@ -12,11 +12,16 @@ from app.core.config import settings
 from app.crud import notification as crud_notification
 from app.db.session import SessionLocal
 from app.models.order import Order
+from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate
 from app.services import email_service
 from app.services import push_service
 
 logger = logging.getLogger(__name__)
+_QUEUE: queue.Queue[int] = queue.Queue()
+_QUEUED: set[int] = set()
+_QUEUE_LOCK = threading.Lock()
+_WORKER: threading.Thread | None = None
 
 _REVIEW_HINT = (
     "Sau khi nhận đủ hàng, vui lòng bấm «Đã nhận hàng» trên trang đơn. "
@@ -30,20 +35,39 @@ def _enabled() -> bool:
 
 
 def schedule_customer_shipper_confirmed_notify(order_id: int) -> None:
-    """Gửi thông báo + email nền sau khi shop xác nhận gửi shipper."""
+    """Queue once after the caller commits; never sleep in the request path."""
     if not _enabled():
         return
+    _ensure_worker()
+    with _QUEUE_LOCK:
+        if order_id in _QUEUED:
+            return
+        _QUEUED.add(order_id)
+    _QUEUE.put(order_id)
 
-    def _run() -> None:
-        # Chờ transaction commit trước khi đọc lại đơn (API / import EMS).
-        time.sleep(1.5)
-        _notify_customer_shipper_confirmed(order_id)
 
-    threading.Thread(
-        target=_run,
-        name=f"shipper-notify-{order_id}",
-        daemon=True,
-    ).start()
+def _ensure_worker() -> None:
+    global _WORKER
+    with _QUEUE_LOCK:
+        if _WORKER and _WORKER.is_alive():
+            return
+        _WORKER = threading.Thread(
+            target=_worker_loop,
+            name="shipper-notify-queue",
+            daemon=True,
+        )
+        _WORKER.start()
+
+
+def _worker_loop() -> None:
+    while True:
+        order_id = _QUEUE.get()
+        try:
+            _notify_customer_shipper_confirmed(order_id)
+        finally:
+            with _QUEUE_LOCK:
+                _QUEUED.discard(order_id)
+            _QUEUE.task_done()
 
 
 def _order_detail_path(order_id: int) -> str:
@@ -60,6 +84,10 @@ def _notify_customer_shipper_confirmed(order_id: int) -> None:
             .first()
         )
         if not order or not order.user_id:
+            return
+        if db.query(Notification.id).filter(
+            Notification.dedupe_key == f"order:{order.id}:shipper_confirmed"
+        ).first():
             return
 
         code = (order.order_code or "").strip() or f"#{order.id}"
@@ -80,6 +108,7 @@ def _notify_customer_shipper_confirmed(order_id: int) -> None:
                     title=title,
                     content=content,
                     type="order",
+                    dedupe_key=f"order:{order.id}:shipper_confirmed",
                 ),
             )
             try:
@@ -118,6 +147,10 @@ def notify_customer_delivered_with_review(order_id: int, *, source: str = "custo
         )
         if not order or not order.user_id:
             return
+        if db.query(Notification.id).filter(
+            Notification.dedupe_key == f"order:{order.id}:delivered"
+        ).first():
+            return
 
         code = (order.order_code or "").strip() or f"#{order.id}"
         if source == "ems_auto":
@@ -144,6 +177,7 @@ def notify_customer_delivered_with_review(order_id: int, *, source: str = "custo
                     title=title,
                     content=content,
                     type="order",
+                    dedupe_key=f"order:{order.id}:delivered",
                 ),
             )
             try:

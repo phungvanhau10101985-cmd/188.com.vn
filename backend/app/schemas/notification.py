@@ -11,6 +11,7 @@ class NotificationBase(BaseModel):
 class NotificationCreate(NotificationBase):
     user_id: int
     expires_at: Optional[datetime] = None
+    dedupe_key: Optional[str] = None
 
 class NotificationUpdate(BaseModel):
     is_read: Optional[bool] = None
@@ -24,6 +25,14 @@ class NotificationResponse(NotificationBase):
 
     class Config:
         from_attributes = True
+
+
+class NotificationPage(BaseModel):
+    items: List[NotificationResponse]
+    total: int
+    skip: int
+    limit: int
+    has_more: bool
 
 class NotificationImportRow(BaseModel):
     phone: str

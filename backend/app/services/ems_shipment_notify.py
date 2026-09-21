@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.crud import notification as crud_notification
 from app.db.session import SessionLocal
 from app.models.order import Order, OrderStatus
+from app.models.notification import Notification
 from app.models.order_shipment import EmsShippingRecord
 from app.schemas.notification import NotificationCreate
 from app.services import email_service
@@ -201,6 +202,11 @@ def maybe_notify_customer_after_ems_refresh(
     )
     if not order or not order.user_id:
         return False
+    dedupe_key = f"order:{order.id}:{event.event_key}"
+    if db.query(Notification.id).filter(
+        Notification.dedupe_key == dedupe_key
+    ).first():
+        return False
 
     try:
         notif = crud_notification.create_notification(
@@ -210,6 +216,7 @@ def maybe_notify_customer_after_ems_refresh(
                 title=event.title,
                 content=event.content,
                 type="order",
+                dedupe_key=dedupe_key,
             ),
         )
         notify_url = (

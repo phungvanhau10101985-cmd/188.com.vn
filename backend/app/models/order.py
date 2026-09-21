@@ -160,6 +160,7 @@ class OrderItem(Base):
     # Tồn kho thanh lý: giữ khi đã cọc, trừ khi giao thành công
     warehouse_stock_reserved_at = Column(DateTime(timezone=True), nullable=True)
     warehouse_stock_deducted_at = Column(DateTime(timezone=True), nullable=True)
+    warehouse_stock_additive = Column(Boolean, nullable=False, default=False)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

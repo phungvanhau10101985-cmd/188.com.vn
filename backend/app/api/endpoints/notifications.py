@@ -7,7 +7,12 @@ from app.core.security import get_current_user, get_current_user_optional, requi
 from app.models.user import User
 from app.models.notification import Notification
 from app.models.admin import AdminUser
-from app.schemas.notification import NotificationResponse, NotificationImportResponse, NotificationCreate
+from app.schemas.notification import (
+    NotificationCreate,
+    NotificationImportResponse,
+    NotificationPage,
+    NotificationResponse,
+)
 from app.crud import notification as crud_notification
 from app.crud import user as crud_user
 import pandas as pd
@@ -27,6 +32,30 @@ def get_my_notifications(
     # Tự động xóa thông báo hết hạn mỗi khi user lấy danh sách
     crud_notification.delete_expired_notifications(db)
     return crud_notification.get_user_notifications(db, user_id=current_user.id, skip=skip, limit=limit)
+
+
+@router.get("/page", response_model=NotificationPage)
+def get_my_notifications_page(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Paginated counterpart; legacy list endpoint remains unchanged."""
+    safe_skip = max(0, skip)
+    safe_limit = min(100, max(1, limit))
+    crud_notification.delete_expired_notifications(db)
+    total = crud_notification.count_user_notifications(db, current_user.id)
+    items = crud_notification.get_user_notifications(
+        db, current_user.id, safe_skip, safe_limit
+    )
+    return NotificationPage(
+        items=items,
+        total=total,
+        skip=safe_skip,
+        limit=safe_limit,
+        has_more=safe_skip + len(items) < total,
+    )
 
 @router.get("/unread-count", response_model=int)
 def get_unread_count(

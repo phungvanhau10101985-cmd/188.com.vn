@@ -22,6 +22,11 @@ class ProductReview(Base):
     - Chỉ admin được trả lời đánh giá (không có user reply).
     """
     __tablename__ = "product_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "product_id", name="uq_product_reviews_user_product"
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_name = Column(String(255), nullable=False, default="")

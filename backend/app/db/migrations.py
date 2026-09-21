@@ -69,6 +69,7 @@ from app.models.newsletter_subscriber import NewsletterSubscriber
 from app.models.marketing_email_suppression import MarketingEmailSuppression
 from app.models.marketing_banner import MarketingBannerAsset
 from app.models.marketing_icon import MarketingIconAsset
+from app.models.notification import Notification
 from app.db.session import engine
 from app.core.config import settings
 import os
@@ -577,6 +578,54 @@ class MigrationManager:
             return True
         except Exception as exc:
             logger.error("migrate_order_fulfillment_indexes failed: %s", exc)
+            return False
+
+    def migrate_hardening_unique_indexes(self) -> bool:
+        """Read-only startup audit; destructive reconciliation is an operator action."""
+        try:
+            inspector = inspect(engine)
+            tables = set(inspector.get_table_names())
+            counts = {}
+            with engine.connect() as conn:
+                if "payments" in tables:
+                    counts["payments"] = int(conn.execute(text(
+                        "SELECT COUNT(*) FROM ("
+                        "SELECT transaction_code FROM payments "
+                        "WHERE payment_type LIKE 'deposit_sepay%' "
+                        "AND transaction_code IS NOT NULL AND TRIM(transaction_code) <> '' "
+                        "GROUP BY transaction_code HAVING COUNT(*) > 1"
+                        ") d"
+                    )).scalar() or 0)
+                if "product_reviews" in tables:
+                    counts["product_reviews"] = int(conn.execute(text(
+                        "SELECT COUNT(*) FROM ("
+                        "SELECT user_id, product_id FROM product_reviews "
+                        "WHERE user_id IS NOT NULL AND product_id IS NOT NULL "
+                        "GROUP BY user_id, product_id HAVING COUNT(*) > 1"
+                        ") d"
+                    )).scalar() or 0)
+                if "notifications" in tables:
+                    columns = {c["name"] for c in inspector.get_columns("notifications")}
+                    if "dedupe_key" in columns:
+                        counts["notifications"] = int(conn.execute(text(
+                            "SELECT COUNT(*) FROM ("
+                            "SELECT dedupe_key FROM notifications "
+                            "WHERE dedupe_key IS NOT NULL AND TRIM(dedupe_key) <> '' "
+                            "GROUP BY dedupe_key HAVING COUNT(*) > 1"
+                            ") d"
+                        )).scalar() or 0)
+            pending = {name: count for name, count in counts.items() if count}
+            if pending:
+                logger.warning(
+                    "Parity reconcile pending (startup is read-only): %s. "
+                    "Run backend/scripts/reconcile_order_schema_parity.py, then --apply.",
+                    pending,
+                )
+            else:
+                logger.info("Parity reconcile startup audit: no duplicate groups found")
+            return True
+        except Exception as exc:
+            logger.error("migrate_hardening_unique_indexes audit failed: %s", exc)
             return False
 
     def migrate_ems_shop_return_received_backfill(self) -> bool:
@@ -1284,6 +1333,10 @@ class MigrationManager:
             "product_review_useful_votes", ProductReviewUsefulVote
         )
         results['product_reviews_sync_columns'] = self._sync_table_columns("product_reviews", ProductReview)
+        results['notifications_sync_columns'] = self._sync_table_columns(
+            "notifications", Notification
+        )
+        results['hardening_reconcile_readiness'] = self.migrate_hardening_unique_indexes()
         # 8. Bảng categories/products (taxonomy + product metadata)
         results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
         results['products_sync_columns'] = self._sync_table_columns("products", Product)

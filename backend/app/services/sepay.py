@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, parse_qs
 
 from fastapi import Request
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -686,6 +687,12 @@ def _apply_sepay_deposit_finalize(
             db, order, amount, sepay_id_str, reference, data, pending_payment
         )
         return True, "ok"
+    except IntegrityError:
+        # DB unique index is the final arbiter when two webhook deliveries race.
+        db.rollback()
+        if crud_payment.find_payment_by_sepay_id(db, sepay_id_str):
+            return True, "duplicate"
+        raise
     except WarehouseStockError as exc:
         order_id = int(order.id)
         payment_id = int(pending_payment.id) if pending_payment and pending_payment.id else None
@@ -790,6 +797,7 @@ def _finalize_sepay_deposit_success(
                 "reference": reference,
                 "payload": data,
             },
+            commit=False,
         )
 
     order.deposit_paid = amount
@@ -901,7 +909,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
                 )
                 if not ok_fin:
                     return False, fin_msg, None
-                return True, "ok", direct_order.id
+                return True, fin_msg, direct_order.id if fin_msg == "ok" else None
 
     # --- Luồng B: khớp bản ghi Payment PENDING đã tạo khi GET sepay-deposit-info (ổn định hơn parse SMS) ---
     pending = _find_matching_pending_sepay_deposit(db, text_blob, amount, data)
@@ -930,7 +938,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         )
         if not ok_fin:
             return False, fin_msg, None
-        return True, "ok", order.id
+        return True, fin_msg, order.id if fin_msg == "ok" else None
 
     # --- Legacy: không có pending (khách chưa mở API cọc sau khi deploy / QR cũ) ---
     sepay_code = _pick(data, "code")
@@ -980,7 +988,7 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         )
         if not ok_fin:
             return False, fin_msg, None
-        return True, "ok", order.id
+        return True, fin_msg, order.id if fin_msg == "ok" else None
 
     # Legacy: đơn + nội dung OK nhưng orders.deposit_amount lệch số tiền thực chuyển — thường do sửa đơn sau khi
     # đã GET sepay-deposit-info / QR. Nếu vẫn có dòng PENDING cùng đơn khớp transferAmount, ghi nhận theo pending.
@@ -998,6 +1006,6 @@ def apply_sepay_incoming_transfer(db: Session, data: Dict[str, Any]) -> Tuple[bo
         )
         if not ok_fin:
             return False, fin_msg, None
-        return True, "ok", order.id
+        return True, fin_msg, order.id if fin_msg == "ok" else None
 
     return False, "amount_mismatch", None

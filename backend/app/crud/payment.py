@@ -33,6 +33,7 @@ def create_payment(
     transfer_date: Optional[datetime] = None,
     payment_status: Optional[str] = None,
     payment_gateway_data: Optional[Dict[str, Any]] = None,
+    commit: bool = True,
 ) -> Payment:
     pm = (
         payment_method
@@ -64,8 +65,11 @@ def create_payment(
     if st == PaymentStatus.PAID:
         p.confirmed_at = datetime.now()
     db.add(p)
-    db.commit()
-    db.refresh(p)
+    if commit:
+        db.commit()
+        db.refresh(p)
+    else:
+        db.flush()
     return p
 
 
@@ -100,7 +104,10 @@ def get_order_payments(db: Session, *, order_id: int) -> List[Payment]:
 def find_payment_by_sepay_id(db: Session, sepay_id: str) -> Optional[Payment]:
     return (
         db.query(Payment)
-        .filter(Payment.transaction_code == sepay_id, Payment.payment_type == "deposit_sepay")
+        .filter(
+            Payment.transaction_code == sepay_id,
+            Payment.payment_type.like("deposit_sepay%"),
+        )
         .first()
     )
 

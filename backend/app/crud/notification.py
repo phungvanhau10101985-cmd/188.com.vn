@@ -1,6 +1,7 @@
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
 from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate, NotificationUpdate
 from datetime import datetime, timezone
@@ -19,6 +20,13 @@ def get_user_notifications(db: Session, user_id: int, skip: int = 0, limit: int 
         Notification.scheduled_at <= now
     ).order_by(desc(Notification.created_at)).offset(skip).limit(limit).all()
 
+def count_user_notifications(db: Session, user_id: int) -> int:
+    now = _utc_now()
+    return db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.scheduled_at <= now,
+    ).count()
+
 def get_unread_count(db: Session, user_id: int) -> int:
     now = _utc_now()
     return db.query(Notification).filter(
@@ -28,16 +36,33 @@ def get_unread_count(db: Session, user_id: int) -> int:
     ).count()
 
 def create_notification(db: Session, notification: NotificationCreate) -> Notification:
+    if notification.dedupe_key:
+        existing = db.query(Notification).filter(
+            Notification.dedupe_key == notification.dedupe_key
+        ).first()
+        if existing:
+            return existing
     db_obj = Notification(
         user_id=notification.user_id,
         title=notification.title,
         content=notification.content,
         type=notification.type,
         scheduled_at=notification.scheduled_at,
-        expires_at=notification.expires_at
+        expires_at=notification.expires_at,
+        dedupe_key=notification.dedupe_key,
     )
     db.add(db_obj)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if notification.dedupe_key:
+            existing = db.query(Notification).filter(
+                Notification.dedupe_key == notification.dedupe_key
+            ).first()
+            if existing:
+                return existing
+        raise
     db.refresh(db_obj)
     try:
         from app.services.push_service import send_for_notification

@@ -12,7 +12,10 @@
     "type-check": "tsc --noEmit",
     "analyze": "cross-env ANALYZE=true next build --webpack",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "test:fulfillment-parity:golden": "python ../tools/order_fulfillment_parity.py --self-test --peer-fixture ../../nanoai.vn/contracts/shared-order-fulfillment-v1.json --peer-tool ../../nanoai.vn/tools/order_fulfillment_parity.py && cd ../backend && python -m pytest tests/test_shared_order_contract_fixtures.py tests/test_optimized_fulfillment_feature.py",
+    "test:fulfillment-parity:integration": "python ../tools/run_order_fulfillment_integration_gate.py --peer-root ../../nanoai.vn",
+    "test:fulfillment-parity:integration:live": "python ../tools/run_order_fulfillment_integration_gate.py --peer-root ../../nanoai.vn --live"
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",

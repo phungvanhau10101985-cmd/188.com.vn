@@ -1,10 +1,15 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime, timezone
 
 from app.models.product_review import ProductReview, ProductReviewUsefulVote
 from app.schemas.product_review import ProductReviewCreate, ProductReviewUpdate, ProductReviewSubmit
+
+
+class DuplicateCustomerReviewError(ValueError):
+    pass
 
 
 def get_review(db: Session, review_id: int) -> Optional[ProductReview]:
@@ -130,7 +135,13 @@ def create_customer_review(
         is_imported=False,
     )
     db.add(obj)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise DuplicateCustomerReviewError(
+            "Mỗi khách chỉ được đánh giá một lần cho mỗi sản phẩm."
+        ) from exc
     db.refresh(obj)
     return obj
 
