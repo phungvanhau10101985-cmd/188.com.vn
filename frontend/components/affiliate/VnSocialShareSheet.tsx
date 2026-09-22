@@ -19,27 +19,38 @@ function PlatformIcon({ id }: { id: VnSharePlatform }) {
   switch (id) {
     case 'facebook':
       return (
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="h-7 w-7" viewBox="0 0 24 24" fill="#fff" aria-hidden>
           <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z" />
         </svg>
       );
     case 'zalo':
-      return <span className="text-lg font-black tracking-tight">Z</span>;
+      return (
+        <svg className="h-7 w-7" viewBox="0 0 48 48" fill="none" aria-hidden>
+          <path
+            fill="#fff"
+            d="M24.1 8.5c-8.6 0-15.6 5.7-15.6 12.8 0 4 2.2 7.6 5.7 10l-.9 6.6 7.2-3.8c1.1.2 2.3.3 3.6.3 8.6 0 15.6-5.7 15.6-12.8S32.7 8.5 24.1 8.5z"
+          />
+          <path
+            fill="#0068FF"
+            d="M17.2 16.2h13.2v2.8H22.4l7.9 6.6h-3.7l-6.6-5.4v5.4h-2.8V16.2z"
+          />
+        </svg>
+      );
     case 'messenger':
       return (
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.906 1.444 5.502 3.707 7.19V22l3.344-1.836c.89.245 1.83.379 2.81.379 5.523 0 10-4.145 10-9.243S17.523 2 12 2zm1.01 12.414-2.563-2.734-5.01 2.734L10.5 8.59l2.625 2.734 4.957-2.734-5.072 5.824z" />
+        <svg className="h-7 w-7" viewBox="0 0 24 24" fill="#fff" aria-hidden>
+          <path d="M12 2C6.36 2 2 6.13 2 11.7c0 2.91 1.19 5.44 3.14 7.17V22l3.45-1.89c1.09.3 2.24.46 3.41.46 5.64 0 10-4.13 10-9.87C22 6.13 17.64 2 12 2zm1.01 13.28-2.61-2.78-5.01 2.78 5.5-5.84 2.67 2.76 4.95-2.75-5.5 5.83z" />
         </svg>
       );
     case 'tiktok':
       return (
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+        <svg className="h-7 w-7" viewBox="0 0 24 24" fill="#fff" aria-hidden>
           <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.27 6.27 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34V8.69a8.18 8.18 0 0 0 4.78 1.52V6.76a4.85 4.85 0 0 1-1.01-.07z" />
         </svg>
       );
     case 'copy':
       return (
-        <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden>
+        <svg className="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="#1f2937" strokeWidth={2} aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
       );
@@ -112,7 +123,8 @@ export default function VnSocialShareSheet({ open, onClose, url, title }: VnSoci
               className="flex flex-col items-center gap-2 rounded-xl p-1 active:scale-95 transition-transform"
             >
               <span
-                className={`flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm ${p.bgClass} ${p.textClass ?? ''}`}
+                className="flex h-14 w-14 items-center justify-center rounded-2xl shadow-sm"
+                style={{ background: p.bg, color: p.color }}
               >
                 <PlatformIcon id={p.id} />
               </span>

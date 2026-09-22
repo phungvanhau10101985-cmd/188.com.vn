@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 import VnSocialShareSheet from '@/components/affiliate/VnSocialShareSheet';
+import { tryNativeShare } from '@/lib/vn-social-share';
 import { trackEvent } from '@/lib/analytics';
 
 interface AffiliateShareBarProps {
@@ -40,7 +41,11 @@ export default function AffiliateShareBar({ shareTitle, className = '' }: Affili
         </span>
         <button
           type="button"
-          onClick={() => setShareOpen(true)}
+          onClick={() => {
+            void tryNativeShare(shareUrl, shareTitle).then((usedNative) => {
+              if (!usedNative) setShareOpen(true);
+            });
+          }}
           className="font-semibold text-[#ea580c] underline-offset-2 hover:underline"
         >
           Chia sẻ
@@ -82,10 +87,12 @@ export function ProductShareActionButtons({
   };
 
   const handleShare = () => {
-    setShareOpen(true);
     trackEvent('share_product', {
       method: isApproved ? 'open_affiliate_share' : 'open_share',
       ...(productId ? { product_id: productId } : {}),
+    });
+    void tryNativeShare(shareUrl, shareTitle).then((usedNative) => {
+      if (!usedNative) setShareOpen(true);
     });
   };
 
@@ -144,7 +151,11 @@ export function ProductShareIconButton({ shareTitle, className = '' }: ProductSh
     <>
       <button
         type="button"
-        onClick={() => setShareOpen(true)}
+        onClick={() => {
+          void tryNativeShare(shareUrl, shareTitle).then((usedNative) => {
+            if (!usedNative) setShareOpen(true);
+          });
+        }}
         className={`w-8 h-8 rounded-full bg-white/80 flex items-center justify-center shadow-sm hover:bg-white ${className}`}
         aria-label={isApproved ? 'Chia sẻ link giới thiệu' : 'Chia sẻ sản phẩm'}
         title={isApproved ? 'Chia sẻ link giới thiệu' : 'Chia sẻ'}

@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { appendReferralToUrl } from '@/lib/affiliate-ref';
 import { useToast } from '@/components/ToastProvider';
 import VnSocialShareSheet from '@/components/affiliate/VnSocialShareSheet';
+import { tryNativeShare } from '@/lib/vn-social-share';
 
 interface AffiliateLinkConverterProps {
   referralCode: string;
@@ -67,7 +68,11 @@ export default function AffiliateLinkConverter({ referralCode }: AffiliateLinkCo
               </button>
               <button
                 type="button"
-                onClick={() => setShareOpen(true)}
+                onClick={() => {
+                  void tryNativeShare(affiliateUrl, '188.com.vn').then((usedNative) => {
+                    if (!usedNative) setShareOpen(true);
+                  });
+                }}
                 className="rounded-lg border border-[#ea580c] text-[#ea580c] px-4 py-2 text-sm font-semibold hover:bg-orange-50"
               >
                 Chia sẻ
