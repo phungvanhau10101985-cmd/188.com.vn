@@ -59,7 +59,7 @@ export default function AffiliateShareBar({ shareTitle, className = '' }: Affili
 interface ProductShareIconButtonProps {
   shareTitle?: string;
   className?: string;
-  productId?: string;
+  productId?: string | number;
 }
 
 /** Cặp nút Copy link + Chia sẻ — hàng badge mobile PDP. */
