@@ -466,7 +466,7 @@ export default function ProductInfo({
             </span>
           )}
         </h1>
-        <AffiliateShareBar shareTitle={product.name} className="mb-2" />
+        {!compactMobile && <AffiliateShareBar shareTitle={product.name} className="mb-2" />}
         {!compactMobile && displayableBrandOrOrigin(product.brand_name) && (
           <p className="text-sm text-gray-600 mb-2">Thương hiệu: {displayableBrandOrOrigin(product.brand_name)}</p>
         )}

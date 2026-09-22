@@ -33,7 +33,11 @@ export function useAffiliatePageShare(options: ShareOptions = {}) {
   const copyShareUrl = useCallback(async () => {
     if (!shareUrl) return false;
     try {
-      await navigator.clipboard.writeText(shareUrl);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl);
+      } else {
+        throw new Error('clipboard-unavailable');
+      }
       pushToast({
         title: isApproved ? 'Đã copy link giới thiệu' : 'Đã copy link',
         variant: 'success',
@@ -41,8 +45,27 @@ export function useAffiliatePageShare(options: ShareOptions = {}) {
       });
       return true;
     } catch {
-      pushToast({ title: 'Không copy được link', variant: 'error', durationMs: 2500 });
-      return false;
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = shareUrl;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (!ok) throw new Error('execCommand-copy-failed');
+        pushToast({
+          title: isApproved ? 'Đã copy link giới thiệu' : 'Đã copy link',
+          variant: 'success',
+          durationMs: 2000,
+        });
+        return true;
+      } catch {
+        pushToast({ title: 'Không copy được link', variant: 'error', durationMs: 2500 });
+        return false;
+      }
     }
   }, [isApproved, pushToast, shareUrl]);
 

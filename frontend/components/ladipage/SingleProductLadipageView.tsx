@@ -34,6 +34,7 @@ import TrustCtaSection from './TrustCtaSection';
 import FaqSection from './FaqSection';
 import LadipageTrustStrip from './LadipageTrustStrip';
 import ProductBuyModal from './ProductBuyModal';
+import { ProductShareActionButtons } from '@/components/affiliate/AffiliateShareBar';
 import ProductDetailDesktopChrome from '@/app/products/[slug]/components/ProductDetailDesktopChrome';
 import { buildHeroCarouselUrlsFromProduct, collectProductImageUrls } from '@/lib/ladipage-utils';
 import type {
@@ -303,12 +304,15 @@ export default function SingleProductLadipageView({
           />
         </SectionErrorBoundary>
 
-        {/* Badge + blurb: cùng cỡ/đậm với tên SP (text-base font-bold), nét mảnh */}
+        {/* Badge + copy/share: cùng hàng trên mobile */}
         <div className="px-4 pt-2.5 pb-1">
-          <p className="inline-flex items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-orange-500" aria-hidden />
-            Gợi ý dành cho bạn
-          </p>
+          <div className="relative z-[1] flex items-center justify-between gap-2 pr-14">
+            <p className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" aria-hidden />
+              <span className="truncate">Gợi ý dành cho bạn</span>
+            </p>
+            <ProductShareActionButtons shareTitle={product.name} productId={product.id} />
+          </div>
           {mobileHeroBlurb.showHeadline ? (
             <p className="mt-2 text-base font-bold leading-snug tracking-tight text-orange-800">
               {mobileHeroBlurb.headline}
