@@ -39,7 +39,7 @@ import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount'
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import AffiliateShareBar, { ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
+import { ProductShareActionButtons, ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
 import { trackEvent } from '@/lib/analytics';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
@@ -499,13 +499,17 @@ export default function ProductDetailMobile({
           )}
         </h1>
 
-        <AffiliateShareBar shareTitle={product.name} className="mb-3" />
-
-        {productCode && (
-          <p className="text-xs text-gray-600 mb-2">
-            Mã sp: <span className="copy-code-product">{productCode}</span>
-          </p>
-        )}
+        <div className="relative z-[1] mb-2 flex items-center justify-between gap-2 pr-14">
+          {productCode ? (
+            <p className="min-w-0 truncate text-xs text-gray-600">
+              Mã SP:{' '}
+              <span className="copy-code-product">{productCode}</span>
+            </p>
+          ) : (
+            <span className="min-w-0" />
+          )}
+          <ProductShareActionButtons shareTitle={product.name} productId={product.id} />
+        </div>
 
         {/* Giá + giá gốc, giảm giá, trả góp */}
         <div className="mb-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3">
