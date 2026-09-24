@@ -112,7 +112,7 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
         className={`sticky top-0 left-0 right-0 z-[30] overflow-visible backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
       >
         <div className="max-w-7xl mx-auto px-4 py-0">
-          <div className="grid grid-cols-[minmax(12rem,17.33rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,21.33rem)_minmax(0,1fr)_9.33rem]">
+          <div className="grid grid-cols-[minmax(12rem,20.75rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,22rem)_minmax(0,1fr)_9.33rem]">
             <div className={`min-w-0 overflow-visible ${isStickyPinned ? '' : 'pointer-events-none opacity-0'}`}>
               <div className="flex min-w-0 items-center gap-2">
                 <Link
@@ -217,10 +217,10 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
                     </div>
                   )}
                 </div>
-                <div className="relative z-[105] ml-2 flex w-full min-w-[8rem] flex-1 items-stretch overflow-hidden rounded-lg bg-white lg:ml-3">
+                <div className="relative z-[105] ml-2 flex w-full min-w-[9.5rem] flex-1 items-stretch overflow-hidden rounded-lg bg-white lg:ml-3">
                   <Link
                     href={MOBILE_SEARCH_HREF}
-                    className="flex min-w-0 flex-1 items-center py-1.5 pl-2.5 pr-1.5 text-xs text-gray-500 hover:text-gray-700"
+                    className="flex min-w-0 flex-1 items-center whitespace-nowrap py-1.5 pl-2.5 pr-2 text-xs text-gray-500 hover:text-gray-700"
                     aria-label="Mở trang tìm kiếm"
                   >
                     Tìm kiếm...
