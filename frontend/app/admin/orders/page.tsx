@@ -1438,6 +1438,7 @@ export default function AdminOrdersPage() {
                                   className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
                                   width={128}
                                   height={128}
+                                  referrerPolicy="no-referrer"
                                 />
                               </a>
                             ) : (
@@ -1448,6 +1449,7 @@ export default function AdminOrdersPage() {
                                 className="block w-32 h-32 shrink-0 aspect-square rounded-lg object-cover border border-gray-100 bg-gray-50"
                                 width={128}
                                 height={128}
+                                referrerPolicy="no-referrer"
                               />
                             )}
                           </td>

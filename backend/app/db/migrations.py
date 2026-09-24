@@ -453,6 +453,47 @@ class MigrationManager:
         """Thêm mọi cột thiếu của bảng order_items theo model OrderItem."""
         return self._sync_table_columns("order_items", OrderItem)
 
+    def migrate_variant_label_column_widths(self) -> bool:
+        """Nới nhãn biến thể trên giỏ/đơn. Tên màu nguồn có thể dài hơn varchar(50)."""
+        if not IS_POSTGRESQL:
+            return True
+        targets = (
+            ("cart_items", "selected_size"),
+            ("cart_items", "selected_color"),
+            ("cart_items", "selected_color_name"),
+            ("order_items", "selected_size"),
+            ("order_items", "selected_color"),
+            ("order_items", "selected_color_name"),
+        )
+        try:
+            with engine.begin() as conn:
+                for table, column in targets:
+                    row = conn.execute(
+                        text(
+                            """
+                            SELECT character_maximum_length
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = :table
+                              AND column_name = :column
+                            """
+                        ),
+                        {"table": table, "column": column},
+                    ).fetchone()
+                    current = row[0] if row else None
+                    if current is None or int(current) >= 500:
+                        continue
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table} ALTER COLUMN {column} TYPE VARCHAR(500)"
+                        )
+                    )
+                    logger.info("Widened %s.%s from varchar(%s) to varchar(500)", table, column, current)
+            return True
+        except Exception as e:
+            logger.error("migrate_variant_label_column_widths failed: %s", e)
+            return False
+
     def migrate_order_fulfillment_backfill(self) -> bool:
         """Snapshot nguồn cho dữ liệu cũ mà không thay đổi timeline lịch sử."""
         from sqlalchemy import and_, func, or_
@@ -1312,6 +1353,7 @@ class MigrationManager:
         results['orders_add_order_code'] = self.migrate_orders_add_order_code()
         # 3. Bảng order_items (unit_price, ...)
         results['order_items_sync_columns'] = self.migrate_order_items_sync_columns()
+        results['variant_label_column_widths'] = self.migrate_variant_label_column_widths()
         results['order_fulfillment_backfill'] = self.migrate_order_fulfillment_backfill()
         results['order_fulfillment_indexes'] = self.migrate_order_fulfillment_indexes()
         results['order_status_overrides_create'] = self._create_table_if_not_exists(

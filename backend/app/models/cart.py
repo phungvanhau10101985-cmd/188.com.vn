@@ -34,8 +34,8 @@ class CartItem(Base):
     # Các cột có trong database
     product_data = Column(JSON, nullable=False)  # notnull=1
     quantity = Column(Integer, default=1, nullable=False)
-    selected_size = Column(String(50), nullable=True)
-    selected_color = Column(String(200), nullable=True)
+    selected_size = Column(String(500), nullable=True)
+    selected_color = Column(String(500), nullable=True)
     unit_price = Column(Float, nullable=False)  # notnull=1
     total_price = Column(Float, nullable=False)  # notnull=1
     added_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -43,7 +43,7 @@ class CartItem(Base):
     
     # Các cột thêm sau
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    selected_color_name = Column(String(100), nullable=True)
+    selected_color_name = Column(String(500), nullable=True)
     product_name = Column(String(500), nullable=True)
     product_price = Column(Float, nullable=True)
     product_image = Column(String(500), nullable=True)

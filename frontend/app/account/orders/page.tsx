@@ -382,6 +382,7 @@ export default function AccountOrdersPage() {
                                   fill
                                   sizes="64px"
                                   className="object-cover"
+                                  referrerPolicy="no-referrer"
                                 />
                               </div>
                             ) : (

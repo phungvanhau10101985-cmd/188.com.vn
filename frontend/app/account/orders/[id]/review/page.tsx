@@ -133,6 +133,7 @@ export default function OrderReviewPage() {
                   fill
                   sizes="80px"
                   className="object-cover"
+                  referrerPolicy="no-referrer"
                 />
               </div>
             ) : (

@@ -361,6 +361,7 @@ export default function AccountOrderDetailPage() {
                     fill
                     sizes="76px"
                     className="object-cover"
+                    referrerPolicy="no-referrer"
                   />
                 </div>
               ) : null;
@@ -483,6 +484,7 @@ export default function AccountOrderDetailPage() {
                               fill
                               sizes="48px"
                               className="object-cover"
+                              referrerPolicy="no-referrer"
                             />
                           </a>
                         ) : item.product_image ? (
@@ -493,6 +495,7 @@ export default function AccountOrderDetailPage() {
                               fill
                               sizes="48px"
                               className="object-cover"
+                              referrerPolicy="no-referrer"
                             />
                           </div>
                         ) : null}

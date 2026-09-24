@@ -142,9 +142,9 @@ class OrderItem(Base):
     total_price = Column(Numeric(12, 2), nullable=False)
     
     # Thông tin variant
-    selected_size = Column(String(50))
-    selected_color = Column(String(50))
-    selected_color_name = Column(String(100))
+    selected_size = Column(String(500))
+    selected_color = Column(String(500))
+    selected_color_name = Column(String(500))
     
     # Đặt cọc cho sản phẩm
     requires_deposit = Column(Boolean, default=False)
