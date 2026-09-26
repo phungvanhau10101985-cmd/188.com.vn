@@ -94,11 +94,9 @@ export const metadata: Metadata = {
     telephone: false,
   },
   metadataBase: new URL(METADATA_BASE_URL),
+  // Site chỉ có tiếng Việt tại `/`. Không khai báo hreflang `/vi` — path đó không phải trang ngôn ngữ.
   alternates: {
     canonical: "/",
-    languages: {
-      "vi-VN": "/vi",
-    },
   },
   openGraph: {
     type: "website",

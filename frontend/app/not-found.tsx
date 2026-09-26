@@ -1,41 +1,17 @@
-'use client';
+import NotFoundHomeLink from '@/components/NotFoundHomeLink';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { getStorefrontHomeHref, isAdminBrowserHost } from '@/lib/admin-origin';
-
+/**
+ * Phải là Server Component đồng bộ, không gọi headers()/cookies().
+ * notFound() nằm trong Suspense của root layout — nếu file này suspend,
+ * Next đã gửi HTTP 200 rồi mới gắn UI 404 (soft 404 với Google).
+ */
 export default function NotFound() {
-  const router = useRouter();
-  const [homeHref, setHomeHref] = useState('/');
-
-  useEffect(() => {
-    const href = getStorefrontHomeHref();
-    setHomeHref(href);
-    const id = window.setTimeout(() => {
-      if (isAdminBrowserHost() || href.startsWith('http')) {
-        window.location.replace(href);
-        return;
-      }
-      router.replace(href);
-    }, 1000);
-    return () => window.clearTimeout(id);
-  }, [router]);
-
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4 text-center">
+    <div className="min-h-[60vh] bg-gray-50 flex flex-col items-center justify-center px-4 text-center">
       <p className="text-6xl font-bold text-[#ea580c] mb-2 tabular-nums">404</p>
-      <p className="text-gray-800 font-medium mb-1">Không tìm thấy trang</p>
-      <p className="text-sm text-gray-500 mb-6">Đang chuyển về trang chủ sau 1 giây…</p>
-      {homeHref.startsWith('http') ? (
-        <a href={homeHref} className="text-[#ea580c] font-semibold hover:underline">
-          Về trang chủ ngay
-        </a>
-      ) : (
-        <Link href={homeHref} className="text-[#ea580c] font-semibold hover:underline">
-          Về trang chủ ngay
-        </Link>
-      )}
+      <h1 className="text-gray-800 font-medium mb-1">Không tìm thấy trang</h1>
+      <p className="text-sm text-gray-500 mb-6">Đường dẫn không tồn tại hoặc đã được gỡ.</p>
+      <NotFoundHomeLink />
     </div>
   );
 }
