@@ -179,6 +179,8 @@ export default function ProductVariantModal({
   const available = realStock > 0;
   const orderingWarehouse = selectedWarehouseId != null;
   const [sizeGuideOpen, setSizeGuideOpen] = useState(false);
+  const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
+  const imagePreviewCloseRef = useRef<HTMLButtonElement>(null);
   const [portalReady, setPortalReady] = useState(false);
   const wasOpenRef = useRef(false);
   const catLevel1Slug = product.category_level1_slug ?? null;
@@ -189,7 +191,10 @@ export default function ProductVariantModal({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) setSizeGuideOpen(false);
+    if (!isOpen) {
+      setSizeGuideOpen(false);
+      setImagePreviewOpen(false);
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -301,6 +306,7 @@ export default function ProductVariantModal({
     setSelectedWarehouseId(null);
     setQuantity(1);
     setConfirmImageIndex(0);
+    setImagePreviewOpen(false);
   }, [isOpen, sizes, colors, product.id]);
 
   const handleWarehouseSelect = useCallback((id: number | null) => {
@@ -367,11 +373,21 @@ export default function ProductVariantModal({
   useEffect(() => {
     if (!isOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (imagePreviewOpen) {
+        setImagePreviewOpen(false);
+        return;
+      }
+      onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, imagePreviewOpen]);
+
+  useEffect(() => {
+    if (!imagePreviewOpen) return;
+    imagePreviewCloseRef.current?.focus();
+  }, [imagePreviewOpen]);
 
   useEffect(() => {
     setQuantity(1);
@@ -424,7 +440,8 @@ export default function ProductVariantModal({
       <div
         className="relative z-10 w-full max-w-3xl max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl animate-in slide-in-from-bottom duration-200 pointer-events-auto touch-manipulation"
         role="dialog"
-        aria-modal="true"
+        aria-modal={imagePreviewOpen ? undefined : true}
+        aria-hidden={imagePreviewOpen || undefined}
         aria-labelledby="variant-modal-title"
       >
         {/* Header: nút đóng */}
@@ -630,7 +647,15 @@ export default function ProductVariantModal({
           {/* Ảnh xác nhận + thông tin (mobile) */}
           <div className="md:hidden mb-2">
             <div className="flex gap-3 mb-3">
-              <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 border border-gray-200">
+              <button
+                type="button"
+                onClick={() => {
+                  if (mainDisplayImage) setImagePreviewOpen(true);
+                }}
+                disabled={!mainDisplayImage}
+                className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 touch-manipulation active:opacity-90 disabled:cursor-default"
+                aria-label="Xem ảnh đã chọn kích thước lớn"
+              >
                 <Image
                   src={getOptimizedImage(mainDisplayImage, { width: 256, height: 256, hideProductPng: true })}
                   alt={product.name}
@@ -638,7 +663,12 @@ export default function ProductVariantModal({
                   height={128}
                   className="w-full h-full object-cover"
                 />
-              </div>
+                <span className="pointer-events-none absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white" aria-hidden>
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4h4M20 8V4h-4M4 16v4h4M20 16v4h-4" />
+                  </svg>
+                </span>
+              </button>
               <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                 <div>
                   <p className="text-[10px] text-gray-500 mb-0.5">Mã: {product.code || product.product_id || '—'}</p>
@@ -898,6 +928,38 @@ export default function ProductVariantModal({
           </div>
         </div>
       </div>
+      {imagePreviewOpen && mainDisplayImage ? (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black p-3 pt-16 pointer-events-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ảnh sản phẩm đã chọn"
+          onClick={() => setImagePreviewOpen(false)}
+        >
+          <button
+            ref={imagePreviewCloseRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setImagePreviewOpen(false);
+            }}
+            className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex h-11 min-w-11 items-center justify-center gap-1 rounded-full bg-white px-3 text-sm font-semibold text-gray-900 shadow-lg touch-manipulation"
+            aria-label="Đóng ảnh"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Đóng
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={getOptimizedImage(mainDisplayImage, { width: 1600, height: 1600, quality: 90, hideProductPng: true })}
+            alt={product.name}
+            className="max-h-full max-w-full object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      ) : null}
     </div>
     {sizeGuidePanel}
     </>
