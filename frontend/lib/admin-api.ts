@@ -2846,6 +2846,16 @@ export const adminSiteEmbedAPI = {
   delete: (id: number) => fetchAdmin<void>(`/admin/site-embed-codes/${id}`, { method: 'DELETE' }),
 };
 
+/** Link hộp thư NanoAI — admin bấm mở, không nhúng ra site. */
+export const adminNanoAiInboxAPI = {
+  get: () => fetchAdmin<{ url: string }>('/admin/nanoai-inbox-link'),
+  save: (url: string) =>
+    fetchAdmin<{ url: string }>('/admin/nanoai-inbox-link', {
+      method: 'PUT',
+      body: JSON.stringify({ url }),
+    }),
+};
+
 /** Vị trí FAB «lướt video» (đồng bộ với GET public `/shop-video-fab/public`). */
 export interface ShopVideoFabSettings {
   right_mobile_px: number;

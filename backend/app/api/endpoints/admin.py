@@ -1268,6 +1268,77 @@ def admin_delete_site_embed_code(
         raise HTTPException(status_code=404, detail="Không tìm thấy mã nhúng")
 
 
+class NanoAiInboxLinkOut(BaseModel):
+    url: str = ""
+
+
+class NanoAiInboxLinkIn(BaseModel):
+    url: str = ""
+
+
+def _clean_nanoai_inbox_url(raw: Optional[str]) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if len(s) > 2000:
+        raise HTTPException(status_code=400, detail="Link quá dài")
+    parsed = urlparse(s)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Link cần bắt đầu bằng http:// hoặc https://")
+    return s
+
+
+def _find_nanoai_inbox_row(db: Session):
+    return (
+        db.query(models.SiteEmbedCode)
+        .filter(models.SiteEmbedCode.platform == "nanoai")
+        .filter(models.SiteEmbedCode.category == "inbox_link")
+        .order_by(models.SiteEmbedCode.id.asc())
+        .first()
+    )
+
+
+@router.get("/nanoai-inbox-link", response_model=NanoAiInboxLinkOut)
+def admin_get_nanoai_inbox_link(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("chat_embeds")),
+):
+    """URL hộp thư NanoAI — admin bấm mở. Không nhúng ra site."""
+    row = _find_nanoai_inbox_row(db)
+    return NanoAiInboxLinkOut(url=(row.content or "").strip() if row else "")
+
+
+@router.put("/nanoai-inbox-link", response_model=NanoAiInboxLinkOut)
+def admin_put_nanoai_inbox_link(
+    data: NanoAiInboxLinkIn,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("chat_embeds")),
+):
+    url = _clean_nanoai_inbox_url(data.url)
+    row = _find_nanoai_inbox_row(db)
+    if row is None:
+        embed_crud.create_embed_code(
+            db,
+            SiteEmbedCodeCreate(
+                platform="nanoai",
+                category="inbox_link",
+                title="NanoAI — Link hộp thư shop",
+                placement="head",
+                content=url,
+                hint="URL bảng hội thoại NanoAI. Chỉ admin bấm mở — không nhúng ra site.",
+                is_active=True,
+                sort_order=85,
+            ),
+        )
+    else:
+        embed_crud.update_embed_code(
+            db,
+            row.id,
+            SiteEmbedCodeUpdate(content=url, is_active=True, placement="head"),
+        )
+    return NanoAiInboxLinkOut(url=url)
+
+
 # ========== Vị trí nút lướt video shop (FAB) ==========
 @router.get("/shop-video-fab-settings", response_model=ShopVideoFabPublicOut)
 def admin_get_shop_video_fab_settings(

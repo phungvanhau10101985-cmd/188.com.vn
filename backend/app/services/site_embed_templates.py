@@ -13,8 +13,9 @@ from app.models.site_embed_code import SiteEmbedCode
 
 PlacementHtml = Tuple[str, str]
 
-# Không bao giờ đưa ra API /embed-codes/public (chỉ dùng máy chủ)
-INTERNAL_ONLY_CATEGORIES = frozenset({"capi_token"})
+# Không bao giờ đưa ra API /embed-codes/public (chỉ dùng máy chủ).
+# inbox_link: URL hộp thư NanoAI cho admin bấm mở — không phải mã nhúng storefront.
+INTERNAL_ONLY_CATEGORIES = frozenset({"capi_token", "inbox_link"})
 
 # Chỉ metadata (AW-/label) — API embed trả qua google_ads_web_conversions, không chèn HTML.
 _GOOGLE_ADS_METADATA_ONLY_CATEGORIES = frozenset(

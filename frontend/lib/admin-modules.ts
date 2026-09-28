@@ -15,6 +15,7 @@ function buildModuleCatalog() {
 
   for (const g of ADMIN_NAV_GROUPS) {
     for (const it of g.items) {
+      if (it.skipModuleCatalog) continue;
       if (!order.includes(it.moduleKey)) order.push(it.moduleKey);
       labels[it.moduleKey] = it.label;
       nav[it.moduleKey] = it.href;

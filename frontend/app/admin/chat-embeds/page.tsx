@@ -205,6 +205,11 @@ export default function AdminChatEmbedsPage() {
             Mã nhúng đầy đủ
           </Link>
           . Nếu trước đây đã lưu script thử đồ NanoAI riêng, vào đó để tắt hoặc xóa — trang này chỉ còn cấu hình chat.
+          Link hộp thư NanoAI (bấm mở hội thoại) đặt ở{' '}
+          <Link href="/admin/xem-hoi-thoai" className="text-[#ea580c] font-medium hover:underline">
+            Xem hội thoại
+          </Link>
+          .
           Sau khi lưu, khách xem site sẽ thấy widget tương ứng khi mục đang bật.
         </p>
 

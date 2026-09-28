@@ -6,6 +6,8 @@ export type AdminNavLink = {
   moduleKey: string;
   /** Chỉ super_admin / admin — không gán qua granular NV. */
   privilegedOnly?: boolean;
+  /** Mục phụ cùng moduleKey — không ghi đè nhãn quyền và trang mặc định. */
+  skipModuleCatalog?: boolean;
 };
 
 export type AdminNavGroup = { title: string; items: AdminNavLink[] };
@@ -55,6 +57,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: 'Website & nhúng',
     items: [
       { href: '/admin/chat-embeds', label: 'Chat & MXH', moduleKey: 'chat_embeds' },
+      {
+        href: '/admin/xem-hoi-thoai',
+        label: 'Xem hội thoại',
+        moduleKey: 'chat_embeds',
+        skipModuleCatalog: true,
+      },
       { href: '/admin/shop-video-fab', label: 'Nút video', moduleKey: 'shop_video_fab' },
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics', moduleKey: 'embed_codes' },
       { href: '/admin/bunny-cdn', label: 'Ảnh Bunny CDN', moduleKey: 'bunny_cdn' },
@@ -95,9 +103,13 @@ export function getPrivilegedOnlyAdminHrefs(): string[] {
 export function getAdminStaffModulePickerGroups(): { title: string; moduleKeys: string[] }[] {
   const groups = ADMIN_NAV_GROUPS.map((g) => ({
     title: g.title,
-    moduleKeys: g.items
-      .filter((it) => !it.privilegedOnly && it.moduleKey !== 'staff_access')
-      .map((it) => it.moduleKey),
+    moduleKeys: [
+      ...new Set(
+        g.items
+          .filter((it) => !it.privilegedOnly && it.moduleKey !== 'staff_access')
+          .map((it) => it.moduleKey),
+      ),
+    ],
   })).filter((g) => g.moduleKeys.length > 0);
   const extraKeys = ADMIN_NAV_EXTRA_MODULES.map((m) => m.moduleKey);
   if (extraKeys.length > 0) {
