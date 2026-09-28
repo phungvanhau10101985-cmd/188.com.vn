@@ -1230,6 +1230,11 @@ class ApiClient {
     return this.fetch('/auth/me');
   }
 
+  /** Link hộp thư NanoAI — chỉ tài khoản shop đã gán quản trị. */
+  async getLinkedAdminNanoAiInbox(): Promise<{ url: string }> {
+    return this.fetch<{ url: string }>('/auth/nanoai-inbox-link');
+  }
+
   async requestStepUp(
     purpose: 'sensitive_action' | 'admin_elevation',
     resend = false,

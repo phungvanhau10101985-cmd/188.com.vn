@@ -1288,24 +1288,13 @@ def _clean_nanoai_inbox_url(raw: Optional[str]) -> str:
     return s
 
 
-def _find_nanoai_inbox_row(db: Session):
-    return (
-        db.query(models.SiteEmbedCode)
-        .filter(models.SiteEmbedCode.platform == "nanoai")
-        .filter(models.SiteEmbedCode.category == "inbox_link")
-        .order_by(models.SiteEmbedCode.id.asc())
-        .first()
-    )
-
-
 @router.get("/nanoai-inbox-link", response_model=NanoAiInboxLinkOut)
 def admin_get_nanoai_inbox_link(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("chat_embeds")),
 ):
     """URL hộp thư NanoAI — admin bấm mở. Không nhúng ra site."""
-    row = _find_nanoai_inbox_row(db)
-    return NanoAiInboxLinkOut(url=(row.content or "").strip() if row else "")
+    return NanoAiInboxLinkOut(url=embed_crud.get_nanoai_inbox_url(db))
 
 
 @router.put("/nanoai-inbox-link", response_model=NanoAiInboxLinkOut)
@@ -1315,7 +1304,7 @@ def admin_put_nanoai_inbox_link(
     current_admin: models.AdminUser = Depends(require_module_permission("chat_embeds")),
 ):
     url = _clean_nanoai_inbox_url(data.url)
-    row = _find_nanoai_inbox_row(db)
+    row = embed_crud.get_nanoai_inbox_row(db)
     if row is None:
         embed_crud.create_embed_code(
             db,

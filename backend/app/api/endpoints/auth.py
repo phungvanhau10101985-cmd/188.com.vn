@@ -1,6 +1,7 @@
 # backend/app/api/endpoints/auth.py - FINAL FIXED VERSION + OTP
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Request, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from datetime import date, timedelta, datetime, timezone
 import random
@@ -32,6 +33,7 @@ from app.models.admin import AdminUser
 from app.models.auth_challenge import AuthActionChallenge
 from app.core.admin_permissions import effective_module_keys
 from app.core.email_identity import identity_email
+from app.crud.site_embed_code import get_nanoai_inbox_url
 from app.crud.user import (
     get_user_by_phone, create_user, update_user,
     update_last_login, get_user_by_email
@@ -605,6 +607,32 @@ def issue_admin_token_for_linked_customer(
         role=role_value,
         modules=effective_module_keys(admin_row, db),
     )
+
+
+class LinkedAdminNanoAiInboxOut(BaseModel):
+    url: str = ""
+
+
+@router.get("/nanoai-inbox-link", response_model=LinkedAdminNanoAiInboxOut)
+def get_linked_admin_nanoai_inbox_link(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Link hộp thư NanoAI đã lưu — chỉ tài khoản shop được gán quản trị."""
+    admin_row = (
+        db.query(AdminUser)
+        .filter(
+            AdminUser.linked_user_id == current_user.id,
+            AdminUser.is_active.is_(True),
+        )
+        .first()
+    )
+    if not admin_row:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tài khoản không được gán quyền quản trị.",
+        )
+    return LinkedAdminNanoAiInboxOut(url=get_nanoai_inbox_url(db))
 
 
 @router.get("/me", response_model=UserResponse)

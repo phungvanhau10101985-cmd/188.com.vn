@@ -42,6 +42,7 @@ export default function AccountPage() {
   const [orders, setOrders] = useState<OrderLite[]>([]);
   const [promoWalletCount, setPromoWalletCount] = useState(0);
   const [adminNavBusy, setAdminNavBusy] = useState(false);
+  const [inboxUrl, setInboxUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -61,6 +62,25 @@ export default function AccountPage() {
         .catch(() => setPromoWalletCount(0));
     }
   }, [isAuthenticated, updateUser]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user?.has_linked_admin) {
+      setInboxUrl(null);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .getLinkedAdminNanoAiInbox()
+      .then((data) => {
+        if (!cancelled) setInboxUrl((data?.url || '').trim());
+      })
+      .catch(() => {
+        if (!cancelled) setInboxUrl('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user?.has_linked_admin]);
 
   const openAdminPanel = useCallback(async () => {
     setAdminNavBusy(true);
@@ -100,6 +120,30 @@ export default function AccountPage() {
   }, [orders]);
 
   const notReady = () => pushToast({ title: 'Tính năng đang phát triển', variant: 'info', durationMs: 2000 });
+
+  const inboxHref = (() => {
+    const raw = (inboxUrl || '').trim();
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  })();
+
+  const openInboxMissing = () => {
+    pushToast({
+      title: inboxUrl === null ? 'Đang tải link hội thoại' : 'Chưa có link hội thoại',
+      description:
+        inboxUrl === null
+          ? 'Vui lòng thử lại sau giây lát.'
+          : 'Vào Quản trị web → Xem hội thoại để dán link NanoAI.',
+      variant: inboxUrl === null ? 'info' : 'error',
+      durationMs: 3500,
+    });
+  };
 
   const menuRowClass =
     'flex w-full min-h-[48px] items-center justify-between gap-3 px-4 py-3 text-sm text-gray-900 active:bg-gray-50 relative z-[1]';
@@ -172,6 +216,28 @@ export default function AccountPage() {
               <span className="flex-1 text-left">⚙️ Quản trị web</span>
               <span className="shrink-0 text-gray-400" aria-hidden>›</span>
             </button>
+          ) : null}
+          {user?.has_linked_admin ? (
+            inboxHref ? (
+              <a
+                href={inboxHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${menuRowClass} font-semibold text-[#ea580c]`}
+              >
+                <span className="flex-1 text-left">💬 Mở hội thoại</span>
+                <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={openInboxMissing}
+                className={`${menuRowClass} font-semibold text-[#ea580c]`}
+              >
+                <span className="flex-1 text-left">💬 Mở hội thoại</span>
+                <span className="shrink-0 text-gray-400" aria-hidden>›</span>
+              </button>
+            )
           ) : null}
           <Link href="/vi-dien-tu" className={menuRowClass}>
             <span className="flex-1 text-left">💳 Ví Affiliate</span>
@@ -251,7 +317,7 @@ export default function AccountPage() {
               Quản lý sổ địa chỉ →
             </Link>
             {user?.has_linked_admin ? (
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   disabled={adminNavBusy}
@@ -260,6 +326,24 @@ export default function AccountPage() {
                 >
                   Quản trị web
                 </button>
+                {inboxHref ? (
+                  <a
+                    href={inboxHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center rounded-lg border border-[#ea580c] px-4 py-2 text-sm font-semibold text-[#ea580c] hover:bg-orange-50 transition-colors"
+                  >
+                    Mở hội thoại
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openInboxMissing}
+                    className="inline-flex items-center rounded-lg border border-[#ea580c] px-4 py-2 text-sm font-semibold text-[#ea580c] hover:bg-orange-50 transition-colors"
+                  >
+                    Mở hội thoại
+                  </button>
+                )}
               </div>
             ) : null}
           </div>

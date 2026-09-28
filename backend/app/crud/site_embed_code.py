@@ -242,6 +242,21 @@ def get_embed_code(db: Session, embed_id: int) -> Optional[SiteEmbedCode]:
     return db.query(SiteEmbedCode).filter(SiteEmbedCode.id == embed_id).first()
 
 
+def get_nanoai_inbox_row(db: Session) -> Optional[SiteEmbedCode]:
+    return (
+        db.query(SiteEmbedCode)
+        .filter(SiteEmbedCode.platform == "nanoai")
+        .filter(SiteEmbedCode.category == "inbox_link")
+        .order_by(SiteEmbedCode.id.asc())
+        .first()
+    )
+
+
+def get_nanoai_inbox_url(db: Session) -> str:
+    row = get_nanoai_inbox_row(db)
+    return (row.content or "").strip() if row else ""
+
+
 def create_embed_code(db: Session, data: SiteEmbedCodeCreate) -> SiteEmbedCode:
     row = SiteEmbedCode(
         platform=data.platform.strip().lower()[:32],
