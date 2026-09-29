@@ -6,6 +6,7 @@ Quảng cáo trừ một lần ở tổng kỳ, không chia vào từng đơn.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -21,6 +22,7 @@ _VN_TZ = timezone(timedelta(hours=7))
 MAX_PROFIT_ORDERS = 400
 _MONEY = Decimal("0.01")
 _RATE = Decimal("0.0001")
+_HAS_LETTER = re.compile(r"[A-Za-z]")
 
 
 def _dec(value: Any) -> Optional[Decimal]:
@@ -57,13 +59,20 @@ def default_listing_rate() -> Decimal:
     return parsed
 
 
+def stored_cny_price(raw: Any) -> Optional[float]:
+    """Giá tệ đã lưu (số, «146,00», «20¥»). Nhãn nhóm hàng có chữ — ví dụ «giày tây nam g05» — không phải số tệ."""
+    if isinstance(raw, str) and _HAS_LETTER.search(raw):
+        return None
+    return parse_approx_cny_amount_from_cell(raw)
+
+
 def goods_cny_from_lines(lines: Sequence[Tuple[Any, Any]]) -> Optional[Decimal]:
     """Tổng giá hàng ¥ = số lượng × giá tệ trên sản phẩm. Thiếu một dòng thì không suy ra 0."""
     if not lines:
         return None
     total = Decimal("0")
     for quantity, raw_price in lines:
-        parsed = parse_approx_cny_amount_from_cell(raw_price)
+        parsed = stored_cny_price(raw_price)
         if parsed is None:
             return None
         qty = _dec(quantity)
@@ -83,7 +92,7 @@ def line_listing_cny(
     qty = _dec(quantity)
     if qty is None or qty <= 0:
         return None
-    catalog = parse_approx_cny_amount_from_cell(catalog_raw)
+    catalog = stored_cny_price(catalog_raw)
     if catalog is not None:
         return Decimal(str(catalog)) * qty
     unit = _dec(unit_vnd)
@@ -274,7 +283,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                     {
                         "quantity": int(quantity or 0),
                         "unit_price_vnd": _money(_dec(unit)) or 0,
-                        "catalog_cny": _money(_dec(str(parsed))) if (parsed := parse_approx_cny_amount_from_cell(raw)) is not None else None,
+                        "catalog_cny": _money(_dec(str(parsed))) if (parsed := stored_cny_price(raw)) is not None else None,
                     }
                     for quantity, unit, raw in order_lines
                 ],

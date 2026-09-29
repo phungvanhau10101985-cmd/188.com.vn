@@ -89,13 +89,14 @@ def estimate_listing_vnd_rounded(
 
 
 # (cận dưới loại trừ, cận trên gồm, hệ số). Khớp `cny_exchange_multiplier_from_grid`.
+# Mốc 280 tách riêng: <=280 là 2.6, trên 280 là 2.5 — gộp đến 320 sẽ đảo ra tệ không quy đổi xuôi về đúng giá bán.
 _CNY_GRID_BANDS = (
     (0.0, 90.0, Decimal("3")),
     (90.0, 100.0, Decimal("2.9")),
     (100.0, 120.0, Decimal("2.8")),
     (120.0, 140.0, Decimal("2.7")),
-    (140.0, 320.0, Decimal("2.6")),
-    (320.0, None, Decimal("2.5")),
+    (140.0, 280.0, Decimal("2.6")),
+    (280.0, None, Decimal("2.5")),
 )
 
 

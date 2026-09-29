@@ -140,8 +140,8 @@ const CNY_GRID_BANDS: Array<[number, number | null, number]> = [
   [90, 100, 2.9],
   [100, 120, 2.8],
   [120, 140, 2.7],
-  [140, 320, 2.6],
-  [320, null, 2.5],
+  [140, 280, 2.6],
+  [280, null, 2.5],
 ];
 
 /** Đảo giá bán VNĐ về CN¥ — cùng lưới `estimateListingVndRounded` lúc cào sản phẩm. */

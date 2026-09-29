@@ -179,7 +179,13 @@ def test_one_platform_error_keeps_the_other():
 def test_profit_uses_cny_rate_shipping_and_ads():
     from decimal import Decimal
 
-    from app.services.ad_spend_profit import goods_cny_from_lines, goods_cny_matching_listing, order_cost_vnd, period_profit
+    from app.services.ad_spend_profit import (
+        goods_cny_from_lines,
+        goods_cny_matching_listing,
+        order_cost_vnd,
+        period_profit,
+        stored_cny_price,
+    )
     from app.services.listing_cny_grid import (
         cny_exchange_multiplier_from_grid,
         estimate_listing_vnd_rounded,
@@ -192,12 +198,26 @@ def test_profit_uses_cny_rate_shipping_and_ads():
     assert goods_cny_from_lines([]) is None
 
     rate = Decimal("3580")
-    for crawled in (50, 80, 95, 110, 150, 400):
+    for crawled in (50, 80, 95, 110, 150, 290, 300, 310, 400):
         selling = estimate_listing_vnd_rounded(crawled, cny_exchange_multiplier_from_grid(crawled), float(rate))
         assert selling is not None
         restored = listing_vnd_to_cny(selling, float(rate))
         assert restored is not None
         assert abs(restored - crawled) < 1.5
+        back = estimate_listing_vnd_rounded(restored, cny_exchange_multiplier_from_grid(restored), float(rate))
+        assert back == selling
+
+    # Bậc >280 dùng hệ số 2.5. Gộp nhầm với 2.6 sẽ đảo 2.880.000 thành ~285 ¥ rồi quy xuôi ra 2.770.000.
+    selling_288 = listing_vnd_to_cny(2_880_000, 3880)
+    assert selling_288 is not None and selling_288 > 290
+    assert (
+        estimate_listing_vnd_rounded(selling_288, cny_exchange_multiplier_from_grid(selling_288), 3880)
+        == 2_880_000
+    )
+    assert stored_cny_price("giày tây nam g05") is None
+    assert stored_cny_price("146,00") == 146
+    inverted_label = goods_cny_matching_listing([(1, 3_410_000, "giày tây nam g05")], Decimal("3880"))
+    assert inverted_label is not None and float(inverted_label) > 100
 
     assert goods_cny_matching_listing([(1, 860000, "80")], rate) == Decimal("80")
     inverted_only = goods_cny_matching_listing([(1, selling, None)], rate)
