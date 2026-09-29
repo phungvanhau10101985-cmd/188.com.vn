@@ -235,6 +235,18 @@ class Settings:
         # Meta Conversion API — bí mật gọi POST /embed-codes/facebook/capi/send-event (Authorization: Bearer …)
         self.FACEBOOK_GRAPH_API_VERSION: str = (os.getenv("FACEBOOK_GRAPH_API_VERSION", "v21.0").strip() or "v21.0").lstrip("/")
         self.FACEBOOK_CAPI_INGEST_SECRET: str = os.getenv("FACEBOOK_CAPI_INGEST_SECRET", "").strip()
+        # Chi phí quảng cáo — admin /admin/ad-spend. Để trống thì nhập trên trang quản trị.
+        self.GOOGLE_ADS_API_VERSION: str = (os.getenv("GOOGLE_ADS_API_VERSION", "v25").strip() or "v25")
+        self.GOOGLE_ADS_DEVELOPER_TOKEN: str = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", "").strip()
+        self.GOOGLE_ADS_CLIENT_ID: str = os.getenv("GOOGLE_ADS_CLIENT_ID", "").strip()
+        self.GOOGLE_ADS_CLIENT_SECRET: str = os.getenv("GOOGLE_ADS_CLIENT_SECRET", "").strip()
+        self.GOOGLE_ADS_REFRESH_TOKEN: str = os.getenv("GOOGLE_ADS_REFRESH_TOKEN", "").strip()
+        self.GOOGLE_ADS_CUSTOMER_ID: str = os.getenv("GOOGLE_ADS_CUSTOMER_ID", "").strip()
+        self.GOOGLE_ADS_LOGIN_CUSTOMER_ID: str = os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID", "").strip()
+        self.GOOGLE_ADS_SERVICE_ACCOUNT_FILE: str = os.getenv("GOOGLE_ADS_SERVICE_ACCOUNT_FILE", "").strip()
+        self.META_ADS_GRAPH_API_VERSION: str = (os.getenv("META_ADS_GRAPH_API_VERSION", "v25.0").strip() or "v25.0")
+        self.META_ADS_ACCESS_TOKEN: str = os.getenv("META_ADS_ACCESS_TOKEN", "").strip()
+        self.META_ADS_ACCOUNT_ID: str = os.getenv("META_ADS_ACCOUNT_ID", "").strip()
         # PDP: gọi từ Next (server) với header — gỡ URL ảnh 404 khỏi DB. Rỗng = tắt endpoint.
         self.BROKEN_MEDIA_PURGE_SECRET: str = os.getenv("BROKEN_MEDIA_PURGE_SECRET", "").strip()
         # NanoAI hosted chat auto-login: chỉ dùng server-side để ký partner customer token.

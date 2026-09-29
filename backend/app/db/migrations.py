@@ -1728,6 +1728,15 @@ class MigrationManager:
             "vps_backup_runs", VpsBackupRun
         )
 
+        from app.models.ad_spend import AdSpendSettings
+
+        results['ad_spend_settings_create'] = self._create_table_if_not_exists(
+            "ad_spend_settings", AdSpendSettings
+        )
+        results['ad_spend_settings_sync'] = self._sync_table_columns(
+            "ad_spend_settings", AdSpendSettings
+        )
+
         from app.models.ladipage import Ladipage, LadipageSection
 
         results['ladipages_create'] = self._create_table_if_not_exists("ladipages", Ladipage)

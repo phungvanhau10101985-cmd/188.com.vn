@@ -2644,6 +2644,90 @@ export const adminVpsBackupAPI = {
     ),
 };
 
+export type AdSpendDay = {
+  date: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+};
+
+export type AdSpendCampaign = {
+  id: string;
+  name: string;
+  spend: number;
+  impressions: number;
+  clicks: number;
+};
+
+export type AdSpendPlatformReport = {
+  configured: boolean;
+  ok: boolean;
+  error: string | null;
+  currency: string | null;
+  spend: number;
+  impressions: number;
+  clicks: number;
+  daily: AdSpendDay[];
+  campaigns: AdSpendCampaign[];
+  partial?: boolean;
+};
+
+export type AdSpendReport = {
+  date_from: string;
+  date_to: string;
+  google: AdSpendPlatformReport;
+  facebook: AdSpendPlatformReport;
+  total_spend: number | null;
+  total_currency: string | null;
+  total_status: 'ok' | 'mixed_currency' | 'incomplete';
+};
+
+export type AdSpendSettingsView = {
+  google_customer_id: string;
+  google_login_customer_id: string;
+  google_developer_token_set: boolean;
+  google_client_id_set: boolean;
+  google_client_secret_set: boolean;
+  google_refresh_token_set: boolean;
+  google_service_account_email: string;
+  google_configured: boolean;
+  google_credential_source: string;
+  meta_ad_account_id: string;
+  meta_access_token_set: boolean;
+  facebook_configured: boolean;
+  meta_credential_source: string;
+  google_ads_api_version: string;
+  meta_graph_api_version: string;
+};
+
+export type AdSpendSettingsUpdate = {
+  google_customer_id?: string;
+  google_login_customer_id?: string;
+  google_developer_token?: string;
+  google_client_id?: string;
+  google_client_secret?: string;
+  google_refresh_token?: string;
+  meta_ad_account_id?: string;
+  meta_access_token?: string;
+  clear_google_secrets?: boolean;
+  clear_meta_secrets?: boolean;
+};
+
+export const adminAdSpendAPI = {
+  getSettings: () => fetchAdmin<AdSpendSettingsView>('/admin/ad-spend/settings'),
+
+  updateSettings: (payload: AdSpendSettingsUpdate) =>
+    fetchAdmin<AdSpendSettingsView>('/admin/ad-spend/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  getReport: (dateFrom: string, dateTo: string) => {
+    const sp = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+    return fetchAdmin<AdSpendReport>(`/admin/ad-spend/report?${sp.toString()}`, { timeoutMs: 90000 });
+  },
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: {
     status?: string;

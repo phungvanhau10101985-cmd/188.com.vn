@@ -19,6 +19,7 @@ venv/
 **/backend/1688-cookies.json.pre-deploy.bak
 **/backend/shipping-lookup-keys.json.pre-deploy.bak
 **/backend/sepay-hmac-secret.json.pre-deploy.bak
+**/backend/.secrets/
 
 # Env (giữ *.env.example trong repo)
 .env

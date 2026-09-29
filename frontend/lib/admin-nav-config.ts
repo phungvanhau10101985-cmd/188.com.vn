@@ -65,6 +65,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       },
       { href: '/admin/shop-video-fab', label: 'Nút video', moduleKey: 'shop_video_fab' },
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics', moduleKey: 'embed_codes' },
+      {
+        href: '/admin/ad-spend',
+        label: 'Chi phí quảng cáo',
+        moduleKey: 'ad_spend',
+        privilegedOnly: true,
+      },
       { href: '/admin/bunny-cdn', label: 'Ảnh Bunny CDN', moduleKey: 'bunny_cdn' },
       { href: '/admin/api-keys', label: 'API & tích hợp', moduleKey: 'api_keys', privilegedOnly: true },
       { href: '/admin/vps-backup', label: 'Backup VPS', moduleKey: 'vps_backup', privilegedOnly: true },

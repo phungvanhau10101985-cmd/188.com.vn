@@ -31,6 +31,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "sale_calendar",
     "affiliate",
     "embed_codes",
+    "ad_spend",
     "chat_embeds",
     "shop_video_fab",
     "api_keys",
