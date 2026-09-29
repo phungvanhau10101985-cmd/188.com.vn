@@ -10,6 +10,19 @@ import { listingVndToCny } from '@/lib/taobao-cards-html-parse';
 
 type AdSpendState = 'loading' | 'ready' | 'unavailable';
 
+export type AdSpendProfitSummary = {
+  dateFrom: string;
+  dateTo: string;
+  loading: boolean;
+  orderCount: number;
+  revenue: number;
+  revenueCny: number | null;
+  cost: number | null;
+  missing: number;
+  gross: number | null;
+  profit: number | null;
+};
+
 type ProfitLine = {
   quantity: number;
   unitPriceVnd: number;
@@ -35,6 +48,12 @@ type ProfitRow = {
   hadShipBorder: boolean;
   hadShipHanoi: boolean;
 };
+
+function formatViDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
 
 function formatVnd(amount: number): string {
   return new Intl.NumberFormat('vi-VN', {
@@ -151,12 +170,14 @@ export function AdSpendProfitSection({
   refreshKey,
   adSpend,
   adSpendState,
+  onSummaryChange,
 }: {
   dateFrom: string;
   dateTo: string;
   refreshKey: number;
   adSpend: number | null;
   adSpendState: AdSpendState;
+  onSummaryChange?: (summary: AdSpendProfitSummary) => void;
 }) {
   const [rate, setRate] = useState('');
   const [shipChina, setShipChina] = useState('0');
@@ -191,10 +212,26 @@ export function AdSpendProfitSection({
   };
 
   useEffect(() => {
-    void load();
-    // refreshKey tăng khi bấm khoảng ngày hoặc «Xem chi phí».
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const sheet = await adminAdSpendAPI.getProfit(dateFrom, dateTo);
+        if (cancelled) return;
+        applySheet(sheet);
+      } catch (err) {
+        if (!cancelled) setError((err as Error)?.message || 'Không tải được hạch toán.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // refreshKey tăng khi bấm lại cùng một kỳ.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, [dateFrom, dateTo, refreshKey]);
 
   const rateNumber = amountOrNull(rate);
   const chinaDefault = amountOrNull(shipChina);
@@ -239,6 +276,21 @@ export function AdSpendProfitSection({
     const profit = costReady && adSpendState === 'ready' && adSpend != null ? revenue - cost - adSpend : null;
     return { revenue, revenueCny, cost: costReady ? cost : null, missing, gross, profit };
   }, [rows, rateNumber, adSpend, adSpendState]);
+
+  useEffect(() => {
+    onSummaryChange?.({
+      dateFrom,
+      dateTo,
+      loading,
+      orderCount: rows.length,
+      revenue: summary.revenue,
+      revenueCny: summary.revenueCny,
+      cost: summary.cost,
+      missing: summary.missing,
+      gross: summary.gross,
+      profit: summary.profit,
+    });
+  }, [dateFrom, dateTo, loading, rows.length, summary, onSummaryChange]);
 
   const patchRow = (orderId: number, patch: Partial<ProfitRow>) => {
     setRows((prev) => prev.map((row) => (row.orderId === orderId ? { ...row, ...patch } : row)));
@@ -298,13 +350,13 @@ export function AdSpendProfitSection({
   };
 
   return (
-    <section className="mt-8 rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="Hạch toán lợi nhuận">
+    <section className="rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="Chi tiết đơn đã cọc">
       <div className="border-b border-slate-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-900">Hạch toán lợi nhuận</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Chi tiết đơn đã cọc</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Chỉ đơn đã cọc trong khoảng ngày. Giá hàng ¥ là giá tệ lúc cào sản phẩm. Đơn không lưu giá tệ thì đảo từ giá
-          bán theo đúng lưới cào: giá bán ≈ CN¥ × hệ số × tỷ giá, làm tròn lên 10.000đ. Lợi nhuận = giá bán − (giá hàng
-          ¥ + ship Trung Quốc ¥ + ship cửa khẩu ¥) × tỷ giá − ship Hà Nội − quảng cáo.
+          Chỉ đơn đã cọc trong khoảng đang chọn. Giá hàng ¥ là giá tệ lúc cào sản phẩm. Đơn không lưu giá tệ thì đảo từ
+          giá bán theo đúng lưới cào: giá bán ≈ CN¥ × hệ số × tỷ giá, làm tròn lên 10.000đ. Lợi nhuận = giá bán − (giá
+          hàng ¥ + ship Trung Quốc ¥ + ship cửa khẩu ¥) × tỷ giá − ship Hà Nội − quảng cáo.
         </p>
       </div>
 
@@ -377,32 +429,6 @@ export function AdSpendProfitSection({
             Mức ship chung áp cho mọi đơn. Sửa ô trong bảng nếu đơn đó khác. Đổi tỷ giá thì giá tệ đảo từ giá bán được
             tính lại; giá tệ đã lưu lúc cào giữ nguyên.
           </p>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <SummaryCard label="Doanh thu đã cọc" value={formatVnd(summary.revenue)} hint={`${rows.length} đơn`} />
-            <SummaryCard
-              label="Giá hàng quy ra tệ"
-              value={summary.revenueCny == null ? '—' : formatCny(summary.revenueCny)}
-              hint="Giá tệ lúc cào, hoặc đảo theo lưới"
-            />
-            <SummaryCard
-              label="Giá vốn"
-              value={summary.cost == null ? '—' : formatVnd(summary.cost)}
-              hint="Giá tệ × tỷ giá + ship Hà Nội"
-            />
-            <SummaryCard
-              label="Quảng cáo"
-              value={adSpendState === 'loading' ? 'Đang đọc…' : adSpendState === 'ready' && adSpend != null ? formatVnd(adSpend) : '—'}
-              hint={adSpendState === 'ready' ? 'Google + Facebook' : 'Chưa cộng được vào lợi nhuận'}
-            />
-            <SummaryCard
-              label="Lợi nhuận"
-              value={summary.profit == null ? '—' : formatVnd(summary.profit)}
-              hint={summary.gross == null ? 'Còn đơn thiếu giá tệ' : `Lãi trước quảng cáo ${formatVnd(summary.gross)}`}
-              emphasize
-              negative={summary.profit != null && summary.profit < 0}
-            />
-          </div>
 
           {summary.missing > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -531,24 +557,3 @@ function rowNeedsSave(row: ProfitRow, china: number, border: number, hanoi: numb
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  hint,
-  emphasize,
-  negative,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  emphasize?: boolean;
-  negative?: boolean;
-}) {
-  return (
-    <div className={`rounded-xl border p-3 ${emphasize ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white'}`}>
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className={`mt-1 text-lg font-semibold ${negative ? 'text-red-700' : 'text-slate-900'}`}>{value}</p>
-      <p className="mt-1 text-xs text-slate-500">{hint}</p>
-    </div>
-  );
-}
