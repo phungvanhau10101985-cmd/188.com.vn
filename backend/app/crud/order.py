@@ -745,8 +745,11 @@ def get_order_stats(
             Order.created_at <= end_dt,
         )
 
-    total_orders = query.count()
-    total_revenue_result = query.with_entities(func.sum(Order.total_amount)).scalar()
+    orders_including_cancelled = query.count()
+    # Doanh thu và tổng đơn không gồm đơn khách (hoặc admin/hệ thống) đã hủy.
+    active_query = query.filter(Order.status != OrderStatus.CANCELLED.value)
+    total_orders = active_query.count()
+    total_revenue_result = active_query.with_entities(func.sum(Order.total_amount)).scalar()
     total_revenue = total_revenue_result if total_revenue_result else Decimal("0")
 
     status_counts: Dict[str, int] = {}
@@ -782,6 +785,7 @@ def get_order_stats(
     return {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
+        "orders_including_cancelled": orders_including_cancelled,
         "deposited_orders": deposited_orders,
         "deposited_revenue": deposited_revenue,
         "deposited_amount": deposited_amount,

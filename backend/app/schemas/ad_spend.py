@@ -70,3 +70,59 @@ class AdSpendReport(BaseModel):
     total_spend: Optional[float] = None
     total_currency: Optional[str] = None
     total_status: Literal["ok", "mixed_currency", "incomplete"] = "incomplete"
+
+
+class AdSpendProfitLine(BaseModel):
+    quantity: int
+    unit_price_vnd: float
+    catalog_cny: Optional[float] = None
+
+
+class AdSpendProfitOrder(BaseModel):
+    order_id: int
+    order_code: str
+    deposited_on: Optional[str] = None
+    revenue_vnd: float
+    catalog_goods_cny: Optional[float] = None
+    lines: List[AdSpendProfitLine] = Field(default_factory=list)
+    goods_cny_override: Optional[float] = None
+    ship_china_domestic_cny_override: Optional[float] = None
+    ship_border_to_hanoi_cny_override: Optional[float] = None
+    ship_hanoi_to_customer_vnd_override: Optional[float] = None
+    cost_vnd: Optional[float] = None
+    gross_profit_vnd: Optional[float] = None
+
+
+class AdSpendProfitSheet(BaseModel):
+    date_from: str
+    date_to: str
+    vnd_per_cny: float
+    vnd_per_cny_saved: bool = False
+    ship_china_domestic_cny: float = 0
+    ship_border_to_hanoi_cny: float = 0
+    ship_hanoi_to_customer_vnd: float = 0
+    order_count: int = 0
+    truncated: bool = False
+    missing_goods_count: int = 0
+    revenue_vnd: float = 0
+    revenue_cny: Optional[float] = None
+    cost_vnd: Optional[float] = None
+    orders: List[AdSpendProfitOrder] = Field(default_factory=list)
+
+
+class AdSpendProfitOrderInput(BaseModel):
+    order_id: int
+    goods_cny: Optional[float] = None
+    ship_china_domestic_cny: Optional[float] = None
+    ship_border_to_hanoi_cny: Optional[float] = None
+    ship_hanoi_to_customer_vnd: Optional[float] = None
+
+
+class AdSpendProfitInputsUpdate(BaseModel):
+    date_from: str
+    date_to: str
+    vnd_per_cny: float
+    ship_china_domestic_cny: float = 0
+    ship_border_to_hanoi_cny: float = 0
+    ship_hanoi_to_customer_vnd: float = 0
+    orders: List[AdSpendProfitOrderInput] = Field(default_factory=list)

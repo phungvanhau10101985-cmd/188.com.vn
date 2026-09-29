@@ -174,3 +174,52 @@ def test_one_platform_error_keeps_the_other():
     assert report["facebook"]["ok"] is True
     assert report["facebook"]["spend"] == 10.0
     assert report["total_status"] == "incomplete"
+
+
+def test_profit_uses_cny_rate_shipping_and_ads():
+    from decimal import Decimal
+
+    from app.services.ad_spend_profit import goods_cny_from_lines, goods_cny_matching_listing, order_cost_vnd, period_profit
+    from app.services.listing_cny_grid import (
+        cny_exchange_multiplier_from_grid,
+        estimate_listing_vnd_rounded,
+        listing_vnd_to_cny,
+    )
+
+    goods = goods_cny_from_lines([(2, "50"), (1, "20¥")])
+    assert goods == Decimal("120")
+    assert goods_cny_from_lines([(1, "")]) is None
+    assert goods_cny_from_lines([]) is None
+
+    rate = Decimal("3580")
+    for crawled in (50, 80, 95, 110, 150, 400):
+        selling = estimate_listing_vnd_rounded(crawled, cny_exchange_multiplier_from_grid(crawled), float(rate))
+        assert selling is not None
+        restored = listing_vnd_to_cny(selling, float(rate))
+        assert restored is not None
+        assert abs(restored - crawled) < 1.5
+
+    assert goods_cny_matching_listing([(1, 860000, "80")], rate) == Decimal("80")
+    inverted_only = goods_cny_matching_listing([(1, selling, None)], rate)
+    assert inverted_only is not None
+    assert abs(float(inverted_only) - 400) < 1.5
+
+    rate = Decimal("3700")
+    cost = order_cost_vnd(
+        goods_cny=Decimal("100"),
+        ship_china_cny=Decimal("10"),
+        ship_border_cny=Decimal("20"),
+        ship_hanoi_vnd=Decimal("30000"),
+        vnd_per_cny=rate,
+    )
+    assert cost == Decimal("511000")
+    revenue = Decimal("1000000")
+    assert period_profit(revenue_vnd=revenue, cost_vnd=cost, ad_spend_vnd=Decimal("200000")) == Decimal("289000")
+    assert period_profit(revenue_vnd=revenue, cost_vnd=None, ad_spend_vnd=Decimal("1")) is None
+    assert order_cost_vnd(
+        goods_cny=None,
+        ship_china_cny=Decimal("0"),
+        ship_border_cny=Decimal("0"),
+        ship_hanoi_vnd=Decimal("0"),
+        vnd_per_cny=rate,
+    ) is None

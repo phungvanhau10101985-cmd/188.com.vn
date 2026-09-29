@@ -6,8 +6,14 @@ from sqlalchemy.orm import Session
 from app.core.security import require_privileged_admin
 from app.db.session import get_db
 from app.models.admin import AdminUser
-from app.schemas.ad_spend import AdSpendReport, AdSpendSettingsUpdate, AdSpendSettingsView
-from app.services import ad_spend_service as svc
+from app.schemas.ad_spend import (
+    AdSpendProfitInputsUpdate,
+    AdSpendProfitSheet,
+    AdSpendReport,
+    AdSpendSettingsUpdate,
+    AdSpendSettingsView,
+)
+from app.services import ad_spend_profit, ad_spend_service as svc
 
 router = APIRouter()
 
@@ -44,5 +50,31 @@ def get_ad_spend_report(
 ):
     try:
         return svc.load_report(db, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/profit", response_model=AdSpendProfitSheet)
+def get_ad_spend_profit(
+    date_from: str = Query(..., description="YYYY-MM-DD"),
+    date_to: str = Query(..., description="YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    try:
+        return ad_spend_profit.load_profit_sheet(db, date_from, date_to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/profit", response_model=AdSpendProfitSheet)
+def update_ad_spend_profit(
+    payload: AdSpendProfitInputsUpdate,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_privileged_admin),
+):
+    try:
+        ad_spend_profit.save_profit_inputs(db, payload.model_dump())
+        return ad_spend_profit.load_profit_sheet(db, payload.date_from, payload.date_to)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -135,6 +135,56 @@ export function estimateListingVndRounded(
   return Math.ceil(rounded / step) * step;
 }
 
+const CNY_GRID_BANDS: Array<[number, number | null, number]> = [
+  [0, 90, 3],
+  [90, 100, 2.9],
+  [100, 120, 2.8],
+  [120, 140, 2.7],
+  [140, 320, 2.6],
+  [320, null, 2.5],
+];
+
+/** Đảo giá bán VNĐ về CN¥ — cùng lưới `estimateListingVndRounded` lúc cào sản phẩm. */
+export function listingVndToCny(unitVnd: number, vndPerOneCny: number): number | null {
+  const target = Math.round(unitVnd);
+  if (!Number.isFinite(target) || target <= 0 || !Number.isFinite(vndPerOneCny) || vndPerOneCny <= 0) {
+    return null;
+  }
+  const exact: number[] = [];
+  for (const [lo, hi, coef] of CNY_GRID_BANDS) {
+    if (coef <= 0) continue;
+    const upper = hi == null ? target / (coef * vndPerOneCny) + 2 : hi;
+    const start = lo <= 0 ? 1 : Math.round(lo * 100) + 1;
+    const end = Math.round(upper * 100);
+    let left = start;
+    let right = end;
+    let found: number | null = null;
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      const value = estimateListingVndRounded(
+        { price_cny_approx: mid / 100, cny_exchange_multiplier: coef },
+        vndPerOneCny,
+      );
+      if (value == null || value < target) left = mid + 1;
+      else if (value > target) right = mid - 1;
+      else {
+        found = mid;
+        left = mid + 1;
+      }
+    }
+    if (found != null) exact.push(found / 100);
+  }
+  if (exact.length) return Math.max(...exact);
+  let guess = target / (3 * vndPerOneCny);
+  for (let i = 0; i < 6; i += 1) {
+    const coef = cnyExchangeMultiplierFromGrid(guess);
+    if (coef <= 0) return null;
+    guess = target / (coef * vndPerOneCny);
+  }
+  if (!Number.isFinite(guess) || guess <= 0) return null;
+  return Math.round(guess * 100) / 100;
+}
+
 /** Giá Tệ hiển thị kiểu bảng parse (146,00) — dùng cho overlay import listing. */
 export function formatListingCnyForImportOverlay(cny: number): string {
   return new Intl.NumberFormat('vi-VN', {

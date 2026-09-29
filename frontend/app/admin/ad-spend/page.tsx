@@ -7,6 +7,7 @@ import {
   type AdSpendReport,
   type AdSpendSettingsView,
 } from '@/lib/admin-api';
+import { AdSpendProfitSection } from './profit-section';
 
 type RangeKey = '7' | '30' | 'month' | 'prev';
 
@@ -104,6 +105,7 @@ export default function AdminAdSpendPage() {
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [profitRefreshKey, setProfitRefreshKey] = useState(0);
 
   const [googleCustomerId, setGoogleCustomerId] = useState('');
   const [googleLoginCustomerId, setGoogleLoginCustomerId] = useState('');
@@ -189,11 +191,13 @@ export default function AdminAdSpendPage() {
     const next = rangeFor(key);
     setDateFrom(next.from);
     setDateTo(next.to);
+    setProfitRefreshKey((value) => value + 1);
     void loadReport(next.from, next.to);
   };
 
   const onSubmitRange = (e: FormEvent) => {
     e.preventDefault();
+    setProfitRefreshKey((value) => value + 1);
     void loadReport(dateFrom, dateTo);
   };
 
@@ -237,8 +241,7 @@ export default function AdminAdSpendPage() {
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <h1 className="text-xl font-bold text-slate-900">Chi phí quảng cáo</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Đọc số tiền đã chi trên Google Ads và Facebook Ads theo khoảng ngày. Số liệu lấy trực tiếp từ tài khoản
-        quảng cáo, không ước tính từ pixel trên website.
+        Đọc số tiền đã chi trên Google Ads và Facebook Ads, rồi đối chiếu lợi nhuận với đơn đã cọc.
       </p>
 
       {error ? (
@@ -381,6 +384,24 @@ export default function AdminAdSpendPage() {
           </div>
         </div>
       ) : null}
+
+      <AdSpendProfitSection
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        refreshKey={profitRefreshKey}
+        adSpend={
+          report && report.total_status === 'ok' && (report.total_currency || '').toUpperCase() === 'VND'
+            ? report.total_spend
+            : null
+        }
+        adSpendState={
+          loadingReport
+            ? 'loading'
+            : report && report.total_status === 'ok' && (report.total_currency || '').toUpperCase() === 'VND'
+              ? 'ready'
+              : 'unavailable'
+        }
+      />
 
       <section className="mt-8 rounded-xl border border-slate-200 bg-white shadow-sm">
         <button

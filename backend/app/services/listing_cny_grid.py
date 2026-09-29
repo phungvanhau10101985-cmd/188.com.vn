@@ -88,6 +88,73 @@ def estimate_listing_vnd_rounded(
         return None
 
 
+# (cận dưới loại trừ, cận trên gồm, hệ số). Khớp `cny_exchange_multiplier_from_grid`.
+_CNY_GRID_BANDS = (
+    (0.0, 90.0, Decimal("3")),
+    (90.0, 100.0, Decimal("2.9")),
+    (100.0, 120.0, Decimal("2.8")),
+    (120.0, 140.0, Decimal("2.7")),
+    (140.0, 320.0, Decimal("2.6")),
+    (320.0, None, Decimal("2.5")),
+)
+
+
+def listing_vnd_to_cny(unit_vnd: float, vnd_per_one_cny: float) -> Optional[float]:
+    """Đảo giá bán VNĐ về CN¥ theo cùng lưới lúc cào: VNĐ ≈ CN¥ × hệ số × tỷ giá, làm tròn lên 10.000.
+
+    Trả CN¥ lớn nhất trong bậc lưới mà quy đổi xuôi ra đúng giá bán. Không có mức khớp thì lấy điểm cố định
+    giá bán ÷ (hệ số của chính mức đó × tỷ giá).
+    """
+    try:
+        target = int(Decimal(str(unit_vnd)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        rate = float(vnd_per_one_cny)
+    except Exception:
+        return None
+    if target <= 0 or not math.isfinite(rate) or rate <= 0:
+        return None
+
+    exact: list[float] = []
+    for lo, hi, coef in _CNY_GRID_BANDS:
+        coef_f = float(coef)
+        if coef_f <= 0:
+            continue
+        upper = hi if hi is not None else (target / (coef_f * rate) + 2.0)
+        start = 1 if lo <= 0 else int(round(lo * 100)) + 1
+        end = int(round(upper * 100))
+        if end < start:
+            continue
+
+        def forward_cents(cents: int, band_coef: Decimal = coef) -> Optional[int]:
+            return estimate_listing_vnd_rounded(cents / 100.0, band_coef, rate)
+
+        left, right = start, end
+        found: Optional[int] = None
+        while left <= right:
+            mid = (left + right) // 2
+            value = forward_cents(mid)
+            if value is None or value < target:
+                left = mid + 1
+            elif value > target:
+                right = mid - 1
+            else:
+                found = mid
+                left = mid + 1
+        if found is not None:
+            exact.append(found / 100.0)
+    if exact:
+        return max(exact)
+
+    guess = target / (3.0 * rate)
+    for _ in range(6):
+        coef = cny_exchange_multiplier_from_grid(guess)
+        if coef <= 0:
+            return None
+        guess = target / (float(coef) * rate)
+    if not math.isfinite(guess) or guess <= 0:
+        return None
+    return round(guess, 2)
+
+
 def parse_approx_cny_amount_from_cell(val: Any) -> Optional[float]:
     """
     Suy ~CN¥ từ ô Excel: số thuần, hoặc chuỗi có ¥/￥/元 (khớp ý parseApproxCnyAmountFromPriceRaw).

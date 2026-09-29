@@ -101,8 +101,10 @@ def test_get_order_stats_deposited_metrics():
 
         # Schema validation
         schema_stats = AdminOrderStats(**stats)
-        assert schema_stats.total_orders == 5
-        assert schema_stats.total_revenue == Decimal("5800000")
+        # DH105 đã hủy: không tính vào doanh thu và tổng đơn
+        assert schema_stats.total_orders == 4
+        assert schema_stats.total_revenue == Decimal("5000000")
+        assert schema_stats.orders_including_cancelled == 5
 
         # Deposited metrics: o3 (2tr, cọc 600k) + o4 (1.5tr, cọc 1.5tr) = 2 đơn, 3.5tr doanh thu, 2.1tr tiền cọc
         assert schema_stats.deposited_orders == 2

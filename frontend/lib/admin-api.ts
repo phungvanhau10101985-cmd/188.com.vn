@@ -381,6 +381,7 @@ export interface AdminOrderListResponse {
 export interface AdminOrderStats {
   total_orders: number;
   total_revenue: number;
+  orders_including_cancelled?: number;
   pending_orders: number;
   waiting_deposit_orders: number;
   deposit_paid_orders: number;
@@ -2713,6 +2714,60 @@ export type AdSpendSettingsUpdate = {
   clear_meta_secrets?: boolean;
 };
 
+export type AdSpendProfitLine = {
+  quantity: number;
+  unit_price_vnd: number;
+  catalog_cny: number | null;
+};
+
+export type AdSpendProfitOrder = {
+  order_id: number;
+  order_code: string;
+  deposited_on: string | null;
+  revenue_vnd: number;
+  catalog_goods_cny: number | null;
+  lines: AdSpendProfitLine[];
+  goods_cny_override: number | null;
+  ship_china_domestic_cny_override: number | null;
+  ship_border_to_hanoi_cny_override: number | null;
+  ship_hanoi_to_customer_vnd_override: number | null;
+  cost_vnd: number | null;
+  gross_profit_vnd: number | null;
+};
+
+export type AdSpendProfitSheet = {
+  date_from: string;
+  date_to: string;
+  vnd_per_cny: number;
+  vnd_per_cny_saved: boolean;
+  ship_china_domestic_cny: number;
+  ship_border_to_hanoi_cny: number;
+  ship_hanoi_to_customer_vnd: number;
+  order_count: number;
+  truncated: boolean;
+  missing_goods_count: number;
+  revenue_vnd: number;
+  revenue_cny: number | null;
+  cost_vnd: number | null;
+  orders: AdSpendProfitOrder[];
+};
+
+export type AdSpendProfitInputsUpdate = {
+  date_from: string;
+  date_to: string;
+  vnd_per_cny: number;
+  ship_china_domestic_cny: number;
+  ship_border_to_hanoi_cny: number;
+  ship_hanoi_to_customer_vnd: number;
+  orders: Array<{
+    order_id: number;
+    goods_cny: number | null;
+    ship_china_domestic_cny: number | null;
+    ship_border_to_hanoi_cny: number | null;
+    ship_hanoi_to_customer_vnd: number | null;
+  }>;
+};
+
 export const adminAdSpendAPI = {
   getSettings: () => fetchAdmin<AdSpendSettingsView>('/admin/ad-spend/settings'),
 
@@ -2726,6 +2781,17 @@ export const adminAdSpendAPI = {
     const sp = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
     return fetchAdmin<AdSpendReport>(`/admin/ad-spend/report?${sp.toString()}`, { timeoutMs: 90000 });
   },
+
+  getProfit: (dateFrom: string, dateTo: string) => {
+    const sp = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+    return fetchAdmin<AdSpendProfitSheet>(`/admin/ad-spend/profit?${sp.toString()}`);
+  },
+
+  saveProfit: (payload: AdSpendProfitInputsUpdate) =>
+    fetchAdmin<AdSpendProfitSheet>('/admin/ad-spend/profit', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
 };
 
 export const adminOrderAPI = {

@@ -238,6 +238,7 @@ class AdminOrderStats(BaseModel):
     """Order statistics for admin dashboard"""
     total_orders: int
     total_revenue: Decimal
+    orders_including_cancelled: int = 0
     pending_orders: int
     waiting_deposit_orders: int
     deposit_paid_orders: int

@@ -1736,6 +1736,14 @@ class MigrationManager:
         results['ad_spend_settings_sync'] = self._sync_table_columns(
             "ad_spend_settings", AdSpendSettings
         )
+        from app.models.ad_spend import AdSpendOrderCost
+
+        results['ad_spend_order_costs_create'] = self._create_table_if_not_exists(
+            "ad_spend_order_costs", AdSpendOrderCost
+        )
+        results['ad_spend_order_costs_sync'] = self._sync_table_columns(
+            "ad_spend_order_costs", AdSpendOrderCost
+        )
 
         from app.models.ladipage import Ladipage, LadipageSection
 

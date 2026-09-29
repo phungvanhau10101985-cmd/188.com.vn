@@ -1055,7 +1055,7 @@ export default function AdminOrdersPage() {
                   </div>
                 </div>
                 <p className="text-sm text-gray-600 mt-3">
-                  Đã hủy / hoàn:{' '}
+                  Doanh thu và tổng đơn đã trừ đơn đã hủy:{' '}
                   <span className="font-semibold text-gray-800">
                     {revenueReport.cancelled_orders} hủy · {revenueReport.returned_orders ?? 0} hoàn
                   </span>
@@ -1077,7 +1077,7 @@ export default function AdminOrdersPage() {
                   activeTab === t.key ? 'bg-[#ea580c] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {t.label} ({statusCounts != null ? (t.countKey === 'total_orders' ? statusCounts.total_orders : t.countKey === 'waiting_ship' ? (statusCounts.deposit_paid_orders ?? 0) + (statusCounts.confirmed_orders ?? 0) + (statusCounts.processing_orders ?? 0) : statusCounts[t.countKey] ?? 0) : '—'})
+                {t.label} ({statusCounts != null ? (t.countKey === 'total_orders' ? (statusCounts.orders_including_cancelled ?? (statusCounts.total_orders ?? 0) + (statusCounts.cancelled_orders ?? 0)) : t.countKey === 'waiting_ship' ? (statusCounts.deposit_paid_orders ?? 0) + (statusCounts.confirmed_orders ?? 0) + (statusCounts.processing_orders ?? 0) : statusCounts[t.countKey] ?? 0) : '—'})
               </button>
             ))}
           </div>

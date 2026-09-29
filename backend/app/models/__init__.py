@@ -61,7 +61,7 @@ from app.models.admin_feature_test import AdminFeatureTestSetting
 print("[OK] AdminFeatureTestSetting model loaded")
 from app.models.vps_backup import VpsBackupSettings, VpsBackupRun
 print("[OK] VpsBackup models loaded")
-from app.models.ad_spend import AdSpendSettings
+from app.models.ad_spend import AdSpendOrderCost, AdSpendSettings
 print("[OK] AdSpendSettings model loaded")
 from app.models.push_subscription import UserPushSubscription
 print("[OK] UserPushSubscription model loaded")
@@ -245,6 +245,7 @@ __all__ = [
     "VpsBackupSettings",
     "VpsBackupRun",
     "AdSpendSettings",
+    "AdSpendOrderCost",
     "UserPushSubscription",
     "UserAddress",
     "UserProductView",
