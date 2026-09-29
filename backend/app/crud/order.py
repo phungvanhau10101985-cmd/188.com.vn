@@ -754,9 +754,37 @@ def get_order_stats(
         count = query.filter(Order.status == status.value).count()
         status_counts[f"{status.value}_orders"] = count
 
+    deposited_filter = and_(
+        Order.status != OrderStatus.CANCELLED.value,
+        Order.payment_status != PaymentStatus.REFUNDED.value,
+        or_(
+            Order.deposit_paid > 0,
+            Order.deposit_paid_at.isnot(None),
+            Order.payment_status == PaymentStatus.DEPOSIT_PAID.value,
+            Order.status == OrderStatus.DEPOSIT_PAID.value,
+        ),
+    )
+    deposited_q = query.filter(deposited_filter)
+    deposited_orders = deposited_q.count()
+    dep_rev_res = deposited_q.with_entities(func.sum(Order.total_amount)).scalar()
+    deposited_revenue = dep_rev_res if dep_rev_res else Decimal("0")
+    dep_amt_res = deposited_q.with_entities(
+        func.sum(
+            func.coalesce(
+                func.nullif(Order.deposit_paid, 0),
+                Order.deposit_amount,
+                0,
+            )
+        )
+    ).scalar()
+    deposited_amount = dep_amt_res if dep_amt_res else Decimal("0")
+
     return {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
+        "deposited_orders": deposited_orders,
+        "deposited_revenue": deposited_revenue,
+        "deposited_amount": deposited_amount,
         "period_label": period_label,
         "date_from": iso_from,
         "date_to": iso_to,

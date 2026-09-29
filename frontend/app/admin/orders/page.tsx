@@ -714,8 +714,17 @@ export default function AdminOrdersPage() {
         </div>
 
         {stats && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-white rounded-lg shadow p-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+            <div
+              onClick={() => {
+                setActiveTab('all');
+                setStatusFilter('');
+                setPaymentFilter('');
+                setListPage(1);
+              }}
+              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
+              title="Xem tất cả đơn hàng"
+            >
               <p className="text-gray-500 text-sm">Tổng đơn hàng</p>
               <p className="text-2xl font-bold">{stats.total_orders}</p>
             </div>
@@ -723,11 +732,51 @@ export default function AdminOrdersPage() {
               <p className="text-gray-500 text-sm">Doanh thu hôm nay</p>
               <p className="text-2xl font-bold text-green-600">{formatVnd(Number(stats.total_revenue))}</p>
             </div>
-            <div className="bg-white rounded-lg shadow p-4">
+            <div
+              onClick={() => {
+                setActiveTab('waiting_deposit');
+                setStatusFilter('');
+                setPaymentFilter('');
+                setListPage(1);
+              }}
+              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
+              title="Lọc đơn chờ đặt cọc"
+            >
               <p className="text-gray-500 text-sm">Chờ đặt cọc</p>
               <p className="text-2xl font-bold text-orange-600">{stats.waiting_deposit_orders}</p>
             </div>
+            <div
+              onClick={() => {
+                setActiveTab('all');
+                setStatusFilter('');
+                setPaymentFilter('deposit_paid');
+                setListPage(1);
+              }}
+              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
+              title="Lọc đơn đã đặt cọc"
+            >
+              <p className="text-gray-500 text-sm">Số đơn đã cọc</p>
+              <p className="text-2xl font-bold text-blue-600">{stats.deposited_orders ?? 0}</p>
+            </div>
             <div className="bg-white rounded-lg shadow p-4">
+              <p className="text-gray-500 text-sm">Doanh thu đơn đã cọc</p>
+              <p className="text-2xl font-bold text-emerald-600">{formatVnd(Number(stats.deposited_revenue ?? 0))}</p>
+              {Number(stats.deposited_amount ?? 0) > 0 && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Cọc đã thu: <span className="font-medium text-gray-700">{formatVnd(Number(stats.deposited_amount))}</span>
+                </p>
+              )}
+            </div>
+            <div
+              onClick={() => {
+                setActiveTab('shipping');
+                setStatusFilter('');
+                setPaymentFilter('');
+                setListPage(1);
+              }}
+              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
+              title="Lọc đơn đang giao hàng"
+            >
               <p className="text-gray-500 text-sm">Đang giao hàng</p>
               <p className="text-2xl font-bold">{stats.shipping_orders}</p>
             </div>
@@ -981,8 +1030,8 @@ export default function AdminOrdersPage() {
             {revenueLoading ? (
               <p className="text-sm text-gray-500">Đang tải báo cáo…</p>
             ) : revenueReport ? (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:col-span-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:col-span-2 lg:col-span-5">
                   <p className="text-sm text-gray-500">Kỳ báo cáo</p>
                   <p className="text-base font-semibold text-gray-900">
                     {revenueReport.period_label || '—'}
@@ -994,7 +1043,7 @@ export default function AdminOrdersPage() {
                   </p>
                 </div>
                 <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
-                  <p className="text-sm text-gray-600">Doanh thu</p>
+                  <p className="text-sm text-gray-600">Tổng doanh thu</p>
                   <p className="text-2xl font-bold text-emerald-700">
                     {formatVnd(Number(revenueReport.total_revenue))}
                   </p>
@@ -1003,7 +1052,22 @@ export default function AdminOrdersPage() {
                   <p className="text-sm text-gray-600">Số đơn hàng</p>
                   <p className="text-2xl font-bold text-gray-900">{revenueReport.total_orders}</p>
                 </div>
-                <div className="rounded-lg border border-gray-100 p-4">
+                <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+                  <p className="text-sm text-gray-600">Số đơn đã cọc</p>
+                  <p className="text-2xl font-bold text-blue-700">{revenueReport.deposited_orders ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-teal-100 bg-teal-50/40 p-4">
+                  <p className="text-sm text-gray-600">Doanh thu đơn đã cọc</p>
+                  <p className="text-2xl font-bold text-teal-700">
+                    {formatVnd(Number(revenueReport.deposited_revenue ?? 0))}
+                  </p>
+                  {Number(revenueReport.deposited_amount ?? 0) > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Cọc đã thu: <span className="font-medium text-gray-700">{formatVnd(Number(revenueReport.deposited_amount))}</span>
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-lg border border-gray-100 p-4 sm:col-span-2 lg:col-span-5">
                   <p className="text-sm text-gray-600">Đã hủy / hoàn</p>
                   <p className="text-lg font-semibold text-gray-800">
                     {revenueReport.cancelled_orders} hủy · {revenueReport.returned_orders ?? 0} hoàn

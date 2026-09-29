@@ -391,6 +391,9 @@ export interface AdminOrderStats {
   completed_orders: number;
   returned_orders: number;
   cancelled_orders: number;
+  deposited_orders?: number;
+  deposited_revenue?: number;
+  deposited_amount?: number;
   period_label?: string | null;
   date_from?: string | null;
   date_to?: string | null;
