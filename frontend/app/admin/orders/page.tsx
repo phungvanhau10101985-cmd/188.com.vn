@@ -199,7 +199,6 @@ export default function AdminOrdersPage() {
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [listPage, setListPage] = useState(1);
   const [listPageSize, setListPageSize] = useState(ADMIN_ORDERS_DEFAULT_PAGE_SIZE);
-  const [stats, setStats] = useState<any>(null);
   const [statusCounts, setStatusCounts] = useState<any>(null); // Số đơn theo trạng thái (period=all) cho tab
   const [activeTab, setActiveTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -288,12 +287,8 @@ export default function AdminOrdersPage() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const [todayData, allData] = await Promise.all([
-        adminOrderAPI.getStats('today'),
-        adminOrderAPI.getStats('all'),
-      ]);
-      setStats(todayData);
-      setStatusCounts(allData); // Dùng số đơn toàn bộ cho tab
+      const allData = await adminOrderAPI.getStats('all');
+      setStatusCounts(allData);
     } catch (e) {
       console.error(e);
     }
@@ -385,7 +380,9 @@ export default function AdminOrdersPage() {
   }, [activeTab, statusFilter, paymentFilter, sourceFilter, specialFilter, listPageSize]);
 
   useEffect(() => {
-    void adminOrderAPI.getStats({ preset: 'today' }).then(setRevenueReport).catch(() => {});
+    void loadRevenueReport();
+    // Chỉ lần đầu: mặc định ngày hôm nay. Đổi ngày gọi loadRevenueReport trực tiếp.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -505,6 +502,7 @@ export default function AdminOrdersPage() {
       setSelectedOrder(null);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: any) {
       showToast('err', err.message || 'Lỗi xác nhận cọc');
     } finally {
@@ -528,6 +526,7 @@ export default function AdminOrdersPage() {
       setSelectedOrder(null);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: any) {
       showToast('err', err.message || 'Lỗi xác nhận cọc');
     } finally {
@@ -544,6 +543,7 @@ export default function AdminOrdersPage() {
       }
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch {
       showToast('err', 'Lỗi cập nhật trạng thái');
     }
@@ -566,6 +566,7 @@ export default function AdminOrdersPage() {
       showToast('ok', 'Đã ghi đè trạng thái và lưu nhật ký');
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: unknown) {
       showToast('err', err instanceof Error ? err.message : 'Không thể ghi đè trạng thái');
     } finally {
@@ -583,6 +584,7 @@ export default function AdminOrdersPage() {
       void loadShipmentTimeline(updated.id);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: unknown) {
       showToast('err', err instanceof Error ? err.message : 'Không thể cập nhật lịch trình');
     } finally {
@@ -600,6 +602,7 @@ export default function AdminOrdersPage() {
       void loadShipmentTimeline(updated.id);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: unknown) {
       showToast('err', err instanceof Error ? err.message : 'Không thể bắt đầu đóng gói');
     } finally {
@@ -620,6 +623,7 @@ export default function AdminOrdersPage() {
       void loadShipmentTimeline(updated.id);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: unknown) {
       showToast('err', err instanceof Error ? err.message : 'Không thể cập nhật lịch trình');
     } finally {
@@ -635,6 +639,7 @@ export default function AdminOrdersPage() {
       setSelectedOrder(null);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: any) {
       showToast('err', err?.message || 'Lỗi duyệt hoàn cọc');
     }
@@ -649,6 +654,7 @@ export default function AdminOrdersPage() {
       setSelectedOrder(updated);
       fetchOrders();
       fetchStats();
+      void loadRevenueReport();
     } catch (err: unknown) {
       showToast('err', err instanceof Error ? err.message : 'Không thể duyệt hoàn hàng');
     }
@@ -706,88 +712,22 @@ export default function AdminOrdersPage() {
             <p className="text-gray-600">Quản lý và xử lý đơn hàng, đặt cọc</p>
           </div>
           <button
-            onClick={fetchOrders}
+            onClick={() => {
+              fetchOrders();
+              fetchStats();
+              void loadRevenueReport();
+            }}
             className="px-4 py-2 bg-[#ea580c] text-white rounded-lg hover:bg-[#c2410c]"
           >
             Làm mới
           </button>
         </div>
 
-        {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-            <div
-              onClick={() => {
-                setActiveTab('all');
-                setStatusFilter('');
-                setPaymentFilter('');
-                setListPage(1);
-              }}
-              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
-              title="Xem tất cả đơn hàng"
-            >
-              <p className="text-gray-500 text-sm">Tổng đơn hàng</p>
-              <p className="text-2xl font-bold">{stats.total_orders}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-gray-500 text-sm">Doanh thu hôm nay</p>
-              <p className="text-2xl font-bold text-green-600">{formatVnd(Number(stats.total_revenue))}</p>
-            </div>
-            <div
-              onClick={() => {
-                setActiveTab('waiting_deposit');
-                setStatusFilter('');
-                setPaymentFilter('');
-                setListPage(1);
-              }}
-              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
-              title="Lọc đơn chờ đặt cọc"
-            >
-              <p className="text-gray-500 text-sm">Chờ đặt cọc</p>
-              <p className="text-2xl font-bold text-orange-600">{stats.waiting_deposit_orders}</p>
-            </div>
-            <div
-              onClick={() => {
-                setActiveTab('all');
-                setStatusFilter('');
-                setPaymentFilter('deposit_paid');
-                setListPage(1);
-              }}
-              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
-              title="Lọc đơn đã đặt cọc"
-            >
-              <p className="text-gray-500 text-sm">Số đơn đã cọc</p>
-              <p className="text-2xl font-bold text-blue-600">{stats.deposited_orders ?? 0}</p>
-            </div>
-            <div className="bg-white rounded-lg shadow p-4">
-              <p className="text-gray-500 text-sm">Doanh thu đơn đã cọc</p>
-              <p className="text-2xl font-bold text-emerald-600">{formatVnd(Number(stats.deposited_revenue ?? 0))}</p>
-              {Number(stats.deposited_amount ?? 0) > 0 && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Cọc đã thu: <span className="font-medium text-gray-700">{formatVnd(Number(stats.deposited_amount))}</span>
-                </p>
-              )}
-            </div>
-            <div
-              onClick={() => {
-                setActiveTab('shipping');
-                setStatusFilter('');
-                setPaymentFilter('');
-                setListPage(1);
-              }}
-              className="bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition-shadow"
-              title="Lọc đơn đang giao hàng"
-            >
-              <p className="text-gray-500 text-sm">Đang giao hàng</p>
-              <p className="text-2xl font-bold">{stats.shipping_orders}</p>
-            </div>
-          </div>
-        )}
-
         <section className="bg-white rounded-lg shadow mb-6 overflow-hidden" aria-label="Báo cáo doanh thu">
           <div className="border-b px-4 py-3">
-            <h2 className="text-lg font-semibold text-gray-900">Báo cáo doanh thu</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Doanh thu</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Tổng doanh thu và số đơn theo ngày, tuần, tháng, năm hoặc khoảng ngày tùy chọn.
+              Mặc định ngày hôm nay. Chọn ngày khác thì số liệu bên dưới đổi theo ngày đó.
             </p>
           </div>
 
@@ -1027,55 +967,102 @@ export default function AdminOrdersPage() {
                 {revenueError}
               </div>
             ) : null}
-            {revenueLoading ? (
-              <p className="text-sm text-gray-500">Đang tải báo cáo…</p>
+            {revenueLoading && !revenueReport ? (
+              <p className="text-sm text-gray-500">Đang tải doanh thu…</p>
             ) : revenueReport ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-                <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:col-span-2 lg:col-span-5">
-                  <p className="text-sm text-gray-500">Kỳ báo cáo</p>
-                  <p className="text-base font-semibold text-gray-900">
-                    {revenueReport.period_label || '—'}
-                    {revenueReport.date_from && revenueReport.date_to && revenueReport.date_from !== revenueReport.date_to ? (
-                      <span className="text-sm font-normal text-gray-500 ml-2">
-                        ({revenueReport.date_from} → {revenueReport.date_to})
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
-                  <p className="text-sm text-gray-600">Tổng doanh thu</p>
-                  <p className="text-2xl font-bold text-emerald-700">
-                    {formatVnd(Number(revenueReport.total_revenue))}
-                  </p>
-                </div>
-                <div className="rounded-lg border border-gray-100 p-4">
-                  <p className="text-sm text-gray-600">Số đơn hàng</p>
-                  <p className="text-2xl font-bold text-gray-900">{revenueReport.total_orders}</p>
-                </div>
-                <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
-                  <p className="text-sm text-gray-600">Số đơn đã cọc</p>
-                  <p className="text-2xl font-bold text-blue-700">{revenueReport.deposited_orders ?? 0}</p>
-                </div>
-                <div className="rounded-lg border border-teal-100 bg-teal-50/40 p-4">
-                  <p className="text-sm text-gray-600">Doanh thu đơn đã cọc</p>
-                  <p className="text-2xl font-bold text-teal-700">
-                    {formatVnd(Number(revenueReport.deposited_revenue ?? 0))}
-                  </p>
-                  {Number(revenueReport.deposited_amount ?? 0) > 0 && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Cọc đã thu: <span className="font-medium text-gray-700">{formatVnd(Number(revenueReport.deposited_amount))}</span>
+              <div>
+                <p className="text-sm text-gray-500 mb-3">
+                  Đang xem:{' '}
+                  <span className="font-semibold text-gray-900">{revenueReport.period_label || '—'}</span>
+                  {revenueLoading ? <span className="ml-2 text-gray-400">Đang tải…</span> : null}
+                </p>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/40 p-4">
+                    <p className="text-gray-500 text-sm">Doanh thu</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {formatVnd(Number(revenueReport.total_revenue))}
                     </p>
-                  )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('all');
+                      setStatusFilter('');
+                      setPaymentFilter('');
+                      setListPage(1);
+                    }}
+                    className="rounded-lg border border-gray-100 bg-white p-4 text-left hover:shadow-md transition-shadow"
+                    title="Xem tất cả đơn hàng"
+                  >
+                    <p className="text-gray-500 text-sm">Tổng đơn hàng</p>
+                    <p className="text-2xl font-bold text-gray-900">{revenueReport.total_orders}</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('waiting_deposit');
+                      setStatusFilter('');
+                      setPaymentFilter('');
+                      setListPage(1);
+                    }}
+                    className="rounded-lg border border-orange-100 bg-orange-50/40 p-4 text-left hover:shadow-md transition-shadow"
+                    title="Lọc đơn chờ đặt cọc"
+                  >
+                    <p className="text-gray-500 text-sm">Chờ đặt cọc</p>
+                    <p className="text-2xl font-bold text-orange-600">{revenueReport.waiting_deposit_orders}</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('shipping');
+                      setStatusFilter('');
+                      setPaymentFilter('');
+                      setListPage(1);
+                    }}
+                    className="rounded-lg border border-gray-100 bg-white p-4 text-left hover:shadow-md transition-shadow"
+                    title="Lọc đơn đang giao hàng"
+                  >
+                    <p className="text-gray-500 text-sm">Đang giao hàng</p>
+                    <p className="text-2xl font-bold text-gray-900">{revenueReport.shipping_orders}</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('all');
+                      setStatusFilter('');
+                      setPaymentFilter('deposit_paid');
+                      setListPage(1);
+                    }}
+                    className="rounded-lg border border-blue-100 bg-blue-50/40 p-4 text-left hover:shadow-md transition-shadow"
+                    title="Lọc đơn đã đặt cọc"
+                  >
+                    <p className="text-gray-500 text-sm">Số đơn đã cọc</p>
+                    <p className="text-2xl font-bold text-blue-600">{revenueReport.deposited_orders ?? 0}</p>
+                  </button>
+                  <div className="rounded-lg border border-teal-100 bg-teal-50/40 p-4">
+                    <p className="text-gray-500 text-sm">Doanh thu đơn đã cọc</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {formatVnd(Number(revenueReport.deposited_revenue ?? 0))}
+                    </p>
+                    {Number(revenueReport.deposited_amount ?? 0) > 0 && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Cọc đã thu:{' '}
+                        <span className="font-medium text-gray-700">
+                          {formatVnd(Number(revenueReport.deposited_amount))}
+                        </span>
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="rounded-lg border border-gray-100 p-4 sm:col-span-2 lg:col-span-5">
-                  <p className="text-sm text-gray-600">Đã hủy / hoàn</p>
-                  <p className="text-lg font-semibold text-gray-800">
+                <p className="text-sm text-gray-600 mt-3">
+                  Đã hủy / hoàn:{' '}
+                  <span className="font-semibold text-gray-800">
                     {revenueReport.cancelled_orders} hủy · {revenueReport.returned_orders ?? 0} hoàn
-                  </p>
-                </div>
+                  </span>
+                </p>
               </div>
             ) : !revenueError ? (
-              <p className="text-sm text-gray-500">Chọn kỳ để xem báo cáo.</p>
+              <p className="text-sm text-gray-500">Chọn kỳ để xem doanh thu.</p>
             ) : null}
           </div>
         </section>
