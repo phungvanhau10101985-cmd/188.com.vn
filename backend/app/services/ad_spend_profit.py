@@ -87,36 +87,57 @@ def line_listing_cny(
     unit_vnd: Any,
     catalog_raw: Any,
     vnd_per_cny: Optional[Decimal],
+    line_total_vnd: Any = None,
 ) -> Optional[Decimal]:
-    """Giá tệ một dòng: ưu tiên số đã lưu lúc cào, không có thì đảo giá bán theo lưới hệ số."""
-    qty = _dec(quantity)
-    if qty is None or qty <= 0:
+    """Giá tệ một dòng: ưu tiên số đã lưu lúc cào, không có thì đảo đơn giá hoặc thành tiền dòng."""
+    if vnd_per_cny is None or vnd_per_cny <= 0:
         return None
+    qty = _dec(quantity)
     catalog = stored_cny_price(catalog_raw)
-    if catalog is not None:
+    if catalog is not None and qty is not None and qty > 0:
         return Decimal(str(catalog)) * qty
     unit = _dec(unit_vnd)
-    if unit is None or unit <= 0 or vnd_per_cny is None or vnd_per_cny <= 0:
+    if unit is not None and unit > 0 and qty is not None and qty > 0:
+        inverted = listing_vnd_to_cny(float(unit), float(vnd_per_cny))
+        if inverted is not None:
+            return Decimal(str(inverted)) * qty
+    total = _dec(line_total_vnd)
+    if total is not None and total > 0:
+        inverted = listing_vnd_to_cny(float(total), float(vnd_per_cny))
+        if inverted is not None:
+            return Decimal(str(inverted))
+    return None
+
+
+def invert_merchandise_cny(merchandise_vnd: Any, vnd_per_cny: Optional[Decimal]) -> Optional[Decimal]:
+    amount = _dec(merchandise_vnd)
+    if amount is None or amount <= 0 or vnd_per_cny is None or vnd_per_cny <= 0:
         return None
-    inverted = listing_vnd_to_cny(float(unit), float(vnd_per_cny))
+    inverted = listing_vnd_to_cny(float(amount), float(vnd_per_cny))
     if inverted is None:
         return None
-    return Decimal(str(inverted)) * qty
+    return Decimal(str(inverted))
 
 
 def goods_cny_matching_listing(
-    lines: Sequence[Tuple[Any, Any, Any]],
+    lines: Sequence[Tuple[Any, ...]],
     vnd_per_cny: Optional[Decimal],
+    merchandise_vnd: Any = None,
 ) -> Optional[Decimal]:
-    if not lines:
-        return None
-    total = Decimal("0")
-    for quantity, unit_vnd, catalog_raw in lines:
-        part = line_listing_cny(quantity, unit_vnd, catalog_raw, vnd_per_cny)
-        if part is None:
-            return None
-        total += part
-    return total
+    """Cộng giá tệ từng dòng. Dòng nào không đảo được thì lấy giá hàng của cả đơn (không gồm phí ship khách trả)."""
+    if lines:
+        parts: List[Decimal] = []
+        for row in lines:
+            quantity, unit_vnd, catalog_raw = row[0], row[1], row[2]
+            line_total = row[3] if len(row) > 3 else None
+            part = line_listing_cny(quantity, unit_vnd, catalog_raw, vnd_per_cny, line_total)
+            if part is None:
+                parts = []
+                break
+            parts.append(part)
+        if parts:
+            return sum(parts, Decimal("0"))
+    return invert_merchandise_cny(merchandise_vnd, vnd_per_cny)
 
 
 def order_cost_vnd(
@@ -217,7 +238,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
     orders = orders[:MAX_PROFIT_ORDERS]
     order_ids = [order.id for order in orders]
 
-    lines_by_order: Dict[int, List[Tuple[Any, Any, Any]]] = {order_id: [] for order_id in order_ids}
+    lines_by_order: Dict[int, List[Tuple[Any, Any, Any, Any]]] = {order_id: [] for order_id in order_ids}
     if order_ids:
         item_rows = (
             db.query(
@@ -225,15 +246,16 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 OrderItem.quantity,
                 OrderItem.unit_price,
                 OrderItem.price,
+                OrderItem.total_price,
                 Product.pro_lower_price,
             )
             .outerjoin(Product, Product.id == OrderItem.product_id)
             .filter(OrderItem.order_id.in_(order_ids))
             .all()
         )
-        for order_id, quantity, unit_price, legacy_price, raw_price in item_rows:
+        for order_id, quantity, unit_price, legacy_price, line_total, raw_price in item_rows:
             unit = unit_price if unit_price not in (None, 0) else legacy_price
-            lines_by_order.setdefault(int(order_id), []).append((quantity, unit, raw_price))
+            lines_by_order.setdefault(int(order_id), []).append((quantity, unit, raw_price, line_total))
 
     overrides = {}
     if order_ids:
@@ -249,7 +271,11 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
         revenue = _dec(order.total_amount) or Decimal("0")
         revenue_total += revenue
         order_lines = lines_by_order.get(order.id) or []
-        catalog = goods_cny_matching_listing(order_lines, rate)
+        goods_vnd = _dec(order.subtotal)
+        if goods_vnd is None or goods_vnd <= 0:
+            shipping = _dec(order.shipping_fee) or Decimal("0")
+            goods_vnd = revenue - shipping if revenue > shipping else revenue
+        catalog = goods_cny_matching_listing(order_lines, rate, goods_vnd)
         override = overrides.get(order.id)
         goods_override = _dec(override.goods_cny) if override is not None else None
         ship_china_override = _dec(override.ship_china_domestic_cny) if override is not None else None
@@ -278,14 +304,16 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 "order_code": order.order_code,
                 "deposited_on": _vn_day(deposited),
                 "revenue_vnd": _money(revenue) or 0,
+                "merchandise_vnd": _money(goods_vnd) or 0,
                 "catalog_goods_cny": _money(catalog),
                 "lines": [
                     {
                         "quantity": int(quantity or 0),
                         "unit_price_vnd": _money(_dec(unit)) or 0,
+                        "line_total_vnd": _money(_dec(line_total)) or 0,
                         "catalog_cny": _money(_dec(str(parsed))) if (parsed := stored_cny_price(raw)) is not None else None,
                     }
-                    for quantity, unit, raw in order_lines
+                    for quantity, unit, raw, line_total in order_lines
                 ],
                 "goods_cny_override": _money(goods_override),
                 "ship_china_domestic_cny_override": _money(ship_china_override),

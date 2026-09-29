@@ -13,6 +13,7 @@ type AdSpendState = 'loading' | 'ready' | 'unavailable';
 type ProfitLine = {
   quantity: number;
   unitPriceVnd: number;
+  lineTotalVnd: number;
   catalogCny: number | null;
 };
 
@@ -21,6 +22,7 @@ type ProfitRow = {
   orderCode: string;
   depositedOn: string | null;
   revenueVnd: number;
+  merchandiseVnd: number;
   lines: ProfitLine[];
   catalogGoodsCny: number | null;
   goodsTouched: boolean;
@@ -71,18 +73,33 @@ function numText(value: number | null | undefined): string {
   return String(value);
 }
 
-function goodsFromLines(lines: ProfitLine[], rate: number | null): number | null {
-  if (!lines.length || rate == null || rate <= 0) return null;
+function goodsFromLines(lines: ProfitLine[], rate: number | null, merchandiseVnd: number): number | null {
+  if (rate == null || rate <= 0) return null;
+  const fromMerchandise = () => {
+    if (!(merchandiseVnd > 0)) return null;
+    const cny = listingVndToCny(merchandiseVnd, rate);
+    return cny == null ? null : Math.round(cny * 100) / 100;
+  };
+  if (!lines.length) return fromMerchandise();
   let total = 0;
   for (const line of lines) {
-    if (!(line.quantity > 0)) return null;
-    if (line.catalogCny != null && line.catalogCny > 0) {
+    if (line.catalogCny != null && line.catalogCny > 0 && line.quantity > 0) {
       total += line.catalogCny * line.quantity;
       continue;
     }
-    const cny = listingVndToCny(line.unitPriceVnd, rate);
-    if (cny == null) return null;
-    total += cny * line.quantity;
+    if (line.unitPriceVnd > 0 && line.quantity > 0) {
+      const cny = listingVndToCny(line.unitPriceVnd, rate);
+      if (cny == null) return fromMerchandise();
+      total += cny * line.quantity;
+      continue;
+    }
+    if (line.lineTotalVnd > 0) {
+      const cny = listingVndToCny(line.lineTotalVnd, rate);
+      if (cny == null) return fromMerchandise();
+      total += cny;
+      continue;
+    }
+    return fromMerchandise();
   }
   return Math.round(total * 100) / 100;
 }
@@ -93,9 +110,11 @@ function rowsFromSheet(sheet: AdSpendProfitSheet): ProfitRow[] {
     orderCode: order.order_code,
     depositedOn: order.deposited_on,
     revenueVnd: order.revenue_vnd,
+    merchandiseVnd: order.merchandise_vnd || 0,
     lines: (order.lines || []).map((line) => ({
       quantity: line.quantity,
       unitPriceVnd: line.unit_price_vnd,
+      lineTotalVnd: line.line_total_vnd || 0,
       catalogCny: line.catalog_cny,
     })),
     catalogGoodsCny: order.catalog_goods_cny,
@@ -187,7 +206,7 @@ export function AdSpendProfitSection({
     setRows((prev) =>
       prev.map((row) => {
         if (row.hadGoodsOverride || row.goodsTouched) return row;
-        const next = goodsFromLines(row.lines, rateNumber);
+        const next = goodsFromLines(row.lines, rateNumber, row.merchandiseVnd);
         if (next == null) {
           if (!row.goods && row.catalogGoodsCny == null) return row;
           return { ...row, catalogGoodsCny: null, goods: '' };

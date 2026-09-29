@@ -75,6 +75,7 @@ class AdSpendReport(BaseModel):
 class AdSpendProfitLine(BaseModel):
     quantity: int
     unit_price_vnd: float
+    line_total_vnd: float = 0
     catalog_cny: Optional[float] = None
 
 
@@ -83,6 +84,7 @@ class AdSpendProfitOrder(BaseModel):
     order_code: str
     deposited_on: Optional[str] = None
     revenue_vnd: float
+    merchandise_vnd: float = 0
     catalog_goods_cny: Optional[float] = None
     lines: List[AdSpendProfitLine] = Field(default_factory=list)
     goods_cny_override: Optional[float] = None

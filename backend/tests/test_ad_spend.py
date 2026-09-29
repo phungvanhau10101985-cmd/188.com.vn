@@ -220,6 +220,15 @@ def test_profit_uses_cny_rate_shipping_and_ads():
     assert inverted_label is not None and float(inverted_label) > 100
 
     assert goods_cny_matching_listing([(1, 860000, "80")], rate) == Decimal("80")
+    # Đơn có giá bán nhưng dòng không có giá tệ số và không có đơn giá — đảo từ tiền hàng của đơn.
+    from_order = goods_cny_matching_listing([(1, 0, "giày tây nam g05", 0)], Decimal("3880"), 1_200_000)
+    assert from_order is not None and float(from_order) > 0
+    mixed = goods_cny_matching_listing(
+        [(1, 860000, "80"), (1, 0, None, 0)],
+        rate,
+        2_000_000,
+    )
+    assert mixed is not None and float(mixed) != 80
     inverted_only = goods_cny_matching_listing([(1, selling, None)], rate)
     assert inverted_only is not None
     assert abs(float(inverted_only) - 400) < 1.5

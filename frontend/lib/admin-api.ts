@@ -2717,6 +2717,7 @@ export type AdSpendSettingsUpdate = {
 export type AdSpendProfitLine = {
   quantity: number;
   unit_price_vnd: number;
+  line_total_vnd: number;
   catalog_cny: number | null;
 };
 
@@ -2725,6 +2726,7 @@ export type AdSpendProfitOrder = {
   order_code: string;
   deposited_on: string | null;
   revenue_vnd: number;
+  merchandise_vnd: number;
   catalog_goods_cny: number | null;
   lines: AdSpendProfitLine[];
   goods_cny_override: number | null;
