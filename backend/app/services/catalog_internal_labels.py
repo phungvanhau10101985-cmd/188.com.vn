@@ -130,7 +130,7 @@ def _format_meta_internal_label_cell(labels: List[str]) -> str:
     return f"[{quoted}]"
 
 
-def _labels_from_product_info_override(product: Product) -> Optional[str]:
+def _labels_from_product_info_list(product: Product) -> Optional[List[str]]:
     raw = getattr(product, "product_info", None)
     if not isinstance(raw, dict):
         return None
@@ -140,16 +140,23 @@ def _labels_from_product_info_override(product: Product) -> Optional[str]:
     if val is None:
         return None
     if isinstance(val, list):
-        labels = _uniq_labels(str(x) for x in val if x is not None and str(x).strip())
-        return _format_meta_internal_label_cell(labels) if labels else ""
+        return _uniq_labels(str(x) for x in val if x is not None and str(x).strip())
     s = str(val).strip()
     if not s:
-        return ""
-    if s.startswith("["):
-        return s
+        return []
+    if s.startswith("[") and s.endswith("]"):
+        inner = s[1:-1].strip()
+        parts = [p.strip().strip("'\"") for p in inner.split(",") if p.strip()]
+        return _uniq_labels(parts)
     parts = [p.strip() for p in re.split(r"[,;|]", s) if p.strip()]
-    labels = _uniq_labels(parts)
-    return _format_meta_internal_label_cell(labels) if labels else ""
+    return _uniq_labels(parts)
+
+
+def _labels_from_product_info_override(product: Product) -> Optional[str]:
+    labels = _labels_from_product_info_list(product)
+    if labels is None:
+        return None
+    return _format_meta_internal_label_cell(labels)
 
 
 def _product_text_blob(product: Product) -> str:
@@ -296,15 +303,19 @@ def meta_internal_labels_for_product(product: Product) -> str:
     """
     Ô `internal_label` cho feed Meta catalogue.
     Ưu tiên `product_info.internal_label` / `internal_labels` nếu admin đã gán tay.
+    Tự động gắn nhãn `thanh_ly_kho` cho sản phẩm kho thanh lý.
     """
-    override = _labels_from_product_info_override(product)
-    if override is not None:
-        return override
-
     labels: List[str] = []
-    if is_phone_accessory_product(product):
-        labels.append("phu_kien_dien_thoai")
-        name = getattr(product, "name", "") or ""
-        labels.extend(extract_phone_device_labels(name))
+    if getattr(product, "is_warehouse_clearance", False):
+        labels.append("thanh_ly_kho")
+
+    custom_labels = _labels_from_product_info_list(product)
+    if custom_labels is not None:
+        labels.extend(custom_labels)
+    else:
+        if is_phone_accessory_product(product):
+            labels.append("phu_kien_dien_thoai")
+            name = getattr(product, "name", "") or ""
+            labels.extend(extract_phone_device_labels(name))
 
     return _format_meta_internal_label_cell(_uniq_labels(labels))

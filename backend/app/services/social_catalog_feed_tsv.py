@@ -243,9 +243,12 @@ def iter_meta_catalog_lines(
 
     ladipage_links = build_published_ladipage_product_links(db, shop_base_url)
     yield "\t".join(META_TSV_COLUMNS)
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
     q = db.query(Product).order_by(Product.id)
     if only_active:
         q = q.filter(Product.is_active.is_(True))
+    q = apply_catalog_visibility_filter(q, include_warehouse_in_catalog=True)
     for p in q.yield_per(max(50, yield_per)):
         vals = meta_row_values(
             p,
@@ -279,9 +282,12 @@ def iter_tiktok_catalog_lines(
 
     ladipage_links = build_published_ladipage_product_links(db, shop_base_url)
     yield "\t".join(TIKTOK_TSV_COLUMNS)
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
     q = db.query(Product).order_by(Product.id)
     if only_active:
         q = q.filter(Product.is_active.is_(True))
+    q = apply_catalog_visibility_filter(q, include_warehouse_in_catalog=True)
     for p in q.yield_per(max(50, yield_per)):
         vals = tiktok_row_values(
             p,

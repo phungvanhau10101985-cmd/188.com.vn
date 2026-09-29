@@ -583,7 +583,9 @@ def _custom_labels_1_to_4(product: Product) -> tuple[str, str, str, str]:
         tier = "high_demand"
     elif purn >= 20:
         tier = "moving"
-    l1 = _optional_custom_label(product, 1) or style
+    is_wh = bool(getattr(product, "is_warehouse_clearance", False))
+    default_l1 = "thanh_ly_kho" if is_wh else style
+    l1 = _optional_custom_label(product, 1) or default_l1
     l2 = _optional_custom_label(product, 2) or occ
     l3 = _optional_custom_label(product, 3) or tier
     l4 = _optional_custom_label(product, 4) or sub
@@ -836,7 +838,7 @@ def iter_merchant_feed_lines(
     q = db.query(Product).order_by(Product.id)
     if only_active:
         q = q.filter(Product.is_active.is_(True))
-    q = apply_catalog_visibility_filter(q)
+    q = apply_catalog_visibility_filter(q, include_warehouse_in_catalog=True)
     for p in q.yield_per(max(50, yield_per)):
         yield merchant_feed_line_for_product(
             p,

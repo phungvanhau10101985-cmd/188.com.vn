@@ -277,19 +277,21 @@ def apply_catalog_visibility_filter(
     include_warehouse_products: bool = False,
     warehouse_clearance_only: bool = False,
     has_text_search: bool = False,
+    include_warehouse_in_catalog: bool = False,
 ):
     """
     Storefront: mặc định ẩn dòng kho thanh lý khỏi danh mục/listing không tìm.
     - warehouse_clearance_only: chỉ SP is_warehouse_clearance (trang /kho-sale).
     - has_text_search: tìm theo q — gồm cả SP thường và kho thanh lý.
     - include_warehouse_products: admin — không lọc.
+    - include_warehouse_in_catalog: feed quảng cáo (GMC / Meta / TikTok) — gồm cả SP thường và kho thanh lý sellable.
     - Luôn ẩn SP hết hàng hoàn toàn (tồn = 0 / nguồn OOS không còn kho TL).
     """
     if include_warehouse_products:
         return query
     if warehouse_clearance_only:
         query = query.filter(Product.is_warehouse_clearance == True)  # noqa: E712
-    elif not has_text_search:
+    elif not has_text_search and not include_warehouse_in_catalog:
         query = query.filter(
             or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
         )

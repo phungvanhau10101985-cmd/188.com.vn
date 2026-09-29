@@ -57,3 +57,25 @@ def test_inference_used_when_product_info_gender_missing():
         subcategory="Sneaker Nam",
     )
     assert _normalized_gender(p) == "male"
+
+
+def test_warehouse_clearance_custom_label_and_internal_label():
+    from app.services.catalog_internal_labels import meta_internal_labels_for_product
+    from app.services.merchant_feed_tsv import _custom_labels_1_to_4
+
+    p_wh = _product(
+        name="Áo Sơ Mi Nam Thanh Lý",
+        is_warehouse_clearance=True,
+    )
+    c1, c2, c3, c4 = _custom_labels_1_to_4(p_wh)
+    assert c1 == "thanh_ly_kho"
+    assert "thanh_ly_kho" in meta_internal_labels_for_product(p_wh)
+
+    p_normal = _product(
+        name="Áo Sơ Mi Nam Mới",
+        is_warehouse_clearance=False,
+    )
+    c1_norm, _, _, _ = _custom_labels_1_to_4(p_normal)
+    assert c1_norm == ""
+    assert "thanh_ly_kho" not in meta_internal_labels_for_product(p_normal)
+
