@@ -510,7 +510,7 @@ class ShopReturnConfirmRowResponse(BaseModel):
 
 
 class ShopReturnConfirmRequest(BaseModel):
-    """Nhập mã đơn DHxxx, mã EMS (tracking) hoặc mã tham chiếu — map sang đơn shop."""
+    """Nhập mã EMS hoặc mã tham chiếu. Mã đơn shop chỉ hiện để xem, không dùng để đối chiếu."""
 
     order_codes: Optional[List[str]] = None
     text: Optional[str] = Field(
@@ -580,7 +580,7 @@ class ReturnWarehouseListingSource(BaseModel):
 
 
 class ResolveReturnWarehouseSkuResponse(BaseModel):
-    """Mã SKU kho (cột H EMS) trích từ mã EMS / tham chiếu / DHxxx."""
+    """Mã SKU kho (cột H EMS) trích từ mã EMS hoặc mã tham chiếu."""
 
     ok: bool = True
     sku: Optional[str] = None

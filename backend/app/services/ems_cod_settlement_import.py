@@ -164,6 +164,7 @@ def _find_shipping_record(
     tracking_code: str,
     reference_code: Optional[str],
 ) -> Optional[EmsShippingRecord]:
+    """Khớp tiền COD theo mã EMS hoặc mã tham chiếu. Mã đơn shop không tham gia đối chiếu."""
     tracking = (tracking_code or "").strip().upper()
     if tracking:
         record = (
@@ -175,12 +176,12 @@ def _find_shipping_record(
             return record
 
     ref = (reference_code or "").strip().upper()
-    if ref:
-        return (
-            db.query(EmsShippingRecord)
-            .filter(EmsShippingRecord.reference_code.ilike(ref))
-            .first()
-        )
+    if not ref:
+        return None
+    for column in (EmsShippingRecord.reference_code, EmsShippingRecord.ems_reference_code):
+        record = db.query(EmsShippingRecord).filter(column.ilike(ref)).first()
+        if record:
+            return record
     return None
 
 

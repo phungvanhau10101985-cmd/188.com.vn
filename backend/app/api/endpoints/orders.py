@@ -1051,11 +1051,11 @@ def admin_confirm_shop_returns_bulk(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
-    """Xác nhận đơn hoàn đã trả shop — nhập / dán danh sách mã DHxxx."""
+    """Xác nhận đơn hoàn đã trả shop — nhập mã EMS hoặc mã tham chiếu."""
     text = (body.text or "").strip()
     codes = [str(c).strip() for c in (body.order_codes or []) if str(c).strip()]
     if not text and not codes:
-        raise HTTPException(status_code=400, detail="Nhập ít nhất một mã đơn (DHxxx).")
+        raise HTTPException(status_code=400, detail="Nhập ít nhất một mã EMS hoặc mã tham chiếu.")
     try:
         if text:
             return shop_return_confirm_svc.confirm_shop_returns_from_text(
@@ -1080,7 +1080,7 @@ def admin_confirm_shop_returns_bulk(
     response_model=shipment_schemas.ResolveReturnWarehouseSkuResponse,
 )
 def admin_resolve_return_warehouse_sku(
-    code: str = Query(..., min_length=1, description="Mã EMS / tham chiếu / DHxxx"),
+    code: str = Query(..., min_length=1, description="Mã EMS hoặc mã tham chiếu"),
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
@@ -1213,7 +1213,7 @@ async def admin_confirm_shop_returns_excel(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
-    """Import Excel xác nhận đơn hoàn đã trả shop — cột có mã DHxxx; mã không tồn tại báo lỗi."""
+    """Import Excel xác nhận đơn hoàn — cột mã EMS hoặc mã tham chiếu."""
     filename = (file.filename or "").lower()
     if not filename.endswith((".xlsx", ".xlsm", ".xls")):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xls / .xlsx")

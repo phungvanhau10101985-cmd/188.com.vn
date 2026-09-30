@@ -1780,7 +1780,7 @@ export default function AdminShippingPage() {
   const runShopReturnConfirm = useCallback(async () => {
     const text = shopReturnText.trim();
     if (!text && !shopReturnFile) {
-      setShopReturnError('Nhập mã đơn (DHxxx) hoặc chọn file Excel.');
+      setShopReturnError('Nhập mã EMS hoặc mã tham chiếu, hoặc chọn file Excel.');
       return;
     }
     if (!shopReturnFile && (shopReturnPreview?.confirmable_count ?? 0) < 1) {
@@ -3410,12 +3410,13 @@ export default function AdminShippingPage() {
         <h2 className="text-lg font-semibold text-gray-900">3. Xác nhận đơn hoàn đã trả shop</h2>
         <p className="text-sm text-gray-600">
           Shop xác nhận đã nhận hàng hoàn — ghi <strong>Đơn hoàn đã trả shop</strong> và hủy hoa hồng affiliate.
-          Nhập <strong>mã vận chuyển EMS</strong>, <strong>mã tham chiếu</strong> (cột A) hoặc <strong>mã đơn</strong>.
+          Chỉ nhập <strong>mã vận chuyển EMS</strong> hoặc <strong>mã tham chiếu</strong> của shop. Mã đơn (DH/DC) chỉ
+          hiện để xem, không dùng để tính đơn hoàn hay đơn nhận COD.
           Chỉ cần EMS đã báo <strong>đơn hoàn</strong> (phát hoàn / chuyển hoàn…) — không bắt buộc có đơn shop trên web; nếu có đơn sẽ cập nhật thêm trạng thái đơn và hủy affiliate.
         </p>
         <div className="space-y-3">
           <label className="block text-sm font-medium text-gray-700">
-            Danh sách mã (EMS / tham chiếu / mã đơn H·DC·DH…)
+            Danh sách mã (EMS hoặc mã tham chiếu)
           </label>
           <textarea
             value={shopReturnText}
@@ -3426,11 +3427,12 @@ export default function AdminShippingPage() {
               setShopReturnResult(null);
             }}
             rows={4}
-            placeholder={'EE123456789VN\nH11022607\nDC38833\nDH131'}
+            placeholder={'EE123456789VN\nH11022607'}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono placeholder:text-gray-400 focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
           />
           <p className="text-xs text-gray-500">
-            Tự tra cứu EMS sau ~0,4s khi ngừng gõ; đồng thời điền và tra SKU kho bên dưới. Hai trạng thái:{' '}
+            Mỗi mã EMS hoặc mã tham chiếu tính một vận đơn. Mã đơn trong bảng kết quả chỉ để xem. Tự tra cứu sau
+            ~0,4s khi ngừng gõ; đồng thời điền và tra SKU kho bên dưới. Hai trạng thái:{' '}
             <strong>Có thể xác nhận</strong> = EMS đã báo đơn hoàn · <strong>Đã xác nhận nhận hàng</strong> = shop đã
             ghi nhận trước.
           </p>
@@ -3547,7 +3549,9 @@ export default function AdminShippingPage() {
                       <tr>
                         <th className="px-3 py-2 text-left font-medium">#</th>
                         <th className="px-3 py-2 text-left font-medium">Mã nhập</th>
-                        <th className="px-3 py-2 text-left font-medium">Mã đơn</th>
+                        <th className="px-3 py-2 text-left font-medium" title="Chỉ để xem — không dùng để đối chiếu">
+                          Mã đơn
+                        </th>
                         <th className="px-3 py-2 text-left font-medium">Trạng thái EMS</th>
                         <th className="px-3 py-2 text-left font-medium">Đơn shop</th>
                         <th className="px-3 py-2 text-left font-medium">Kết quả</th>

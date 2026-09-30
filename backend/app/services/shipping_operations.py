@@ -632,7 +632,10 @@ def get_shipping_received_timeline_stats(
     preset: str | None = None,
     year: int | None = None,
 ) -> dict[str, Any]:
-    """Thống kê thực nhận theo tháng: COD theo ngày EMS trả, hoàn theo ngày admin nhận."""
+    """Thống kê thực nhận theo từng vận đơn (mã tham chiếu shop hoặc mã EMS).
+
+    COD theo ngày EMS trả, hoàn theo ngày admin nhận. Không gộp theo mã đơn shop.
+    """
     key = (granularity or "month").strip().lower()
     if key not in _TIMELINE_GRANULARITIES:
         raise ValueError("granularity phải là year, month, week hoặc day.")
@@ -996,7 +999,7 @@ def list_operations_bucket_records(
 
 
 def find_ems_record_by_token(db: Session, token: str) -> EmsShippingRecord | None:
-    """Tra mã EMS, mã tham chiếu (cột A), ems_reference_code hoặc mã đơn shop trên dòng EMS."""
+    """Tra cứu xem: mã EMS, mã tham chiếu hoặc mã đơn shop trên dòng EMS."""
     t = (token or "").strip().upper()
     if not t or len(t) < 3:
         return None
@@ -1012,13 +1015,20 @@ def find_ems_record_by_token(db: Session, token: str) -> EmsShippingRecord | Non
     return None
 
 
-def _primary_ems_record_for_order(db: Session, order_id: int) -> EmsShippingRecord | None:
-    return (
-        db.query(EmsShippingRecord)
-        .filter(EmsShippingRecord.order_id == order_id)
-        .order_by(EmsShippingRecord.updated_at.desc(), EmsShippingRecord.id.desc())
-        .first()
-    )
+def find_ems_record_by_ems_or_reference(db: Session, token: str) -> EmsShippingRecord | None:
+    """Khớp vận đơn để tính hoàn / COD — chỉ mã EMS hoặc mã tham chiếu, không theo mã đơn."""
+    t = (token or "").strip().upper()
+    if not t or len(t) < 3:
+        return None
+    for column in (
+        EmsShippingRecord.ems_tracking_code,
+        EmsShippingRecord.reference_code,
+        EmsShippingRecord.ems_reference_code,
+    ):
+        record = db.query(EmsShippingRecord).filter(column.ilike(t)).first()
+        if record:
+            return record
+    return None
 
 
 def _warehouse_sku_from_ems_record(record: EmsShippingRecord | None) -> str | None:
@@ -1063,41 +1073,26 @@ def _resolve_shop_return_context(
     raw: str,
     code: Optional[str],
 ) -> tuple[Optional[EmsShippingRecord], Optional[Order], str]:
-    """Ghép vận đơn EMS + đơn shop từ mã nhập (EMS / tham chiếu / mã đơn)."""
-    token = (raw or code or "").strip()
-    display_code = (code or "").strip().upper() or None
-    record = find_ems_record_by_token(db, token) if token else None
+    """Ghép đúng một vận đơn từ mã EMS hoặc mã tham chiếu. Mã đơn chỉ để hiển thị."""
+    del code
+    token = (raw or "").strip()
+    record = find_ems_record_by_ems_or_reference(db, token) if token else None
     order: Order | None = None
+    display_code: str | None = None
 
     if record:
-        if not display_code:
-            display_code = (record.order_code or "").strip().upper() or None
+        display_code = (record.order_code or "").strip().upper() or None
         if record.order_id:
             order = db.query(Order).filter(Order.id == record.order_id).first()
         if not order and display_code:
             order = crud.order.get_order_by_code(db, display_code)
 
-    if not record and display_code:
-        order = crud.order.get_order_by_code(db, display_code)
-        if order:
-            record = _primary_ems_record_for_order(db, order.id)
-
-    if not display_code and record:
-        display_code = (
-            (record.order_code or record.reference_code or record.ems_tracking_code or token or "")
-            .strip()
-            .upper()
-            or None
-        )
-
     return record, order, display_code or ""
 
 
 def _shop_already_received_return(*, order: Order | None, record: EmsShippingRecord | None) -> bool:
-    if order is not None:
-        status_val = getattr(order.status, "value", order.status)
-        if _is_shop_return_received(order_status=status_val):
-            return True
+    """Đã xác nhận trên đúng vận đơn này. Trạng thái đơn shop không thay cho vận đơn khác."""
+    del order
     if record is not None and is_ems_record_shop_return_received(record):
         return True
     return False
@@ -1135,21 +1130,21 @@ def evaluate_shop_return_entry(
         base.update(kwargs)
         return base
 
-    if not code and not raw:
+    if not raw:
         return _row(
             status="not_ready",
-            message="Mã trống — nhập mã EMS, mã tham chiếu hoặc mã đơn.",
+            message="Mã trống — nhập mã EMS hoặc mã tham chiếu.",
         )
 
-    if resolve_error and not code:
+    if resolve_error:
         return _row(
             status="not_found",
             message=resolve_error,
         )
 
     record, order, display_code = _resolve_shop_return_context(db, raw=raw, code=code)
-    code = display_code or code
-    dedupe_key = (code or raw).strip().upper()
+    code = display_code or None
+    dedupe_key = f"ems:{record.id}" if record is not None else raw.strip().upper()
     if dedupe_key in seen_codes:
         return _row(
             order_code=code or None,
@@ -1175,7 +1170,7 @@ def evaluate_shop_return_entry(
         return _row(
             order_code=code or None,
             status="not_ready",
-            message="Không tìm thấy vận đơn EMS — nhập mã EMS, mã tham chiếu hoặc mã đơn.",
+            message="Không tìm thấy vận đơn — nhập mã EMS hoặc mã tham chiếu. Mã đơn shop chỉ để xem.",
         )
 
     if not _is_ems_return_pending_shop(ems_status=record.ems_status):
@@ -1194,7 +1189,8 @@ def evaluate_shop_return_entry(
 
     if order:
         err = validate_shop_return_confirm(order)
-        if err:
+        # Đơn đã hoàn không chặn vận đơn khác cùng đơn — mỗi mã EMS / tham chiếu tính riêng.
+        if err and err[0] != "already_returned":
             return _row(
                 order_code=code,
                 order_id=order.id,
@@ -1206,9 +1202,19 @@ def evaluate_shop_return_entry(
             )
 
     wh_sku = _warehouse_sku_from_ems_record(record)
-    msg = "EMS đã báo đơn hoàn — shop chưa xác nhận, có thể xác nhận đã nhận hàng."
-    if not order:
-        msg += " (Chưa có đơn shop trên web — chỉ ghi nhận trên vận đơn EMS.)"
+    order_already = False
+    if order is not None:
+        status_val = getattr(order.status, "value", order.status)
+        order_already = _is_shop_return_received(order_status=status_val)
+    if order_already:
+        msg = (
+            "Vận đơn này chưa ghi nhận hoàn. Đơn shop đã hoàn từ mã khác — "
+            "xác nhận chỉ tính mã EMS / mã tham chiếu này."
+        )
+    else:
+        msg = "EMS đã báo đơn hoàn — shop chưa xác nhận, có thể xác nhận đã nhận hàng."
+        if not order:
+            msg += " (Chưa có đơn shop trên web — chỉ ghi nhận trên vận đơn EMS.)"
     return _row(
         order_code=code or None,
         order_id=order.id if order else record.order_id,
@@ -1284,35 +1290,16 @@ def validate_shop_return_confirm(order: Order) -> tuple[str, str] | None:
     return None
 
 
-def apply_shop_return_received_on_ems_record(
-    db: Session,
-    record: EmsShippingRecord,
-    *,
-    admin_id: int,
-    note: str | None = None,
-) -> None:
-    """Ghi nhận shop đã nhận hoàn trên vận đơn EMS; cập nhật đơn shop nếu có và hợp lệ."""
-    now = datetime.now()
-    if record.order_id:
-        order = db.query(Order).filter(Order.id == record.order_id).first()
-        if order and validate_shop_return_confirm(order) is None:
-            apply_shop_return_received_on_order(db, order, admin_id=admin_id, note=note)
-            return
-    record.shop_return_received_at = now
-    record.order_status = OrderStatus.RETURNED.value
-    record.sync_message = RETURN_SHOP_RECEIVED_LABEL
-
-
-def apply_shop_return_received_on_order(
+def _apply_order_return_fields(
     db: Session,
     order: Order,
     *,
     admin_id: int,
-    note: str | None = None,
+    note: str | None,
+    now: datetime,
 ) -> None:
-    """Cập nhật đơn + EMS — không commit (dùng trong bulk)."""
+    """Cập nhật trạng thái đơn shop (affiliate, tồn). Không đụng vận đơn khác."""
     old_status = getattr(order.status, "value", order.status)
-    now = datetime.now()
     order.status = OrderStatus.RETURNED.value
     order.returned_at = now
     if note:
@@ -1326,15 +1313,49 @@ def apply_shop_return_received_on_order(
     sync_warehouse_stock_on_status_change(db, order, old_status, OrderStatus.RETURNED.value)
     affiliate_svc.handle_order_status_change(db, order, old_status, OrderStatus.RETURNED.value)
 
+
+def _stamp_ems_shop_return(record: EmsShippingRecord, *, now: datetime) -> None:
+    record.shop_return_received_at = now
+    record.order_status = OrderStatus.RETURNED.value
+    record.sync_message = RETURN_SHOP_RECEIVED_LABEL
+
+
+def apply_shop_return_received_on_ems_record(
+    db: Session,
+    record: EmsShippingRecord,
+    *,
+    admin_id: int,
+    note: str | None = None,
+) -> None:
+    """Ghi nhận đúng vận đơn đã khớp mã EMS / tham chiếu. Không kéo các vận đơn cùng mã đơn."""
+    now = datetime.now()
+    _stamp_ems_shop_return(record, now=now)
+    if not record.order_id:
+        return
+    order = db.query(Order).filter(Order.id == record.order_id).first()
+    if order is None or validate_shop_return_confirm(order) is not None:
+        return
+    _apply_order_return_fields(db, order, admin_id=admin_id, note=note, now=now)
+
+
+def apply_shop_return_received_on_order(
+    db: Session,
+    order: Order,
+    *,
+    admin_id: int,
+    note: str | None = None,
+) -> None:
+    """Xác nhận từ trang đơn — cập nhật đơn và mọi vận đơn đã gắn đơn đó."""
+    now = datetime.now()
+    _apply_order_return_fields(db, order, admin_id=admin_id, note=note, now=now)
+
     ems_records = (
         db.query(EmsShippingRecord)
         .filter(EmsShippingRecord.order_id == order.id)
         .all()
     )
     for record in ems_records:
-        record.shop_return_received_at = now
-        record.order_status = OrderStatus.RETURNED.value
-        record.sync_message = RETURN_SHOP_RECEIVED_LABEL
+        _stamp_ems_shop_return(record, now=now)
 
 
 def bulk_confirm_shop_returns(

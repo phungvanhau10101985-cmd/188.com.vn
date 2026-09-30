@@ -107,13 +107,12 @@ def build_freight_settlement_sample_xlsx() -> tuple[bytes, str]:
 
 
 def build_shop_return_confirm_sample_xlsx() -> tuple[bytes, str]:
-    """Xác nhận đơn hoàn — mỗi dòng một mã EMS / tham chiếu / DHxxx."""
+    """Xác nhận đơn hoàn — mỗi dòng một mã EMS hoặc mã tham chiếu."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Xac nhan hoan"
-    _bold_header_row(ws, 1, ["Mã (EMS / tham chiếu / DHxxx)"])
+    _bold_header_row(ws, 1, ["Mã EMS hoặc mã tham chiếu"])
     ws.append(["EE123456789VN"])
-    ws.append(["MA_THAM_CHIEU_A"])
-    ws.append(["DH131"])
+    ws.append(["H11022607"])
     ws.column_dimensions["A"].width = 28
     return _workbook_to_bytes(wb), "xac_nhan_don_hoan_mau.xlsx"

@@ -1,4 +1,7 @@
-"""Xác nhận đơn hoàn đã trả shop — nhập mã DH / mã EMS / mã tham chiếu."""
+"""Xác nhận đơn hoàn đã trả shop — chỉ mã EMS hoặc mã tham chiếu.
+
+Mã đơn shop (DH/DC) chỉ để xem trên kết quả, không dùng làm khóa đối chiếu.
+"""
 
 from __future__ import annotations
 
@@ -16,73 +19,67 @@ from app.services.ems_shipment_import import (
     looks_like_recipient_not_sku,
     warehouse_sku_from_col_h_cell,
 )
-from app import crud
 from app.services.shipping_operations import (
     _is_ems_return_pending_shop,
     bulk_confirm_shop_returns,
-    find_ems_record_by_token,
-    order_has_ems_return_marker,
+    find_ems_record_by_ems_or_reference,
     preview_shop_returns,
 )
 
-_ORDER_CODE_FULL_RE = re.compile(r"^DH\d+$", re.IGNORECASE)
-_ORDER_CODE_SEARCH_RE = re.compile(r"\b(DH\d+)\b", re.IGNORECASE)
+_SHOP_ORDER_CODE_RE = re.compile(r"^(?:DH|DC)\d+$", re.IGNORECASE)
 _CODE_SPLIT_RE = re.compile(r"[\s,;|\t]+")
 
 
-def normalize_shop_order_code(raw: str) -> Optional[str]:
+def shop_order_code_token(raw: str) -> Optional[str]:
+    """Mã đơn shop (DH/DC) — chỉ để nhận diện, không dùng làm khóa đối chiếu."""
     text = (raw or "").strip().upper()
-    if not text:
-        return None
-    if _ORDER_CODE_FULL_RE.match(text):
+    if _SHOP_ORDER_CODE_RE.fullmatch(text):
         return text
-    match = _ORDER_CODE_SEARCH_RE.search(text)
-    return match.group(1).upper() if match else None
+    return None
 
 
 def resolve_shop_return_input(
     db: Session,
     raw: str,
-) -> tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str], bool]:
     """
-    Trả (order_code shop, lỗi).
-    Nhận: DHxxx/DCxxx/H… | mã EMS | mã tham chiếu cột A | mã đơn trên dòng EMS.
-    Vận đơn EMS không gắn DHxxx → (None, None); bước preview/confirm dựa trên trạng thái EMS.
+    Trả (mã đơn để xem, lỗi, đã khớp vận đơn).
+
+    Chỉ khớp mã EMS hoặc mã tham chiếu. Mã đơn DH/DC không phải khóa đối chiếu.
     """
     text = (raw or "").strip()
     if not text:
-        return None, "Mã trống."
+        return None, "Mã trống — nhập mã EMS hoặc mã tham chiếu.", False
 
-    dh = normalize_shop_order_code(text)
-    if dh:
-        return dh, None
-
-    record = find_ems_record_by_token(db, text)
+    record = find_ems_record_by_ems_or_reference(db, text)
     if record:
-        order_code = (record.order_code or "").strip().upper()
-        if order_code:
-            return order_code, None
-
-        if record.order_id:
+        order_code = (record.order_code or "").strip().upper() or None
+        if not order_code and record.order_id:
             order = db.query(Order).filter(Order.id == record.order_id).first()
             if order and order.order_code:
-                return order.order_code.strip().upper(), None
+                order_code = order.order_code.strip().upper()
+        return order_code, None, True
 
-        # Không gắn đơn shop — vẫn cho phép tra/xác nhận theo mã EMS nếu EMS đã báo hoàn.
-        return None, None
-
-    order = crud.order.get_order_by_code(db, text)
-    if order and order.order_code:
-        return order.order_code.strip().upper(), None
+    shop_code = shop_order_code_token(text)
+    if shop_code:
+        return (
+            None,
+            (
+                f"«{shop_code}» là mã đơn — chỉ để xem. "
+                "Nhập mã EMS hoặc mã tham chiếu của shop để xác nhận hoàn."
+            ),
+            False,
+        )
 
     return (
         None,
-        f"Không tìm thấy «{text[:40]}» trong bảng vận chuyển EMS (mã EMS / tham chiếu / mã đơn H·DC·DH…).",
+        f"Không tìm thấy «{text[:40]}» theo mã EMS hoặc mã tham chiếu.",
+        False,
     )
 
 
 def _entry_from_raw(db: Session, *, row_number: int, raw: str) -> dict[str, Any]:
-    order_code, resolve_error = resolve_shop_return_input(db, raw)
+    order_code, resolve_error, _matched = resolve_shop_return_input(db, raw)
     return {
         "row_number": row_number,
         "raw": raw,
@@ -107,8 +104,8 @@ def _resolve_cell_to_entry(db: Session, *, row_idx: int, cell_text: str) -> Opti
     text = cell_text.strip()
     if not text:
         return None
-    order_code, resolve_error = resolve_shop_return_input(db, text)
-    if order_code or resolve_error:
+    order_code, resolve_error, matched = resolve_shop_return_input(db, text)
+    if matched or resolve_error:
         return {
             "row_number": row_idx,
             "raw": text,
@@ -154,7 +151,7 @@ def parse_order_codes_from_excel(
 
     if not entries:
         warnings.append(
-            "Không có dòng hợp lệ (cột mã đơn DHxxx, mã EMS hoặc mã tham chiếu vận đơn)."
+            "Không có dòng hợp lệ (mã EMS hoặc mã tham chiếu). Mã đơn shop không dùng để đối chiếu."
         )
     return entries, warnings
 
@@ -185,87 +182,74 @@ def _sku_from_order(db: Session, order: Order) -> tuple[Optional[str], str]:
 
 
 def resolve_warehouse_sku_for_return_intake(db: Session, token: str) -> dict[str, Any]:
-    """
-    Trích mã kho (cột H file gui ems — trước dấu «-» đầu) từ mã EMS / tham chiếu / DHxxx.
-    """
+    """Trích mã kho cột H từ mã EMS hoặc mã tham chiếu. Mã đơn không dùng để tra."""
     text = (token or "").strip()
     if not text:
         return {"ok": False, "sku": None, "order_code": None, "source": None, "message": "Mã trống."}
 
-    record = find_ems_record_by_token(db, text)
+    shop_code = shop_order_code_token(text)
+    if shop_code:
+        return {
+            "ok": False,
+            "sku": None,
+            "order_code": shop_code,
+            "source": None,
+            "message": f"«{shop_code}» là mã đơn — chỉ để xem. Nhập mã EMS hoặc mã tham chiếu.",
+        }
+
+    record = find_ems_record_by_ems_or_reference(db, text)
     order_code: Optional[str] = None
 
-    if record is not None:
-        if not _is_ems_return_pending_shop(ems_status=record.ems_status):
-            ems_label = (record.ems_status or "").strip() or "—"
-            return {
-                "ok": False,
-                "sku": None,
-                "order_code": (record.order_code or "").strip().upper() or None,
-                "source": None,
-                "message": (
-                    f"EMS chưa báo đơn hoàn (trạng thái: «{ems_label}»). "
-                    "Chỉ tra mã SKU khi EMS đã phát hoàn / chuyển hoàn."
-                ),
-            }
+    if record is None:
+        return {
+            "ok": False,
+            "sku": None,
+            "order_code": None,
+            "source": None,
+            "message": f"Không tìm thấy «{text[:40]}» theo mã EMS hoặc mã tham chiếu.",
+        }
 
-        order_code = (record.order_code or "").strip().upper() or None
-        if not order_code and record.order_id:
-            order = db.query(Order).filter(Order.id == record.order_id).first()
-            if order and order.order_code:
-                order_code = order.order_code.strip().upper()
+    if not _is_ems_return_pending_shop(ems_status=record.ems_status):
+        ems_label = (record.ems_status or "").strip() or "—"
+        return {
+            "ok": False,
+            "sku": None,
+            "order_code": (record.order_code or "").strip().upper() or None,
+            "source": None,
+            "message": (
+                f"EMS chưa báo đơn hoàn (trạng thái: «{ems_label}»). "
+                "Chỉ tra mã SKU khi EMS đã phát hoàn / chuyển hoàn."
+            ),
+        }
 
-        pc = _warehouse_sku_from_ems_record(record)
-        if pc:
-            return {
-                "ok": True,
-                "sku": pc,
-                "order_code": order_code,
-                "source": "ems_column_h",
-                "message": None,
-            }
+    order_code = (record.order_code or "").strip().upper() or None
+    if not order_code and record.order_id:
+        order = db.query(Order).filter(Order.id == record.order_id).first()
+        if order and order.order_code:
+            order_code = order.order_code.strip().upper()
 
-        if record.order_id:
-            order = db.query(Order).filter(Order.id == record.order_id).first()
-            if order:
-                sku, src = _sku_from_order(db, order)
-                if sku:
-                    return {
-                        "ok": True,
-                        "sku": sku,
-                        "order_code": order_code or (order.order_code or "").strip().upper() or None,
-                        "source": src,
-                        "message": None,
-                    }
+    pc = _warehouse_sku_from_ems_record(record)
+    if pc:
+        return {
+            "ok": True,
+            "sku": pc,
+            "order_code": order_code,
+            "source": "ems_column_h",
+            "message": None,
+        }
 
-    dh = normalize_shop_order_code(text)
-    if dh:
-        order = db.query(Order).filter(Order.order_code.ilike(dh)).first()
+    if record.order_id:
+        order = db.query(Order).filter(Order.id == record.order_id).first()
         if order:
-            if not order_has_ems_return_marker(db, order.id):
-                return {
-                    "ok": False,
-                    "sku": None,
-                    "order_code": order.order_code.strip().upper(),
-                    "source": None,
-                    "message": "EMS chưa báo đơn hoàn — chỉ tra mã SKU khi EMS đã phát hoàn / chuyển hoàn.",
-                }
             sku, src = _sku_from_order(db, order)
             if sku:
                 return {
                     "ok": True,
                     "sku": sku,
-                    "order_code": order.order_code.strip().upper(),
+                    "order_code": order_code or (order.order_code or "").strip().upper() or None,
                     "source": src,
                     "message": None,
                 }
-            return {
-                "ok": False,
-                "sku": None,
-                "order_code": order.order_code.strip().upper(),
-                "source": None,
-                "message": f"Đơn {dh} không có dòng sản phẩm để trích mã SKU.",
-            }
 
     return {
         "ok": False,
