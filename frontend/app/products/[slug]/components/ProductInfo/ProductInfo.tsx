@@ -471,12 +471,14 @@ export default function ProductInfo({
           <p className="text-sm text-gray-600 mb-2">Thương hiệu: {displayableBrandOrOrigin(product.brand_name)}</p>
         )}
         
-        <p className="text-xs text-gray-500 mb-2">
-          Mã SP:{' '}
-          <span className="copy-code-product font-mono text-gray-700">
-            {product.code?.trim() || product.product_id || '—'}
-          </span>
-        </p>
+        {!compactMobile && (
+          <p className="text-xs text-gray-500 mb-2">
+            Mã SP:{' '}
+            <span className="copy-code-product font-mono text-gray-700">
+              {product.code?.trim() || product.product_id || '—'}
+            </span>
+          </p>
+        )}
 
         <div className={`flex items-center space-x-3 mb-1 ${compactMobile ? 'text-xs' : 'text-sm'}`}>
           <div className="flex items-center space-x-1">

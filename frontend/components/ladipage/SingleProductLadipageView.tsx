@@ -291,6 +291,8 @@ export default function SingleProductLadipageView({
     </>
   );
 
+  const productCode = (product.code?.trim() || product.product_id || '').trim();
+
   return (
     <ProductReviewsProvider productId={product.id}>
       {/* Mobile: gallery gọn + badge/blurb (không trùng tên SP) + buy-box */}
@@ -304,12 +306,14 @@ export default function SingleProductLadipageView({
           />
         </SectionErrorBoundary>
 
-        {/* Badge + copy/share: cùng hàng trên mobile */}
+        {/* Mã SP + copy/share: cùng hàng trên mobile */}
         <div className="px-4 pt-2.5 pb-1">
           <div className="relative z-[1] flex items-center justify-between gap-1.5 max-[359px]:gap-1 max-[359px]:[&_button]:px-1.5 max-[359px]:[&_button]:text-[10px]">
-            <p className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-orange-200 bg-orange-50/80 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-500" aria-hidden />
-              <span className="whitespace-nowrap">Gợi ý dành cho bạn</span>
+            <p className="min-w-0 truncate text-xs leading-tight text-gray-600">
+              Mã SP:{' '}
+              <span className="copy-code-product font-mono font-medium text-gray-900">
+                {productCode || '—'}
+              </span>
             </p>
             <ProductShareActionButtons
               shareTitle={product.name}
