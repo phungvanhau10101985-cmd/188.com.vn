@@ -47,7 +47,10 @@ export const IMPORT_1688_EXCEL_COLUMNS: ReadonlyArray<readonly [string, string]>
   ['product_info', 'Thông tin sản phẩm'],
   ['chinese_name', 'Tên tiếng trung'],
   ['shop_name_chinese', 'Shop Trung Quốc'],
+  ['Slug', 'Slug'],
   ['listed', 'Trong danh sách (1=import, 0=xóa DB)'],
+  ['cost_cny', 'Giá gốc tệ'],
+  ['cost_vnd', 'Giá Việt Nam'],
 ];
 
 function jsonExcelCell(value: unknown): string {
@@ -94,6 +97,19 @@ function excelStr(v: unknown): string {
   return '';
 }
 
+/** Ô giá nhập: trống nếu chưa có số. 0 là giá hợp lệ. */
+function excelCostCell(v: unknown): string | number {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
+    return Math.abs(v - Math.round(v)) < 1e-9 ? Math.round(v) : v;
+  }
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number.parseFloat(v.replace(/\s/g, '').replace(/,/g, ''));
+    if (Number.isFinite(n) && n >= 0) return Math.abs(n - Math.round(n)) < 1e-9 ? Math.round(n) : n;
+  }
+  return '';
+}
+
 function excelNum(v: unknown, fallback: number): number {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string' && v.trim()) {
@@ -137,6 +153,11 @@ export function excelExportRowFromProductData(
 
   const pd = productData;
   const styleCell = styleCellFromPd(pd);
+  const costVnd = excelCostCell(pd.cost_vnd);
+  let costCny = excelCostCell(pd.cost_cny);
+  if (costVnd === '' && costCny === '') {
+    costCny = excelCostCell(pd.pro_lower_price);
+  }
 
   return {
     id: pd.product_id != null ? String(pd.product_id) : '',
@@ -178,6 +199,9 @@ export function excelExportRowFromProductData(
     product_info: jsonExcelCell(pd.product_info ?? {}),
     chinese_name: excelStr(pd.chinese_name),
     shop_name_chinese: excelStr(pd.shop_name_chinese),
+    Slug: excelStr(pd.slug),
     listed: depositRequireToExcelInt(pd.is_active, 1),
+    cost_cny: costVnd === '' ? costCny : '',
+    cost_vnd: costVnd,
   };
 }

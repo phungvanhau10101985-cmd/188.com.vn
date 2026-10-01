@@ -18,9 +18,83 @@ def import_cost_is_set(value: Any) -> bool:
     if value is None or value == "":
         return False
     try:
-        return float(value) >= 0
+        amount = float(value)
     except (TypeError, ValueError):
         return False
+    if amount != amount:  # NaN
+        return False
+    return amount >= 0
+
+
+def parse_excel_import_cost(value: Any) -> Optional[float]:
+    """Ô giá nhập trên Excel. Trống → None. Âm hoặc không phải số → ValueError."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            return None
+        if value < 0:
+            raise ValueError("Giá nhập không được âm")
+        return float(value)
+    if isinstance(value, int):
+        if value < 0:
+            raise ValueError("Giá nhập không được âm")
+        return float(value)
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null", "-"}:
+        return None
+    compact = text.replace(" ", "").replace("₫", "").replace("đ", "").replace("¥", "")
+    if "," in compact and "." in compact:
+        compact = compact.replace(",", "")
+    elif "," in compact:
+        tail = compact.split(",")[-1]
+        compact = compact.replace(",", "") if len(tail) == 3 else compact.replace(",", ".")
+    try:
+        amount = float(compact)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Giá nhập không đọc được") from exc
+    if amount != amount or amount in (float("inf"), float("-inf")):
+        return None
+    if amount < 0:
+        raise ValueError("Giá nhập không được âm")
+    return amount
+
+
+_EXCEL_COST_CNY_KEYS = ("cost_cny", "Giá gốc tệ", "Gia goc te")
+_EXCEL_COST_VND_KEYS = ("cost_vnd", "Giá Việt Nam", "Gia Viet Nam")
+
+
+def _excel_row_key(row: dict, keys: tuple[str, ...]) -> Optional[str]:
+    folded = {str(col).strip().casefold(): col for col in row.keys() if col is not None}
+    for key in keys:
+        if key in row:
+            return key
+        found = folded.get(key.strip().casefold())
+        if found is not None:
+            return str(found)
+    return None
+
+
+def excel_row_import_costs(row: dict) -> dict:
+    """
+    Đọc hai cột giá nhập nếu file có chúng.
+    Cột thiếu thì không trả key — import không xóa giá đang lưu.
+    Ô trống → None. Cả hai ô đều có số thì từ chối.
+    """
+    if not isinstance(row, dict):
+        return {}
+    cny_key = _excel_row_key(row, _EXCEL_COST_CNY_KEYS)
+    vnd_key = _excel_row_key(row, _EXCEL_COST_VND_KEYS)
+    if cny_key is None and vnd_key is None:
+        return {}
+    out: dict = {}
+    if cny_key is not None:
+        out["cost_cny"] = parse_excel_import_cost(row.get(cny_key))
+    if vnd_key is not None:
+        out["cost_vnd"] = parse_excel_import_cost(row.get(vnd_key))
+    if import_cost_is_set(out.get("cost_cny")) and import_cost_is_set(out.get("cost_vnd")):
+        raise ValueError("Chỉ điền một cột giá nhập: giá gốc tệ hoặc giá Việt Nam.")
+    return out
 
 
 def looks_like_china_source(origin: Optional[str], link: Optional[str]) -> bool:

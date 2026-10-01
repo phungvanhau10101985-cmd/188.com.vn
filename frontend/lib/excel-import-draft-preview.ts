@@ -1,5 +1,5 @@
 /**
- * Khớp backend: `import_1688` export draft + `sample_import_template` (39 cột: đến Shop Trung Quốc).
+ * Khớp backend: export draft cào, export danh sách sản phẩm và sample_import_template.
  */
 export type DraftExcelColumnKey = (typeof DRAFT_IMPORT_EXCEL_COLUMNS)[number]['key'];
 
@@ -83,11 +83,14 @@ export const DRAFT_IMPORT_EXCEL_COLUMNS = [
   },
   { key: 'chinese_name', labelVi: 'Tên tiếng trung', sampleHint: '商务正装皮鞋男牛津鞋…' },
   { key: 'shop_name_chinese', labelVi: 'Shop Trung Quốc', sampleHint: '义乌市××商行' },
+  { key: 'Slug', labelVi: 'Slug', sampleHint: '' },
   {
     key: 'listed',
     labelVi: 'Trong danh sách (1=import, 0=xóa DB)',
     sampleHint: '1',
   },
+  { key: 'cost_cny', labelVi: 'Giá gốc tệ', sampleHint: '88.5' },
+  { key: 'cost_vnd', labelVi: 'Giá Việt Nam', sampleHint: '' },
 ] as const;
 
 function colLetter(index1Based: number): string {
@@ -182,7 +185,10 @@ export function productDataToDraftExcelRow(
     product_info: j(p.product_info),
     chinese_name: String((p as Record<string, unknown>).chinese_name ?? ''),
     shop_name_chinese: String((p as Record<string, unknown>).shop_name_chinese ?? ''),
+    Slug: String((p as Record<string, unknown>).slug ?? ''),
     listed: depositRequireToExcelCell((p as Record<string, unknown>).is_active),
+    cost_cny: String((p as Record<string, unknown>).cost_cny ?? ''),
+    cost_vnd: String((p as Record<string, unknown>).cost_vnd ?? ''),
   };
 }
 

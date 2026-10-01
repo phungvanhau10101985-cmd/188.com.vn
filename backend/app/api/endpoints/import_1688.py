@@ -280,93 +280,14 @@ def _infer_import_source_for_url(norm_url: str, requested_source: Optional[str] 
 
 
 def _excel_export_columns_and_vi_headers() -> Tuple[List[str], List[str]]:
-    """
-    Trùng thứ tự với template / file ~40 cột (sau `product_info` thêm tên tiếng Trung, shop Trung Quốc, listed).
-    """
-    columns = [
-        "id",
-        "sku",
-        "origin",
-        "brand",
-        "name",
-        "pro_content",
-        "price",
-        "shop_name",
-        "shop_id",
-        "pro_lower_price",
-        "pro_high_price",
-        "rating_group_id",
-        "question_group_id",
-        "sizes",
-        "Variant",
-        "gallery_images",
-        "detail_images",
-        "product_url",
-        "video_url",
-        "main_image",
-        "likes_count",
-        "purchases_count",
-        "reviews_count",
-        "questions_count",
-        "rating_score",
-        "stock_quantity",
-        "deposit_required",
-        "Main Category",
-        "Subcategory",
-        "Sub-subcategory",
-        "Material",
-        "Style",
-        "Color",
-        "Occasion",
-        "Features",
-        "Weight",
-        "product_info",
-        "chinese_name",
-        "shop_name_chinese",
-        "listed",
-    ]
-    vietnamese_headers = [
-        "Id sản phẩm",
-        "Mã sản phẩm",
-        "Xuất xứ",
-        "Thương hiệu",
-        "Tên",
-        "Mô tả sản phẩm",
-        "Giá",
-        "Tên shop",
-        "Shop id",
-        "Sp giá thấp hơn",
-        "Sp giá cao hơn",
-        "Nhóm đánh giá",
-        "Nhóm câu hỏi",
-        "Size",
-        "Biến thể",
-        "Thư viện ảnh",
-        "Nội dung",
-        "Link mặc định",
-        "Link Video",
-        "Link img",
-        "Thích",
-        "Mua",
-        "Lượt đánh giá",
-        "Lượt hỏi",
-        "Điểm đánh giá",
-        "Số lượng có thể mua",
-        "Cần đặt cọc",
-        "Danh mục cấp 1",
-        "Danh mục cấp 2",
-        "Danh mục cấp 3",
-        "Chất liệu",
-        "Kiểu dáng",
-        "màu sắc",
-        "Dịp",
-        "Tính năng",
-        "Trọng lượng",
-        "Thông tin sản phẩm",
-        "Tên tiếng trung",
-        "Shop Trung Quốc",
-        "Trong danh sách (1=import, 0=xóa DB)",
-    ]
+    """Cùng thứ tự cột với export danh sách sản phẩm và file mẫu import."""
+    from app.services.excel_importer import (
+        PRODUCT_EXCEL_EXPORT_COLUMNS,
+        PRODUCT_EXCEL_VIETNAMESE_HEADERS,
+    )
+
+    columns = list(PRODUCT_EXCEL_EXPORT_COLUMNS)
+    vietnamese_headers = [PRODUCT_EXCEL_VIETNAMESE_HEADERS[col] for col in columns]
     return columns, vietnamese_headers
 
 
@@ -808,6 +729,20 @@ def _draft_product_data_for_excel_export(
     return dict(draft.product_data or {})
 
 
+def _excel_import_cost_cell(product_data: Dict[str, Any], field: str) -> Any:
+    """Ô giá nhập trên file cào. Chưa có cost_cny thì lấy số tệ đã cào (pro_lower_price)."""
+    from app.services.product_import_cost import import_cost_is_set, scraped_cny_amount
+
+    raw = product_data.get(field)
+    if import_cost_is_set(raw):
+        return raw
+    if field == "cost_cny" and not import_cost_is_set(product_data.get("cost_vnd")):
+        fallback = scraped_cny_amount(product_data.get("pro_lower_price"))
+        if fallback is not None:
+            return fallback
+    return ""
+
+
 def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
     def j(value: Any) -> str:
         if value is None:
@@ -869,9 +804,12 @@ def _excel_row_from_product(product_data: Dict[str, Any]) -> Dict[str, Any]:
         "product_info": j(product_data.get("product_info", {})),
         "chinese_name": product_data.get("chinese_name", "") or "",
         "shop_name_chinese": product_data.get("shop_name_chinese", "") or "",
+        "Slug": product_data.get("slug", "") or "",
         "listed": product_crud.deposit_require_to_excel_int(
             product_data.get("is_active", True), default=1
         ),
+        "cost_cny": _excel_import_cost_cell(product_data, "cost_cny"),
+        "cost_vnd": _excel_import_cost_cell(product_data, "cost_vnd"),
     }
 
 

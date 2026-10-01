@@ -5,12 +5,16 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.crud.product import product_to_excel_row
+from app.crud.product import excel_row_to_product, product_to_excel_row
 from app.schemas.product import Product, ProductUpdate
-from app.services.excel_importer import PRODUCT_EXCEL_EXPORT_COLUMNS
+from app.services.excel_importer import (
+    PRODUCT_EXCEL_EXPORT_COLUMNS,
+    PRODUCT_EXCEL_VIETNAMESE_HEADERS,
+)
 from app.services.product_import_cost import (
     assert_single_import_cost,
     cost_cny_backfill_value,
+    excel_row_import_costs,
     scraped_cny_amount,
     stamp_scraped_cost_cny,
 )
@@ -161,3 +165,55 @@ def test_catalog_export_appends_costs_and_keeps_cny_column_blank():
     assert row["pro_high_price"] == ""
     assert row["cost_cny"] == 88.5
     assert row["cost_vnd"] == ""
+
+
+def test_excel_roundtrip_columns_include_both_import_costs():
+    assert [PRODUCT_EXCEL_VIETNAMESE_HEADERS[col] for col in PRODUCT_EXCEL_EXPORT_COLUMNS][-2:] == [
+        "Giá gốc tệ",
+        "Giá Việt Nam",
+    ]
+    from app.api.endpoints.import_1688 import (
+        _excel_export_columns_and_vi_headers,
+        _excel_row_from_product,
+    )
+
+    columns, headers = _excel_export_columns_and_vi_headers()
+    assert columns == PRODUCT_EXCEL_EXPORT_COLUMNS
+    assert headers == [PRODUCT_EXCEL_VIETNAMESE_HEADERS[col] for col in columns]
+    scraped = _excel_row_from_product(
+        {
+            "product_id": "P1",
+            "name": "Giày",
+            "price": 250000,
+            "pro_lower_price": "88.5",
+        }
+    )
+    assert scraped["cost_cny"] == 88.5
+    assert scraped["cost_vnd"] == ""
+    assert scraped["pro_lower_price"] == ""
+    blocked = _excel_row_from_product(
+        {"product_id": "P2", "cost_vnd": 0, "pro_lower_price": "10"}
+    )
+    assert blocked["cost_cny"] == ""
+    assert blocked["cost_vnd"] == 0
+
+
+def test_excel_import_reads_cost_columns_and_rejects_both():
+    kept = excel_row_to_product({"id": "A100a188B0001", "name": "Giày"})
+    assert "cost_cny" not in kept
+    assert "cost_vnd" not in kept
+
+    one = excel_row_to_product(
+        {"id": "A100a188B0001", "name": "Giày", "cost_cny": 88.5, "cost_vnd": ""}
+    )
+    assert one["cost_cny"] == 88.5
+    assert one["cost_vnd"] is None
+    assert one["price"] == 0
+
+    vi = excel_row_import_costs({"Giá gốc tệ": None, "Giá Việt Nam": "150000"})
+    assert vi == {"cost_cny": None, "cost_vnd": 150000.0}
+
+    with pytest.raises(ValueError, match="một cột"):
+        excel_row_to_product(
+            {"id": "A100a188B0001", "name": "Giày", "cost_cny": 10, "cost_vnd": 1000}
+        )

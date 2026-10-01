@@ -118,8 +118,8 @@ def _resolve_export_dir() -> Path:
     backend_root = Path(__file__).resolve().parents[2]
     return (backend_root / settings.UPLOAD_DIR).resolve()
 
-# Thứ tự cột export Excel / đồng bộ Google Sheet catalog (43 cột).
-# cost_cny / cost_vnd nối cuối — importer catalog không đọc hai cột này.
+# Thứ tự cột export Excel / file mẫu / đồng bộ Google Sheet catalog.
+# cost_cny / cost_vnd nối cuối. Import đọc hai cột này (ô trống = xóa giá nhập đang lưu).
 PRODUCT_EXCEL_EXPORT_COLUMNS = [
     'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
     'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
@@ -197,8 +197,9 @@ class ExcelImporter:
         should_cancel: Optional[Callable[[], bool]] = None,
     ) -> Dict[str, Any]:
         """
-        Import sản phẩm từ file Excel (~40 cột mẫu / ~41 cột export: thêm «listed» sau Slug).
+        Import sản phẩm từ file Excel cùng bộ cột với export (kể cả Slug, Giá gốc tệ, Giá Việt Nam).
         Cột listed: 1 = thêm mới/cập nhật; 0 = xóa bản ghi sản phẩm khỏi DB (nếu tồn tại).
+        Giá gốc tệ / Giá Việt Nam: chỉ một cột có số. Ô trống thì xóa giá nhập tương ứng. Slug trên file bị bỏ qua, hệ thống tự tạo.
         Sau AK: tên TQ / shop TQ; row 2 nhãn VI.
         Slug được tự động tạo
         Template thường gặp: hàng 1 = tên cột (id, sku, ...), hàng 2 = nhãn tiếng Việt, dữ liệu từ hàng 3.
@@ -592,7 +593,7 @@ class ExcelImporter:
     
     def create_sample_template(self) -> Dict[str, Any]:
         """
-        Tạo file Excel mẫu (40 cột tới «listed»): ... AK product_info; AL-AM tiếng Trung; không Slug (tự tạo).
+        Tạo file Excel mẫu cùng cột với export (Slug để trống — import tự tạo; cuối file là giá gốc tệ và giá Việt Nam).
         Cột «listed» = 1 mặc định; ghi 0 để khi import xóa bản ghi sản phẩm khỏi DB theo cột id (cần đã tồn tại).
         """
         try:
@@ -644,10 +645,13 @@ class ExcelImporter:
                 'product_info': sample_product_info,  # Cột AK
                 'chinese_name': '商务正装皮鞋男牛津鞋真皮尖头增高',
                 'shop_name_chinese': '示例义乌商行',
+                'Slug': '',
                 'listed': 1,
+                'cost_cny': '',
+                'cost_vnd': '',
             }]
             
-            df = pd.DataFrame(sample_data)
+            df = pd.DataFrame(sample_data, columns=PRODUCT_EXCEL_EXPORT_COLUMNS)
             
             template_dir = os.path.join("app", "static", "templates")
             os.makedirs(template_dir, exist_ok=True)
@@ -659,21 +663,9 @@ class ExcelImporter:
                 workbook = writer.book
                 worksheet = writer.sheets['Products']
                 
-                # 40 cột import mẫu: tới shop TQ + listed; không Slug
                 worksheet.insert_rows(2)
                 vietnamese_headers = [
-                    'Id sản phẩm', 'Mã sản phẩm', 'Xuất xứ', 'Thương hiệu', 'Tên',
-                    'Mô tả sản phẩm', 'Giá', 'Tên shop', 'Shop id', 'Sp giá thấp hơn',
-                    'Sp giá cao hơn', 'Nhóm đánh giá', 'Nhóm câu hỏi', 'Size',
-                    'Biến thể', 'Thư viện ảnh', 'Nội dung', 'Link mặc định',
-                    'Link Video', 'Link img', 'Thích', 'Mua', 'Lượt đánh giá',
-                    'Lượt hỏi', 'Điểm đánh giá', 'Số lượng có thể mua', 'Cần đặt cọc',
-                    'Danh mục cấp 1', 'Danh mục cấp 2', 'Danh mục cấp 3', 'Chất liệu',
-                    'Kiểu dáng', 'màu sắc', 'Dịp', 'Tính năng', 'Trọng lượng',
-                    'Thông tin sản phẩm',
-                    'Tên tiếng trung',
-                    'Shop Trung Quốc',
-                    'Trong danh sách (1=import, 0=xóa DB)',
+                    PRODUCT_EXCEL_VIETNAMESE_HEADERS[col] for col in PRODUCT_EXCEL_EXPORT_COLUMNS
                 ]
                 
                 for col_idx, header in enumerate(vietnamese_headers, 1):
@@ -694,7 +686,7 @@ class ExcelImporter:
             
             logger.info(f"✅ Tạo template mẫu thành công: {filepath}")
             logger.info(
-                "📋 Cấu trúc: 40 cột, AK = product_info; AL-AM tiếng Trung; cột «listed» (1/0); slug tự tạo khi import."
+                "📋 Cấu trúc: cùng cột export, cuối file là Giá gốc tệ và Giá Việt Nam; slug tự tạo khi import."
             )
 
             return {
@@ -702,7 +694,7 @@ class ExcelImporter:
                 "filename": "sample_import_template.xlsx",
                 "filepath": filepath,
                 "download_url": "/static/templates/sample_import_template.xlsx",
-                "note": "Template 40 cột. «listed»=1 import bình thường; 0 = xóa sản phẩm khỏi DB (đã có id). «Cần đặt cọc» mặc định = 1.",
+                "note": "Template cùng cột với export. «listed»=1 import bình thường; 0 = xóa sản phẩm khỏi DB (đã có id). Chỉ điền một trong hai cột Giá gốc tệ / Giá Việt Nam. «Cần đặt cọc» mặc định = 1.",
             }
             
         except Exception as e:

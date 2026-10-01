@@ -14,7 +14,8 @@ cột G AK, khối L–O hay layout Excel đặt hàng cũ.
 
 - **category / subcategory / sub_subcategory**: tuỳ chọn — cột Main Category / Danh mục cấp 1–3 (file export đủ cột); bỏ qua ô nhãn mẫu «Danh mục cấp …».
 
-- **Giá Tệ** (hoặc `pro_lower_price` trên file export draft) → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`).
+- **Giá Tệ** (hoặc `pro_lower_price` trên file export draft; nếu ô đó trống thì dùng **Giá gốc tệ** / `cost_cny`) → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`).
+- **Giá gốc tệ** (`cost_cny`) và **Giá Việt Nam** (`cost_vnd`): ghi vào nháp nếu ô có số. Chỉ một trong hai cột được có số.
 
   Tỷ giá nền `LISTING_IMPORT_VND_PER_CNY`; cột `vnd_per_cny_used` / Tỷ giá ghi đè theo dòng nếu có.
 
@@ -68,7 +69,7 @@ _ws_re = re.compile(r"\s+")
 
 
 
-MAX_IMPORT_COL_1BASED = 40
+MAX_IMPORT_COL_1BASED = 48
 
 DATA_FIRST_ROW = 3
 
@@ -228,7 +229,14 @@ def _resolve_china_price_column_required(by_col: Dict[int, set[str]]) -> Optiona
     return None
 
 
+def _resolve_cost_cny_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(_norm_header(x) for x in ("cost_cny", "Giá gốc tệ", "gia goc te"))
+    return _first_col_matching(by_col, needles)
 
+
+def _resolve_cost_vnd_column(by_col: Dict[int, set[str]]) -> Optional[int]:
+    needles = frozenset(_norm_header(x) for x in ("cost_vnd", "Giá Việt Nam", "gia viet nam"))
+    return _first_col_matching(by_col, needles)
 
 
 def _resolve_optional_vnd_per_cny_column(by_col: Dict[int, set[str]]) -> Optional[int]:
@@ -627,6 +635,11 @@ def merge_import_excel_overlay_into_product_data(
 
         product_data["shop_name"] = str(sn).strip()
 
+    if "cost_cny" in overlay:
+        product_data["cost_cny"] = overlay.get("cost_cny")
+    if "cost_vnd" in overlay:
+        product_data["cost_vnd"] = overlay.get("cost_vnd")
+
     pl = overlay.get("pro_lower_price")
 
     if pl is not None and str(pl).strip() != "":
@@ -932,6 +945,8 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
             shop_cn_col = _resolve_compact_listing_shop_column(link_col, china_price_col, ch_name_col)
 
         vnd_optional_col = _resolve_optional_vnd_per_cny_column(label_by_col)
+        cost_cny_col = _resolve_cost_cny_column(label_by_col)
+        cost_vnd_col = _resolve_cost_vnd_column(label_by_col)
 
         base_vnd_rate = _default_listing_import_vnd_per_cny()
 
@@ -1046,6 +1061,11 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
 
 
             cny_cell = coord(china_price_col)
+            cost_cny_cell = coord(cost_cny_col) if cost_cny_col else None
+            cost_vnd_cell = coord(cost_vnd_col) if cost_vnd_col else None
+            if cny_cell is None or str(cny_cell).strip() == "":
+                if cost_cny_cell is not None and str(cost_cny_cell).strip() != "":
+                    cny_cell = cost_cny_cell
 
             if cny_cell is None or str(cny_cell).strip() == "":
 
@@ -1078,6 +1098,28 @@ def parse_link_import_excel(path: str | Path) -> Tuple[List[Dict[str, Any]], Lis
                 continue
 
             overlays["price"] = float(vnd_px)
+
+            from app.services.product_import_cost import parse_excel_import_cost
+
+            parsed_cost_cny = None
+            parsed_cost_vnd = None
+            try:
+                if cost_cny_col:
+                    parsed_cost_cny = parse_excel_import_cost(cost_cny_cell)
+                if cost_vnd_col:
+                    parsed_cost_vnd = parse_excel_import_cost(cost_vnd_cell)
+            except ValueError as exc:
+                skip.append(f"Dòng {excel_row}: {exc}.")
+                continue
+            if parsed_cost_cny is not None and parsed_cost_vnd is not None:
+                skip.append(
+                    f"Dòng {excel_row}: chỉ điền một cột giá nhập — Giá gốc tệ hoặc Giá Việt Nam."
+                )
+                continue
+            if parsed_cost_cny is not None:
+                overlays["cost_cny"] = parsed_cost_cny
+            if parsed_cost_vnd is not None:
+                overlays["cost_vnd"] = parsed_cost_vnd
 
             out.append({"excel_row": excel_row, "url": url.strip(), "overlays": overlays})
 

@@ -1424,6 +1424,9 @@ def excel_row_to_product(row: Dict) -> Dict:
             'is_active': bool(excel_import_listed),
             'created_at': datetime.now()
         }
+        from app.services.product_import_cost import excel_row_import_costs
+
+        product_data.update(excel_row_import_costs(row))
 
         normalize_product_data_image_urls_for_db(product_data)
 
@@ -1443,7 +1446,9 @@ def excel_row_to_product(row: Dict) -> Dict:
         logger.debug(f"   Features: {product_data['features']}")
         
         return product_data
-        
+
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"❌ Error converting Excel row: {str(e)}")
         import traceback
