@@ -118,7 +118,8 @@ def _resolve_export_dir() -> Path:
     backend_root = Path(__file__).resolve().parents[2]
     return (backend_root / settings.UPLOAD_DIR).resolve()
 
-# Thứ tự cột export Excel / đồng bộ Google Sheet catalog (41 cột)
+# Thứ tự cột export Excel / đồng bộ Google Sheet catalog (43 cột).
+# cost_cny / cost_vnd nối cuối — importer catalog không đọc hai cột này.
 PRODUCT_EXCEL_EXPORT_COLUMNS = [
     'id', 'sku', 'origin', 'brand', 'name', 'pro_content',
     'price', 'shop_name', 'shop_id', 'pro_lower_price', 'pro_high_price',
@@ -133,6 +134,8 @@ PRODUCT_EXCEL_EXPORT_COLUMNS = [
     'shop_name_chinese',
     'Slug',
     'listed',
+    'cost_cny',
+    'cost_vnd',
 ]
 
 PRODUCT_EXCEL_VIETNAMESE_HEADERS = {
@@ -177,6 +180,8 @@ PRODUCT_EXCEL_VIETNAMESE_HEADERS = {
     'shop_name_chinese': 'Shop Trung Quốc',
     'Slug': 'Slug',
     'listed': 'Trong danh sách (1=import, 0=xóa DB)',
+    'cost_cny': 'Giá gốc tệ',
+    'cost_vnd': 'Giá Việt Nam',
 }
 
 

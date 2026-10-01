@@ -432,6 +432,10 @@ export interface AdminProduct {
   name: string;
   slug?: string;
   price: number;
+  /** Giá nhập nhân dân tệ lúc cào — hàng Trung Quốc. */
+  cost_cny?: number | null;
+  /** Giá nhập đồng — hàng Việt Nam. */
+  cost_vnd?: number | null;
   brand_name?: string;
   category?: string;
   subcategory?: string;

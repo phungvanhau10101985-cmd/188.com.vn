@@ -1525,6 +1525,9 @@ def product_to_excel_row(product: Product) -> Dict:
             'Slug': slug_value,
             # 1 = đang hiển thị; 0 = đã ẩn (export trước khi xóa)
             'listed': deposit_require_to_excel_int(getattr(product, "is_active", True), default=1),
+            # Giá nhập — nối cuối file, không ghi vào pro_lower_price (cột đó để trống để nhập lại không tính lại giá bán).
+            'cost_cny': '' if getattr(product, 'cost_cny', None) is None else getattr(product, 'cost_cny'),
+            'cost_vnd': '' if getattr(product, 'cost_vnd', None) is None else getattr(product, 'cost_vnd'),
         }
         
         # Debug log
@@ -5656,6 +5659,14 @@ def update_product(db: Session, product_id: int, product_update: ProductUpdate):
             else product_update.dict(exclude_unset=True)
         )
         normalize_product_data_image_urls_for_db(update_data)
+
+        from app.services.product_import_cost import assert_single_import_cost
+
+        assert_single_import_cost(
+            existing_cny=db_product.cost_cny,
+            existing_vnd=db_product.cost_vnd,
+            update_data=update_data,
+        )
 
         if 'name' in update_data and 'slug' not in update_data:
             update_data['slug'] = generate_consistent_slug(update_data['name'], db_product.product_id)

@@ -1,5 +1,5 @@
 """
-Đồng bộ **toàn bộ** dữ liệu sản phẩm (cùng 41 cột Excel export) lên Google Sheet catalog.
+Đồng bộ **toàn bộ** dữ liệu sản phẩm (cùng các cột Excel export) lên Google Sheet catalog.
 
 DB/web là chuẩn — mỗi lần chạy ghi đè tab:
 - Sản phẩm mới trên web → có trên sheet

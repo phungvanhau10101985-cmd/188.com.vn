@@ -283,6 +283,8 @@ def _serialize_products_for_api(
                 d = Product.model_validate(product).model_dump(
                     exclude=_ADMIN_LIST_DUMP_EXCLUDE,
                 )
+                d["cost_cny"] = getattr(product, "cost_cny", None)
+                d["cost_vnd"] = getattr(product, "cost_vnd", None)
                 paired.append((product, d))
             except Exception:
                 paired.append((None, product))

@@ -18,6 +18,9 @@ class Product(Base):
     name = Column(String(500), nullable=False)
     description = Column(Text)  # Mô tả sản phẩm (cột F)
     price = Column(Float, default=0)
+    # Giá nhập gốc — không phải giá bán. Hàng Trung Quốc điền cost_cny, hàng Việt Nam điền cost_vnd.
+    cost_cny = Column(Float, nullable=True)
+    cost_vnd = Column(Float, nullable=True)
     shop_name = Column(String(200))
     shop_id = Column(String(100))
     pro_lower_price = Column(String(255))

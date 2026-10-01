@@ -2591,6 +2591,25 @@ export default function AdminProductsPage() {
     const payload: Record<string, unknown> = {};
     if (cur.field === 'name') payload.name = cur.value;
     if (cur.field === 'price') payload.price = parseFloat(cur.value) || 0;
+    if (cur.field === 'cost_cny' || cur.field === 'cost_vnd') {
+      const raw = cur.value.trim().replace(/\s/g, '').replace(',', '.');
+      if (!raw) {
+        payload[cur.field] = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0) {
+          showToast('err', 'Giá nhập phải là số không âm');
+          return;
+        }
+        const otherField = cur.field === 'cost_cny' ? 'cost_vnd' : 'cost_cny';
+        const other = product[otherField];
+        if (other != null && other !== '' && Number(other) >= 0) {
+          showToast('err', 'Chỉ điền một cột: giá gốc tệ hoặc giá Việt Nam');
+          return;
+        }
+        payload[cur.field] = n;
+      }
+    }
     if (cur.field === 'product_id') payload.product_id = cur.value;
     if (cur.field === 'brand_name') payload.brand_name = cur.value;
     if (cur.field === 'category') payload.category = cur.value;
@@ -2627,7 +2646,7 @@ export default function AdminProductsPage() {
         return {
           ...prev,
           products: prev.products.map((p) =>
-            p.product_id === cur.productId ? { ...p, ...updated } : p,
+            p.product_id === cur.productId ? { ...p, ...updated, ...payload } : p,
           ),
         };
       });
@@ -5004,6 +5023,18 @@ export default function AdminProductsPage() {
                           <th className="min-w-[6.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
                             Giá
                           </th>
+                          <th
+                            className="min-w-[7rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700"
+                            title="Hàng Trung Quốc: giá nhân dân tệ lúc cào. Không phải giá bán."
+                          >
+                            Giá gốc tệ
+                          </th>
+                          <th
+                            className="min-w-[7.5rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700"
+                            title="Hàng Việt Nam: giá nhập bằng đồng. Không phải giá bán."
+                          >
+                            Giá Việt Nam
+                          </th>
                           <th className="min-w-[8rem] whitespace-nowrap bg-gray-50 py-3 px-3 text-left font-semibold text-gray-700">
                             Thương hiệu
                           </th>
@@ -5232,6 +5263,46 @@ export default function AdminProductsPage() {
                                   onSave={saveEdit}
                                   onKeyDown={handleKeyDown}
                                   inputType="number"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top tabular-nums">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="cost_cny"
+                                  value={p.cost_cny ?? ''}
+                                  display={
+                                    p.cost_cny == null
+                                      ? '—'
+                                      : new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 4 }).format(
+                                          Number(p.cost_cny),
+                                        )
+                                  }
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={openInlineEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputClassName="w-24 rounded border border-gray-300 px-2 py-1"
+                                />
+                              </td>
+                              <td className="whitespace-nowrap py-2 px-3 align-top tabular-nums">
+                                <AdminProductEditableCell
+                                  productId={p.product_id}
+                                  field="cost_vnd"
+                                  value={p.cost_vnd ?? ''}
+                                  display={
+                                    p.cost_vnd == null
+                                      ? '—'
+                                      : new Intl.NumberFormat('vi-VN').format(Number(p.cost_vnd))
+                                  }
+                                  editing={editing}
+                                  saving={saving}
+                                  onStart={openInlineEdit}
+                                  onEditChange={onEditChange}
+                                  onSave={saveEdit}
+                                  onKeyDown={handleKeyDown}
+                                  inputClassName="w-28 rounded border border-gray-300 px-2 py-1"
                                 />
                               </td>
                               <td className="whitespace-nowrap py-2 px-3 align-top">

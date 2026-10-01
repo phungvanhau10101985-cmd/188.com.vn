@@ -2008,6 +2008,9 @@ def publish_import_1688_draft(
             },
         )
 
+    from app.services.product_import_cost import stamp_scraped_cost_cny
+
+    stamp_scraped_cost_cny(payload)
     compact_product_info_for_web(payload)
     _finalize_product_data_for_db(payload)
 

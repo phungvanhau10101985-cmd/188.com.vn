@@ -171,6 +171,8 @@ class ProductCreate(ProductBase):
 
     model_config = ConfigDict(extra="ignore")
     is_active: bool = True
+    cost_cny: Optional[float] = None
+    cost_vnd: Optional[float] = None
 
 class ProductUpdate(BaseModel):
     """Schema for updating product"""
@@ -181,6 +183,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     price: Optional[float] = None
+    cost_cny: Optional[float] = None
+    cost_vnd: Optional[float] = None
     shop_name: Optional[str] = None
     shop_id: Optional[str] = None
     pro_lower_price: Optional[str] = None
@@ -231,6 +235,24 @@ class ProductUpdate(BaseModel):
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     meta_keywords: Optional[str] = None
+
+    @field_validator("cost_cny", "cost_vnd", mode="before")
+    @classmethod
+    def _blank_import_cost(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    @field_validator("cost_cny", "cost_vnd")
+    @classmethod
+    def _non_negative_import_cost(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        if v < 0:
+            raise ValueError("Giá nhập không được âm")
+        return float(v)
 
     @field_validator("slug", mode="before")
     @classmethod

@@ -632,6 +632,9 @@ def merge_import_excel_overlay_into_product_data(
     if pl is not None and str(pl).strip() != "":
 
         product_data["pro_lower_price"] = _cell_str(pl)
+        from app.services.product_import_cost import stamp_scraped_cost_cny
+
+        stamp_scraped_cost_cny(product_data)
 
     ph = overlay.get("pro_high_price")
 

@@ -192,7 +192,7 @@ class MigrationManager:
 
     def _dialect_type_for_column(self, col) -> str:
         """Map SQLAlchemy column to database-specific type for ALTER TABLE."""
-        from sqlalchemy import Integer, String, Text, Boolean, DateTime, Date, Numeric
+        from sqlalchemy import Float, Integer, String, Text, Boolean, DateTime, Date, Numeric
         from sqlalchemy.types import Enum as EnumType, JSON as SA_JSON_TYPE
         t = type(col.type)
         default_empty = "" if not getattr(col, "nullable", True) else " DEFAULT NULL"
@@ -211,8 +211,10 @@ class MigrationManager:
             return "DATETIME" + default_empty if not IS_POSTGRESQL else "TIMESTAMP" + default_empty
         if t == Date:
             return "DATE" + default_empty
-        if t == Numeric:
-            return "REAL DEFAULT 0" if not IS_POSTGRESQL else "DOUBLE PRECISION DEFAULT 0"
+        if t == Numeric or t == Float:
+            if not getattr(col, "nullable", True):
+                return "REAL DEFAULT 0" if not IS_POSTGRESQL else "DOUBLE PRECISION DEFAULT 0"
+            return "REAL" if not IS_POSTGRESQL else "DOUBLE PRECISION"
         if t == EnumType:
             return "VARCHAR(50)" + default_empty
         return "TEXT" + default_empty
@@ -1299,6 +1301,41 @@ class MigrationManager:
             logger.warning("migrate_order_items_product_id_index: %s", e)
             return True
 
+    def migrate_product_import_cost_numeric(self) -> bool:
+        """cost_cny / cost_vnd là số. Sync cũ từng map Float thành TEXT."""
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            cols = {c["name"]: c for c in inspector.get_columns("products")}
+            with engine.connect() as conn:
+                for name in ("cost_cny", "cost_vnd"):
+                    col = cols.get(name)
+                    if col is None:
+                        sql_type = "DOUBLE PRECISION" if IS_POSTGRESQL else "REAL"
+                        conn.execute(text(f"ALTER TABLE products ADD COLUMN {name} {sql_type}"))
+                        conn.commit()
+                        continue
+                    type_name = str(col["type"]).upper()
+                    if any(tok in type_name for tok in ("DOUBLE", "FLOAT", "REAL", "NUMERIC", "INT")):
+                        continue
+                    if not IS_POSTGRESQL:
+                        logger.warning("products.%s is %s; skip type change on this dialect", name, type_name)
+                        continue
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE products ALTER COLUMN {name} TYPE DOUBLE PRECISION "
+                            f"USING CASE WHEN {name} IS NULL OR btrim({name}::text) = '' THEN NULL "
+                            f"ELSE {name}::double precision END"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("products.%s converted to double precision", name)
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_import_cost_numeric: %s", e)
+            return True
+
     def migrate_product_search_document_trgm(self) -> bool:
         """Cột search_document + backfill + index pg_trgm (Postgres)."""
         try:
@@ -1406,6 +1443,7 @@ class MigrationManager:
         # 8. Bảng categories/products (taxonomy + product metadata)
         results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
+        results['product_import_cost_numeric'] = self.migrate_product_import_cost_numeric()
         results['product_deletions_create'] = self._create_table_if_not_exists(
             "product_deletions", ProductDeletion
         )
