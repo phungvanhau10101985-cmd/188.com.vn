@@ -3005,8 +3005,8 @@ export default function AdminShippingPage() {
           <div>
             <h3 className="text-base font-semibold text-gray-900">Theo dữ liệu thực nhận</h3>
             <p className="text-sm text-gray-600 mt-1">
-              COD theo ngày EMS chuyển tiền về shop · Hoàn theo ngày admin xác nhận nhận hoàn (không theo ngày
-              import).
+              COD theo ngày EMS chuyển tiền về shop · Hoàn theo ngày admin xác nhận nhận đúng vận đơn EMS báo
+              hoàn (không theo ngày import, không gồm vận đơn đã giao hoặc EMS đã trả COD cho shop).
             </p>
           </div>
 
@@ -3104,7 +3104,7 @@ export default function AdminShippingPage() {
               </div>
               <p className="text-xs text-gray-500">
                 Bấm số để xem danh sách · COD nhận = ngày EMS trả tiền (file đối soát) · Hoàn admin nhận = ngày
-                xác nhận nhận hoàn.
+                xác nhận nhận hoàn trên vận đơn EMS báo hoàn, chưa trả COD.
               </p>
             </div>
           ) : receivedTimelineError ? null : (

@@ -670,12 +670,28 @@ class MigrationManager:
             return False
 
     def migrate_ems_shop_return_received_backfill(self) -> bool:
-        """Gắn cờ xác nhận hoàn shop cho bản ghi EMS đã có order_status=returned."""
+        """Gỡ cờ hoàn gắn nhầm, rồi backfill chỉ vận đơn EMS thực sự báo hoàn."""
         try:
             from app.db.session import SessionLocal
+            from app.services.shipping_operations import (
+                is_ems_record_shop_return_received,
+                shipment_qualifies_as_shop_return,
+            )
 
             db = SessionLocal()
             try:
+                stamped = (
+                    db.query(EmsShippingRecord)
+                    .filter(EmsShippingRecord.shop_return_received_at.isnot(None))
+                    .all()
+                )
+                cleared = 0
+                for row in stamped:
+                    if is_ems_record_shop_return_received(row):
+                        continue
+                    row.shop_return_received_at = None
+                    cleared += 1
+
                 rows = (
                     db.query(EmsShippingRecord)
                     .filter(
@@ -684,19 +700,27 @@ class MigrationManager:
                     )
                     .all()
                 )
-                if not rows:
-                    return True
                 now = datetime.now(timezone.utc)
+                filled = 0
                 for row in rows:
+                    if not shipment_qualifies_as_shop_return(
+                        ems_status=row.ems_status,
+                        ems_phase=row.ems_phase,
+                        cod_settlement_status=row.cod_settlement_status,
+                    ):
+                        continue
                     row.shop_return_received_at = row.updated_at or row.created_at or now
-                db.commit()
-                logger.info(
-                    "✅ ems_shipping_records shop_return_received_at backfill (%s rows)",
-                    len(rows),
-                )
+                    filled += 1
+                if cleared or filled:
+                    db.commit()
+                    logger.info(
+                        "✅ ems shop_return_received cleanup cleared=%s backfill=%s",
+                        cleared,
+                        filled,
+                    )
+                return True
             finally:
                 db.close()
-            return True
         except Exception as e:
             logger.warning("migrate_ems_shop_return_received_backfill: %s", e)
             return False

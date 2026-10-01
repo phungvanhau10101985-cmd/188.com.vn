@@ -1,12 +1,16 @@
 """Xác nhận đơn hoàn chỉ khớp mã EMS / mã tham chiếu — mã đơn chỉ để xem."""
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.models.order import OrderStatus
 from app.models.order_shipment import EmsShippingRecord
 from app.services.shipping_operations import (
+    _record_shop_return_received_date,
     apply_shop_return_received_on_ems_record,
     evaluate_shop_return_entry,
+    is_ems_record_shop_return_received,
+    return_to_shop_label,
 )
 from app.services.shop_return_confirm import resolve_shop_return_input
 
@@ -25,6 +29,7 @@ def _record(**overrides):
         order_status="shipping",
         product_code=None,
         cod_amount=None,
+        cod_settlement_status=None,
         sync_message=None,
     )
     base.update(overrides)
@@ -120,3 +125,78 @@ def test_confirm_stamps_only_the_matched_shipment():
 
     assert record.shop_return_received_at is not None
     assert order.status == OrderStatus.RETURNED.value
+    assert is_ems_record_shop_return_received(record) is True
+
+
+def test_cod_paid_delivery_is_not_counted_as_return_received():
+    record = _record(
+        order_status="returned",
+        ems_status="Đã phát thành công . Người nhận:HẢO shop188 DH537",
+        ems_phase="delivered",
+        shop_return_received_at="2026-09-23T11:42:37",
+        cod_settlement_status="matched",
+        cod_amount=504000,
+    )
+    assert is_ems_record_shop_return_received(record) is False
+    assert _record_shop_return_received_date(record) is None
+    assert (
+        return_to_shop_label(
+            order_status="returned",
+            ems_status=record.ems_status,
+            shop_return_received_at=record.shop_return_received_at,
+            ems_phase="delivered",
+            cod_settlement_status="matched",
+        )
+        is None
+    )
+
+
+def test_delivered_sibling_without_cod_file_is_not_a_return():
+    record = _record(
+        order_status="returned",
+        ems_status="Đã phát thành công . Người nhận:GA",
+        ems_phase="delivered",
+        shop_return_received_at="2026-09-25T11:40:31",
+        cod_amount=1450000,
+    )
+    assert is_ems_record_shop_return_received(record) is False
+    assert _record_shop_return_received_date(record) is None
+
+
+def test_unknown_ems_inherited_from_returned_order_is_not_received():
+    record = _record(
+        order_status="returned",
+        ems_status="Chưa có thông tin",
+        ems_phase="unknown",
+        shop_return_received_at="2026-09-30T13:52:48",
+    )
+    assert is_ems_record_shop_return_received(record) is False
+
+
+def test_real_return_confirm_still_counts_on_received_date():
+    record = _record(
+        order_status="returned",
+        ems_status="Chưa phát được. 4.Chuyển hoàn cho người gửi",
+        ems_phase="unknown",
+        shop_return_received_at=datetime(2026, 9, 22, 8, 44, tzinfo=timezone.utc),
+    )
+    assert is_ems_record_shop_return_received(record) is True
+    assert _record_shop_return_received_date(record) is not None
+
+
+def test_order_status_returned_without_this_shipment_confirm_does_not_count():
+    record = _record(
+        order_status="returned",
+        ems_status="Chuyển hoàn cho người gửi",
+        shop_return_received_at=None,
+    )
+    assert is_ems_record_shop_return_received(record) is False
+    assert (
+        return_to_shop_label(
+            order_status="returned",
+            ems_status=record.ems_status,
+            shop_return_received_at=None,
+            ems_phase=None,
+        )
+        == "Đơn hoàn chưa trả shop"
+    )

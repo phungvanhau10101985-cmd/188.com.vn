@@ -39,11 +39,45 @@ def _is_shop_return_received(*, order_status: str | None) -> bool:
     return (order_status or "").strip().lower() == OrderStatus.RETURNED.value
 
 
+def shipment_qualifies_as_shop_return(
+    *,
+    ems_status: str | None,
+    ems_phase: str | None = None,
+    cod_settlement_status: str | None = None,
+) -> bool:
+    """EMS đang báo hoàn trên đúng vận đơn — không phải giao thành công, chưa trả COD cho shop."""
+    if (cod_settlement_status or "").strip().lower() == "matched":
+        return False
+    if _is_delivered(ems_phase=ems_phase, ems_status=ems_status):
+        return False
+    return _is_ems_return_pending_shop(ems_status=ems_status)
+
+
 def is_ems_record_shop_return_received(record: EmsShippingRecord) -> bool:
-    """Xác nhận hoàn shop — cờ thời gian ưu tiên hơn order_status (tránh mất sau import EMS)."""
-    if getattr(record, "shop_return_received_at", None) is not None:
-        return True
-    return _is_shop_return_received(order_status=record.order_status)
+    """Admin đã xác nhận nhận hoàn đúng vận đơn này.
+
+    Không lấy theo order_status của đơn shop (một đơn có nhiều mã EMS).
+    Bỏ vận đơn đã giao thành công và vận đơn EMS đã trả COD.
+    """
+    if getattr(record, "shop_return_received_at", None) is None:
+        return False
+    return shipment_qualifies_as_shop_return(
+        ems_status=record.ems_status,
+        ems_phase=record.ems_phase,
+        cod_settlement_status=record.cod_settlement_status,
+    )
+
+
+def clear_inherited_shop_return_stamp(record: EmsShippingRecord) -> bool:
+    """Gỡ cờ hoàn gắn nhầm từ trạng thái đơn shop sang vận đơn đã giao / đã trả COD."""
+    if getattr(record, "shop_return_received_at", None) is None:
+        return False
+    if is_ems_record_shop_return_received(record):
+        return False
+    record.shop_return_received_at = None
+    if (record.sync_message or "").strip() == RETURN_SHOP_RECEIVED_LABEL:
+        record.sync_message = None
+    return True
 
 
 def _is_ems_return_pending_shop(*, ems_status: str | None) -> bool:
@@ -67,12 +101,21 @@ def return_to_shop_label(
     order_status: str | None,
     ems_status: str | None,
     shop_return_received_at: Any = None,
+    ems_phase: str | None = None,
+    cod_settlement_status: str | None = None,
 ) -> str | None:
-    if shop_return_received_at is not None or _is_shop_return_received(order_status=order_status):
+    """Nhãn hoàn theo từng vận đơn. Trạng thái đơn shop không kéo các mã EMS khác."""
+    del order_status
+    qualifies = shipment_qualifies_as_shop_return(
+        ems_status=ems_status,
+        ems_phase=ems_phase,
+        cod_settlement_status=cod_settlement_status,
+    )
+    if not qualifies:
+        return None
+    if shop_return_received_at is not None:
         return RETURN_SHOP_RECEIVED_LABEL
-    if _is_ems_return_pending_shop(ems_status=ems_status):
-        return RETURN_PENDING_SHOP_LABEL
-    return None
+    return RETURN_PENDING_SHOP_LABEL
 
 
 def _is_delivered(*, ems_phase: str | None, ems_status: str | None) -> bool:
@@ -233,7 +276,7 @@ def get_shipping_operations_stats(db: Session) -> dict[str, Any]:
 
         if record.order_id is not None:
             shop_linked_count += 1
-        if (record.order_status or "").strip().lower() == OrderStatus.RETURNED.value:
+        if is_ems_record_shop_return_received(record):
             shop_return_received_count += 1
 
         if (
@@ -1355,6 +1398,12 @@ def apply_shop_return_received_on_order(
         .all()
     )
     for record in ems_records:
+        if not shipment_qualifies_as_shop_return(
+            ems_status=record.ems_status,
+            ems_phase=record.ems_phase,
+            cod_settlement_status=record.cod_settlement_status,
+        ):
+            continue
         _stamp_ems_shop_return(record, now=now)
 
 

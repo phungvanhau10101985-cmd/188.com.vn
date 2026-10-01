@@ -1215,14 +1215,11 @@ def _upsert_record(
     record.order_code = result.get("order_code")
     record.order_id = result.get("order_id")
     record.excel_row_number = result.get("row_number")
-    # Giữ xác nhận hoàn shop — cron/import EMS không được ghi đè về None/shipping.
-    shop_confirmed = getattr(record, "shop_return_received_at", None) is not None or (
-        (record.order_status or "").strip().lower() == OrderStatus.RETURNED.value
-    )
-    if shop_confirmed:
+    # Chỉ khóa returned khi chính vận đơn đã được admin xác nhận.
+    # Không copy order_status=returned của đơn shop rồi gắn shop_return_received_at
+    # — một đơn có nhiều mã EMS (giao thành công / đã trả COD) không phải hàng hoàn.
+    if getattr(record, "shop_return_received_at", None) is not None:
         record.order_status = OrderStatus.RETURNED.value
-        if getattr(record, "shop_return_received_at", None) is None:
-            record.shop_return_received_at = record.updated_at or datetime.now(timezone.utc)
     elif result.get("order_status") is not None:
         record.order_status = result.get("order_status")
     record.current_step_key = result.get("current_step_key")
@@ -1247,7 +1244,9 @@ def _upsert_record(
         record.ems_error = result.get("ems_error")
         if result.get("sync_status"):
             record.sync_status = result.get("sync_status") or "pending"
-        if not shop_confirmed and result.get("sync_message") is not None:
+        from app.services.shipping_operations import is_ems_record_shop_return_received
+
+        if not is_ems_record_shop_return_received(record) and result.get("sync_message") is not None:
             record.sync_message = result.get("sync_message")
     elif not (record.sync_status or "").strip():
         record.sync_status = result.get("sync_status") or "pending"
@@ -1267,6 +1266,9 @@ def _upsert_record(
         record.import_source_filename = source_filename
     if admin_id:
         record.imported_by_admin_id = admin_id
+    from app.services.shipping_operations import clear_inherited_shop_return_stamp
+
+    clear_inherited_shop_return_stamp(record)
     _apply_return_to_shop_on_record(record)
     db.flush()
     return record, created
@@ -1283,12 +1285,16 @@ def _apply_return_to_shop_fields(row: dict[str, Any]) -> dict[str, Any]:
         order_status=row.get("order_status"),
         ems_status=row.get("ems_status"),
         shop_return_received_at=row.get("shop_return_received_at"),
+        ems_phase=row.get("ems_phase"),
+        cod_settlement_status=row.get("cod_settlement_status"),
     )
     row["return_to_shop_label"] = label
     if label == RETURN_PENDING_SHOP_LABEL:
         row["sync_message"] = RETURN_PENDING_SHOP_LABEL
     elif label == RETURN_SHOP_RECEIVED_LABEL:
         row["sync_message"] = RETURN_SHOP_RECEIVED_LABEL
+    elif row.get("sync_message") in (RETURN_PENDING_SHOP_LABEL, RETURN_SHOP_RECEIVED_LABEL):
+        row["sync_message"] = ""
     return row
 
 
@@ -1303,11 +1309,15 @@ def _apply_return_to_shop_on_record(record: EmsShippingRecord) -> None:
         order_status=record.order_status,
         ems_status=record.ems_status,
         shop_return_received_at=getattr(record, "shop_return_received_at", None),
+        ems_phase=record.ems_phase,
+        cod_settlement_status=record.cod_settlement_status,
     )
     if label == RETURN_PENDING_SHOP_LABEL:
         record.sync_message = RETURN_PENDING_SHOP_LABEL
     elif label == RETURN_SHOP_RECEIVED_LABEL:
         record.sync_message = RETURN_SHOP_RECEIVED_LABEL
+    elif (record.sync_message or "").strip() in (RETURN_PENDING_SHOP_LABEL, RETURN_SHOP_RECEIVED_LABEL):
+        record.sync_message = None
 
 
 def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, Any]:
