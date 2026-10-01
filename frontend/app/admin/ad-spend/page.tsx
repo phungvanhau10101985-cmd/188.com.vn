@@ -489,7 +489,7 @@ export default function AdminAdSpendPage() {
   const profitHint = profitLoading
     ? 'Đơn đã cọc trong kỳ đang chọn'
     : profitForFocus?.missing
-      ? `${profitForFocus.missing} đơn còn thiếu giá tệ`
+      ? `${profitForFocus.missing} đơn còn thiếu giá nhập`
       : profitForFocus?.gross != null
         ? `${profitForFocus.orderCount} đơn · lãi trước quảng cáo ${formatMoney(profitForFocus.gross, 'VND')}`
         : `${profitForFocus?.orderCount ?? 0} đơn`;
@@ -656,7 +656,7 @@ export default function AdminAdSpendPage() {
             value={
               profitLoading ? 'Đang tính…' : profitForFocus?.cost == null ? '—' : formatMoney(profitForFocus.cost, 'VND')
             }
-            hint={profitForFocus?.missing ? 'Còn đơn thiếu giá tệ' : 'Giá hàng và ship'}
+            hint={profitForFocus?.missing ? 'Còn đơn thiếu giá nhập' : 'Giá hàng và ship'}
           />
         </div>
       </section>

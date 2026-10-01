@@ -2723,6 +2723,8 @@ export type AdSpendProfitLine = {
   unit_price_vnd: number;
   line_total_vnd: number;
   catalog_cny: number | null;
+  import_cny?: number | null;
+  import_vnd?: number | null;
 };
 
 export type AdSpendProfitOrder = {
@@ -2732,6 +2734,9 @@ export type AdSpendProfitOrder = {
   revenue_vnd: number;
   merchandise_vnd: number;
   catalog_goods_cny: number | null;
+  goods_vnd?: number;
+  uses_china_ship?: boolean;
+  import_stored?: boolean;
   lines: AdSpendProfitLine[];
   goods_cny_override: number | null;
   ship_china_domestic_cny_override: number | null;

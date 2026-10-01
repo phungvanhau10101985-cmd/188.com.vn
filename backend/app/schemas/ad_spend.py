@@ -77,6 +77,8 @@ class AdSpendProfitLine(BaseModel):
     unit_price_vnd: float
     line_total_vnd: float = 0
     catalog_cny: Optional[float] = None
+    import_cny: Optional[float] = None
+    import_vnd: Optional[float] = None
 
 
 class AdSpendProfitOrder(BaseModel):
@@ -86,6 +88,9 @@ class AdSpendProfitOrder(BaseModel):
     revenue_vnd: float
     merchandise_vnd: float = 0
     catalog_goods_cny: Optional[float] = None
+    goods_vnd: float = 0
+    uses_china_ship: bool = True
+    import_stored: bool = False
     lines: List[AdSpendProfitLine] = Field(default_factory=list)
     goods_cny_override: Optional[float] = None
     ship_china_domestic_cny_override: Optional[float] = None

@@ -252,3 +252,71 @@ def test_profit_uses_cny_rate_shipping_and_ads():
         ship_hanoi_vnd=Decimal("0"),
         vnd_per_cny=rate,
     ) is None
+
+
+def test_profit_uses_stored_import_and_collected_sale_price():
+    from decimal import Decimal
+
+    from app.services.ad_spend_profit import (
+        collected_goods_vnd,
+        line_stored_import,
+        order_cost_from_import,
+        summarize_stored_import,
+    )
+
+    # Phí ship khách trả và ví không nằm trong giá thu. Giảm giá sale/khuyến mãi thì có.
+    assert collected_goods_vnd(1_000_000, 100_000, 880_000, 30_000, 50_000) == Decimal("900000")
+    assert collected_goods_vnd(0, 0, 500_000, 30_000, 20_000) == Decimal("490000")
+
+    assert line_stored_import(2, 80, None) == ("cny", Decimal("160"))
+    assert line_stored_import(3, None, 0, is_warehouse=True) == ("vnd", Decimal("0"))
+    assert line_stored_import(1, None, 150_000) == ("vnd", Decimal("150000"))
+    assert line_stored_import(1, None, None, is_warehouse=True) == ("vnd", Decimal("0"))
+    assert line_stored_import(1, None, None) is None
+
+    stored = summarize_stored_import(
+        [
+            (1, 100, None, False),
+            (2, None, 0, True),
+        ]
+    )
+    assert stored is not None
+    assert stored["goods_cny"] == Decimal("100")
+    assert stored["goods_vnd"] == Decimal("0")
+    assert stored["uses_china_ship"] is True
+    rate = Decimal("3700")
+    mixed = order_cost_from_import(
+        goods_cny=stored["goods_cny"],
+        goods_vnd=stored["goods_vnd"],
+        uses_china_ship=True,
+        ship_china_cny=Decimal("10"),
+        ship_border_cny=Decimal("20"),
+        ship_hanoi_vnd=Decimal("30000"),
+        vnd_per_cny=rate,
+    )
+    assert mixed == Decimal("100") * rate + Decimal("30") * rate + Decimal("30000")
+
+    sale_only = summarize_stored_import([(1, None, 0, True), (2, None, 0, True)])
+    assert sale_only is not None and sale_only["uses_china_ship"] is False
+    sale_cost = order_cost_from_import(
+        goods_cny=sale_only["goods_cny"],
+        goods_vnd=sale_only["goods_vnd"],
+        uses_china_ship=False,
+        ship_china_cny=Decimal("10"),
+        ship_border_cny=Decimal("20"),
+        ship_hanoi_vnd=Decimal("30000"),
+        vnd_per_cny=rate,
+    )
+    assert sale_cost == Decimal("30000")
+
+    vietnam = order_cost_from_import(
+        goods_cny=Decimal("0"),
+        goods_vnd=Decimal("200000"),
+        uses_china_ship=False,
+        ship_china_cny=Decimal("10"),
+        ship_border_cny=Decimal("20"),
+        ship_hanoi_vnd=Decimal("0"),
+        vnd_per_cny=rate,
+    )
+    assert vietnam == Decimal("200000")
+    assert summarize_stored_import([(1, None, None, False)]) is None

@@ -1,7 +1,9 @@
 """Hạch toán lợi nhuận đơn đã cọc trên trang chi phí quảng cáo.
 
-Lợi nhuận = giá bán − (giá hàng ¥ + ship TQ ¥ + ship cửa khẩu ¥) × tỷ giá − ship Hà Nội − quảng cáo.
-Quảng cáo trừ một lần ở tổng kỳ, không chia vào từng đơn.
+Giá thu = tiền hàng sau mọi chương trình sale (tạm tính dòng trừ giảm giá đơn), không cộng phí ship khách trả.
+Giá vốn hàng Trung Quốc = giá gốc tệ × tỷ giá. Hàng Việt Nam, kể cả sale thanh lý kho, dùng giá nhập đồng (sale = 0đ).
+Ship Trung Quốc và cửa khẩu chỉ cộng vào đơn còn hàng tệ.
+Lợi nhuận = giá thu − giá vốn − ship − quảng cáo. Quảng cáo trừ một lần ở tổng kỳ, không chia vào từng đơn.
 """
 
 from __future__ import annotations
@@ -154,6 +156,106 @@ def order_cost_vnd(
     return cny * vnd_per_cny + ship_hanoi_vnd
 
 
+def collected_goods_vnd(
+    subtotal: Any,
+    discount_amount: Any,
+    total_amount: Any = None,
+    shipping_fee: Any = None,
+    wallet_amount_used: Any = None,
+) -> Decimal:
+    """Giá thu thực tế của hàng sau sale. Không gồm phí ship khách trả và không trừ ví."""
+    sub = _dec(subtotal) or Decimal("0")
+    discount = _dec(discount_amount) or Decimal("0")
+    if discount < 0:
+        discount = Decimal("0")
+    if sub > 0 or discount > 0:
+        return max(Decimal("0"), sub - discount)
+    total = _dec(total_amount) or Decimal("0")
+    wallet = _dec(wallet_amount_used) or Decimal("0")
+    shipping = _dec(shipping_fee) or Decimal("0")
+    return max(Decimal("0"), total + wallet - shipping)
+
+
+def _import_cost_is_set(value: Any) -> bool:
+    """0đ vẫn là giá nhập đã điền (hàng sale thanh lý kho)."""
+    if value is None or value == "":
+        return False
+    amount = _dec(value)
+    return amount is not None and amount >= 0
+
+
+def line_stored_import(
+    quantity: Any,
+    cost_cny: Any,
+    cost_vnd: Any,
+    *,
+    is_warehouse: bool = False,
+) -> Optional[Tuple[str, Decimal]]:
+    """(«vnd»|«cny», thành tiền nhập). Hàng sale kho không có giá thì nhập 0đ. Thiếu cả hai thì None."""
+    qty = _dec(quantity)
+    if qty is None or qty <= 0:
+        return None
+    if _import_cost_is_set(cost_vnd):
+        amount = _dec(cost_vnd)
+        if amount is None or amount < 0:
+            return None
+        return ("vnd", amount * qty)
+    if _import_cost_is_set(cost_cny):
+        amount = _dec(cost_cny)
+        if amount is None or amount < 0:
+            return None
+        return ("cny", amount * qty)
+    if is_warehouse:
+        return ("vnd", Decimal("0"))
+    return None
+
+
+def summarize_stored_import(lines: Sequence[Tuple[Any, Any, Any, bool]]) -> Optional[dict]:
+    """Cộng giá nhập đã lưu. Một dòng không có giá thì cả đơn không chốt theo cột giá nhập."""
+    if not lines:
+        return None
+    goods_cny = Decimal("0")
+    goods_vnd = Decimal("0")
+    uses_china_ship = False
+    for quantity, cost_cny, cost_vnd, is_warehouse in lines:
+        part = line_stored_import(quantity, cost_cny, cost_vnd, is_warehouse=bool(is_warehouse))
+        if part is None:
+            return None
+        kind, amount = part
+        if kind == "vnd":
+            goods_vnd += amount
+        else:
+            goods_cny += amount
+            uses_china_ship = True
+    return {
+        "goods_cny": goods_cny,
+        "goods_vnd": goods_vnd,
+        "uses_china_ship": uses_china_ship,
+    }
+
+
+def order_cost_from_import(
+    *,
+    goods_cny: Optional[Decimal],
+    goods_vnd: Decimal,
+    uses_china_ship: bool,
+    ship_china_cny: Decimal,
+    ship_border_cny: Decimal,
+    ship_hanoi_vnd: Decimal,
+    vnd_per_cny: Optional[Decimal],
+) -> Optional[Decimal]:
+    """Hàng tệ đổi ra đồng rồi cộng giá nhập Việt Nam. Đơn chỉ có hàng đồng thì không cộng ship Trung Quốc."""
+    cny_goods = goods_cny if goods_cny is not None else Decimal("0")
+    ship_cny = ship_china_cny + ship_border_cny if uses_china_ship else Decimal("0")
+    needs_rate = uses_china_ship or cny_goods > 0 or ship_cny > 0
+    if needs_rate and (vnd_per_cny is None or vnd_per_cny <= 0):
+        return None
+    if uses_china_ship and goods_cny is None:
+        return None
+    rate = vnd_per_cny if vnd_per_cny is not None else Decimal("0")
+    return goods_vnd + (cny_goods + ship_cny) * rate + ship_hanoi_vnd
+
+
 def revenue_to_cny(goods_cny: Optional[Decimal]) -> Optional[Decimal]:
     """Giá hàng quy ra tệ — tổng CN¥ đã cào hoặc đã đảo theo lưới, không chia doanh thu cho tỷ giá."""
     return goods_cny
@@ -183,6 +285,26 @@ def _optional_non_negative(value: Any, label: str) -> Optional[Decimal]:
     if value is None or value == "":
         return None
     return _non_negative(value, label)
+
+
+def _profit_line_payload(line: dict) -> dict:
+    unit_part = line_stored_import(
+        1,
+        line.get("cost_cny"),
+        line.get("cost_vnd"),
+        is_warehouse=bool(line.get("is_warehouse")),
+    )
+    import_cny = float(unit_part[1]) if unit_part is not None and unit_part[0] == "cny" else None
+    import_vnd = float(unit_part[1]) if unit_part is not None and unit_part[0] == "vnd" else None
+    parsed = stored_cny_price(line.get("raw"))
+    return {
+        "quantity": int(line.get("quantity") or 0),
+        "unit_price_vnd": _money(_dec(line.get("unit"))) or 0,
+        "line_total_vnd": _money(_dec(line.get("line_total"))) or 0,
+        "catalog_cny": _money(_dec(str(parsed))) if parsed is not None else None,
+        "import_cny": import_cny,
+        "import_vnd": import_vnd,
+    }
 
 
 def _vn_day(moment: Optional[datetime]) -> Optional[str]:
@@ -238,7 +360,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
     orders = orders[:MAX_PROFIT_ORDERS]
     order_ids = [order.id for order in orders]
 
-    lines_by_order: Dict[int, List[Tuple[Any, Any, Any, Any]]] = {order_id: [] for order_id in order_ids}
+    lines_by_order: Dict[int, List[dict]] = {order_id: [] for order_id in order_ids}
     if order_ids:
         item_rows = (
             db.query(
@@ -247,15 +369,38 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 OrderItem.unit_price,
                 OrderItem.price,
                 OrderItem.total_price,
+                OrderItem.is_warehouse_item,
                 Product.pro_lower_price,
+                Product.cost_cny,
+                Product.cost_vnd,
             )
             .outerjoin(Product, Product.id == OrderItem.product_id)
             .filter(OrderItem.order_id.in_(order_ids))
             .all()
         )
-        for order_id, quantity, unit_price, legacy_price, line_total, raw_price in item_rows:
+        for (
+            order_id,
+            quantity,
+            unit_price,
+            legacy_price,
+            line_total,
+            is_warehouse,
+            raw_price,
+            cost_cny,
+            cost_vnd,
+        ) in item_rows:
             unit = unit_price if unit_price not in (None, 0) else legacy_price
-            lines_by_order.setdefault(int(order_id), []).append((quantity, unit, raw_price, line_total))
+            lines_by_order.setdefault(int(order_id), []).append(
+                {
+                    "quantity": quantity,
+                    "unit": unit,
+                    "raw": raw_price,
+                    "line_total": line_total,
+                    "is_warehouse": bool(is_warehouse),
+                    "cost_cny": cost_cny,
+                    "cost_vnd": cost_vnd,
+                }
+            )
 
     overrides = {}
     if order_ids:
@@ -268,14 +413,33 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
     cost_complete = True
     missing_goods = 0
     for order in orders:
-        revenue = _dec(order.total_amount) or Decimal("0")
+        revenue = collected_goods_vnd(
+            order.subtotal,
+            order.discount_amount,
+            order.total_amount,
+            order.shipping_fee,
+            order.wallet_amount_used,
+        )
         revenue_total += revenue
         order_lines = lines_by_order.get(order.id) or []
-        goods_vnd = _dec(order.subtotal)
-        if goods_vnd is None or goods_vnd <= 0:
-            shipping = _dec(order.shipping_fee) or Decimal("0")
-            goods_vnd = revenue - shipping if revenue > shipping else revenue
-        catalog = goods_cny_matching_listing(order_lines, rate, goods_vnd)
+        stored = summarize_stored_import(
+            [
+                (line["quantity"], line["cost_cny"], line["cost_vnd"], line["is_warehouse"])
+                for line in order_lines
+            ]
+        )
+        if stored is not None:
+            catalog = stored["goods_cny"]
+            direct_vnd = stored["goods_vnd"]
+            uses_china_ship = bool(stored["uses_china_ship"])
+        else:
+            direct_vnd = Decimal("0")
+            uses_china_ship = True
+            catalog = goods_cny_matching_listing(
+                [(line["quantity"], line["unit"], line["raw"], line["line_total"]) for line in order_lines],
+                rate,
+                revenue,
+            )
         override = overrides.get(order.id)
         goods_override = _dec(override.goods_cny) if override is not None else None
         ship_china_override = _dec(override.ship_china_domestic_cny) if override is not None else None
@@ -285,8 +449,14 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
         ship_china = ship_china_override if ship_china_override is not None else ship_china_default
         ship_border = ship_border_override if ship_border_override is not None else ship_border_default
         ship_hanoi = ship_hanoi_override if ship_hanoi_override is not None else ship_hanoi_default
-        cost = order_cost_vnd(
+        if not uses_china_ship:
+            ship_china = ship_china_override if ship_china_override is not None else Decimal("0")
+            ship_border = ship_border_override if ship_border_override is not None else Decimal("0")
+        charge_china_ship = uses_china_ship or ship_china_override is not None or ship_border_override is not None
+        cost = order_cost_from_import(
             goods_cny=goods,
+            goods_vnd=direct_vnd,
+            uses_china_ship=charge_china_ship,
             ship_china_cny=ship_china,
             ship_border_cny=ship_border,
             ship_hanoi_vnd=ship_hanoi,
@@ -304,16 +474,13 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 "order_code": order.order_code,
                 "deposited_on": _vn_day(deposited),
                 "revenue_vnd": _money(revenue) or 0,
-                "merchandise_vnd": _money(goods_vnd) or 0,
+                "merchandise_vnd": _money(revenue) or 0,
                 "catalog_goods_cny": _money(catalog),
+                "goods_vnd": _money(direct_vnd) or 0,
+                "uses_china_ship": uses_china_ship,
+                "import_stored": stored is not None,
                 "lines": [
-                    {
-                        "quantity": int(quantity or 0),
-                        "unit_price_vnd": _money(_dec(unit)) or 0,
-                        "line_total_vnd": _money(_dec(line_total)) or 0,
-                        "catalog_cny": _money(_dec(str(parsed))) if (parsed := stored_cny_price(raw)) is not None else None,
-                    }
-                    for quantity, unit, raw, line_total in order_lines
+                    _profit_line_payload(line) for line in order_lines
                 ],
                 "goods_cny_override": _money(goods_override),
                 "ship_china_domestic_cny_override": _money(ship_china_override),

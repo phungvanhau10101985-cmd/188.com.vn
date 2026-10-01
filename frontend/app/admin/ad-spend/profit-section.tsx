@@ -28,6 +28,8 @@ type ProfitLine = {
   unitPriceVnd: number;
   lineTotalVnd: number;
   catalogCny: number | null;
+  importCny: number | null;
+  importVnd: number | null;
 };
 
 type ProfitRow = {
@@ -38,6 +40,9 @@ type ProfitRow = {
   merchandiseVnd: number;
   lines: ProfitLine[];
   catalogGoodsCny: number | null;
+  goodsVnd: number;
+  usesChinaShip: boolean;
+  importStored: boolean;
   goodsTouched: boolean;
   goods: string;
   shipChina: string;
@@ -135,12 +140,23 @@ function rowsFromSheet(sheet: AdSpendProfitSheet): ProfitRow[] {
       unitPriceVnd: line.unit_price_vnd,
       lineTotalVnd: line.line_total_vnd || 0,
       catalogCny: line.catalog_cny,
+      importCny: line.import_cny ?? null,
+      importVnd: line.import_vnd ?? null,
     })),
     catalogGoodsCny: order.catalog_goods_cny,
+    goodsVnd: order.goods_vnd ?? 0,
+    usesChinaShip: order.uses_china_ship !== false,
+    importStored: order.import_stored === true,
     goodsTouched: false,
     goods: numText(order.goods_cny_override ?? order.catalog_goods_cny),
-    shipChina: numText(order.ship_china_domestic_cny_override ?? sheet.ship_china_domestic_cny),
-    shipBorder: numText(order.ship_border_to_hanoi_cny_override ?? sheet.ship_border_to_hanoi_cny),
+    shipChina: numText(
+      order.ship_china_domestic_cny_override ??
+        (order.uses_china_ship === false ? 0 : sheet.ship_china_domestic_cny),
+    ),
+    shipBorder: numText(
+      order.ship_border_to_hanoi_cny_override ??
+        (order.uses_china_ship === false ? 0 : sheet.ship_border_to_hanoi_cny),
+    ),
     shipHanoi: numText(order.ship_hanoi_to_customer_vnd_override ?? sheet.ship_hanoi_to_customer_vnd),
     hadGoodsOverride: order.goods_cny_override != null,
     hadShipChina: order.ship_china_domestic_cny_override != null,
@@ -149,19 +165,34 @@ function rowsFromSheet(sheet: AdSpendProfitSheet): ProfitRow[] {
   }));
 }
 
-function lineCny(row: ProfitRow, rate: number | null): number | null {
-  const goods = amountOrNull(row.goods);
+function chinaShipCny(row: ProfitRow): number | null {
   const china = amountOrNull(row.shipChina);
   const border = amountOrNull(row.shipBorder);
+  if (china == null || border == null) return null;
+  return china + border;
+}
+
+function lineCny(row: ProfitRow, rate: number | null): number | null {
+  const goods = amountOrNull(row.goods);
   const hanoi = amountOrNull(row.shipHanoi);
-  if (goods == null || china == null || border == null || hanoi == null || rate == null || rate <= 0) return null;
-  return goods + china + border + hanoi / rate;
+  const ship = chinaShipCny(row);
+  if (ship == null || hanoi == null) return null;
+  if (row.usesChinaShip && (goods == null || rate == null || rate <= 0)) return null;
+  const cnyGoods = goods ?? 0;
+  const hanoiCny = row.usesChinaShip && rate != null && rate > 0 ? hanoi / rate : 0;
+  return cnyGoods + ship + hanoiCny;
 }
 
 function lineCost(row: ProfitRow, rate: number | null): number | null {
-  const cny = lineCny(row, rate);
-  if (cny == null || rate == null) return null;
-  return cny * rate;
+  const goods = amountOrNull(row.goods);
+  const hanoi = amountOrNull(row.shipHanoi);
+  const ship = chinaShipCny(row);
+  if (ship == null || hanoi == null) return null;
+  if (row.usesChinaShip && goods == null) return null;
+  const cnyGoods = goods ?? 0;
+  const needsRate = row.usesChinaShip || cnyGoods > 0 || ship > 0;
+  if (needsRate && (rate == null || rate <= 0)) return null;
+  return row.goodsVnd + (cnyGoods + ship) * (rate ?? 0) + hanoi;
 }
 
 export function AdSpendProfitSection({
@@ -242,7 +273,7 @@ export function AdSpendProfitSection({
     if (rateNumber == null || rateNumber <= 0) return;
     setRows((prev) =>
       prev.map((row) => {
-        if (row.hadGoodsOverride || row.goodsTouched) return row;
+        if (row.importStored || row.hadGoodsOverride || row.goodsTouched) return row;
         const next = goodsFromLines(row.lines, rateNumber, row.merchandiseVnd);
         if (next == null) {
           if (!row.goods && row.catalogGoodsCny == null) return row;
@@ -301,7 +332,19 @@ export function AdSpendProfitSection({
     if (field === 'shipChina') setShipChina(value);
     if (field === 'shipBorder') setShipBorder(value);
     if (field === 'shipHanoi') setShipHanoi(value);
-    setRows((prev) => prev.map((row) => (row[field] === previous ? { ...row, [field]: value } : row)));
+    setRows((prev) =>
+      prev.map((row) => {
+        if (
+          (field === 'shipChina' || field === 'shipBorder') &&
+          !row.usesChinaShip &&
+          !row.hadShipChina &&
+          !row.hadShipBorder
+        ) {
+          return row;
+        }
+        return row[field] === previous ? { ...row, [field]: value } : row;
+      }),
+    );
   };
 
   const onSave = async (event: FormEvent) => {
@@ -354,9 +397,9 @@ export function AdSpendProfitSection({
       <div className="border-b border-slate-100 px-4 py-3">
         <h2 className="text-sm font-semibold text-slate-900">Chi tiết đơn đã cọc</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Chỉ đơn đã cọc trong khoảng đang chọn. Giá hàng ¥ là giá tệ lúc cào sản phẩm. Đơn không lưu giá tệ thì đảo từ
-          giá bán theo đúng lưới cào: giá bán ≈ CN¥ × hệ số × tỷ giá, làm tròn lên 10.000đ. Lợi nhuận = giá bán − (giá
-          hàng ¥ + ship Trung Quốc ¥ + ship cửa khẩu ¥) × tỷ giá − ship Hà Nội − quảng cáo.
+          Chỉ đơn đã cọc trong khoảng đang chọn. Giá thu là tiền hàng sau các chương trình sale, không gồm phí ship khách
+          trả. Giá vốn hàng Trung Quốc lấy giá gốc tệ × tỷ giá. Hàng Việt Nam lấy giá nhập đồng; hàng sale thanh lý kho
+          là 0đ và không cộng ship Trung Quốc. Lợi nhuận = giá thu − giá vốn − ship − quảng cáo.
         </p>
       </div>
 
@@ -426,13 +469,13 @@ export function AdSpendProfitSection({
             </label>
           </div>
           <p className="text-xs text-slate-500">
-            Mức ship chung áp cho mọi đơn. Sửa ô trong bảng nếu đơn đó khác. Đổi tỷ giá thì giá tệ đảo từ giá bán được
-            tính lại; giá tệ đã lưu lúc cào giữ nguyên.
+            Mức ship chung áp cho đơn có hàng tệ. Đơn chỉ có hàng Việt Nam hoặc sale kho giữ ship Trung Quốc bằng 0, trừ
+            khi sửa riêng đơn đó. Đổi tỷ giá thì tiền vốn tệ đổi lại; giá gốc tệ và giá nhập đồng đã lưu không đổi.
           </p>
 
           {summary.missing > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              {summary.missing} đơn chưa có đủ giá tệ nên tổng giá vốn và lợi nhuận chưa chốt. Nhập giá hàng ¥ cho các
+              {summary.missing} đơn chưa có đủ giá nhập nên tổng giá vốn và lợi nhuận chưa chốt. Nhập giá hàng ¥ cho các
               đơn đó.
             </div>
           ) : null}
@@ -451,8 +494,9 @@ export function AdSpendProfitSection({
                   <tr>
                     <th className="px-3 py-2 font-medium">Đơn</th>
                     <th className="px-3 py-2 font-medium">Ngày cọc</th>
-                    <th className="px-3 py-2 font-medium">Giá bán</th>
+                    <th className="px-3 py-2 font-medium">Giá thu</th>
                     <th className="px-3 py-2 font-medium">Giá hàng ¥</th>
+                    <th className="px-3 py-2 font-medium">Nhập VN</th>
                     <th className="px-3 py-2 font-medium">Ship TQ ¥</th>
                     <th className="px-3 py-2 font-medium">Cửa khẩu ¥</th>
                     <th className="px-3 py-2 font-medium">Hà Nội ₫</th>
@@ -470,7 +514,9 @@ export function AdSpendProfitSection({
                       <tr key={row.orderId} className="border-t border-slate-100">
                         <td className="px-3 py-2 font-medium text-slate-800">{row.orderCode}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-slate-600">{row.depositedOn || '—'}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">{formatVnd(row.revenueVnd)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap" title="Tiền hàng sau sale, không gồm phí ship khách trả">
+                          {formatVnd(row.revenueVnd)}
+                        </td>
                         <td className="px-3 py-2">
                           <input
                             aria-label={`Giá hàng tệ ${row.orderCode}`}
@@ -483,6 +529,7 @@ export function AdSpendProfitSection({
                             className="w-24 rounded border border-slate-300 px-2 py-1"
                           />
                         </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-slate-700">{formatVnd(row.goodsVnd)}</td>
                         <td className="px-3 py-2">
                           <input
                             aria-label={`Ship Trung Quốc ${row.orderCode}`}
