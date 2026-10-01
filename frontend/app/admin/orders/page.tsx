@@ -1059,6 +1059,8 @@ export default function AdminOrdersPage() {
                   <span className="font-semibold text-gray-800">
                     {revenueReport.cancelled_orders} hủy · {revenueReport.returned_orders ?? 0} hoàn
                   </span>
+                  . Đơn trùng (cùng số điện thoại, cùng sản phẩm, cùng tổng tiền) chỉ tính một lần;
+                  nếu trong nhóm có đơn đã đặt cọc thì chỉ tính đơn đó.
                 </p>
               </div>
             ) : !revenueError ? (

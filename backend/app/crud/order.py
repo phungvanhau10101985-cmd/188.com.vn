@@ -1,6 +1,6 @@
 # backend/app/crud/order.py - COMPLETE ORDER CRUD WITH DEPOSIT
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import and_, or_, func, desc
+from sqlalchemy import or_, func, desc
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -717,6 +717,120 @@ def resolve_order_stats_range(
     )
 
 
+def _enum_value(value: Any) -> str:
+    if value is None:
+        return ""
+    raw = getattr(value, "value", value)
+    return str(raw or "")
+
+
+def _money_key(value: Any) -> str:
+    try:
+        return format(Decimal(value or 0).quantize(Decimal("0.01")), "f")
+    except Exception:
+        return "0.00"
+
+
+def _phone_key(phone: str | None) -> str:
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if digits.startswith("84") and len(digits) >= 11:
+        digits = "0" + digits[2:]
+    return digits
+
+
+def _items_signature(items: Any) -> tuple:
+    parts = []
+    for item in items or []:
+        unit = item.unit_price if item.unit_price is not None else item.price
+        parts.append(
+            (
+                int(item.product_id or 0),
+                int(item.quantity or 0),
+                (item.selected_size or "").strip().lower(),
+                (item.selected_color or "").strip().lower(),
+                _money_key(unit),
+            )
+        )
+    parts.sort()
+    return tuple(parts)
+
+
+def revenue_duplicate_key(order: Order, items: Any = None) -> tuple:
+    """Đơn trùng: cùng SĐT, cùng tổng tiền, cùng dòng hàng (SP, SL, biến thể, giá)."""
+    return (
+        _phone_key(order.customer_phone),
+        _money_key(order.total_amount),
+        _items_signature(items if items is not None else getattr(order, "items", None)),
+    )
+
+
+def order_counts_as_deposited(order: Order) -> bool:
+    if _enum_value(order.status) == OrderStatus.CANCELLED.value:
+        return False
+    if _enum_value(order.payment_status) == PaymentStatus.REFUNDED.value:
+        return False
+    if Decimal(order.deposit_paid or 0) > 0:
+        return True
+    if order.deposit_paid_at is not None:
+        return True
+    if _enum_value(order.payment_status) == PaymentStatus.DEPOSIT_PAID.value:
+        return True
+    return _enum_value(order.status) == OrderStatus.DEPOSIT_PAID.value
+
+
+def _aware_dt(value: datetime | None) -> datetime:
+    if value is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def pick_revenue_representative(orders: List[Order]) -> Order:
+    """
+    Một nhóm đơn trùng chỉ giữ 1 đơn.
+    Có đơn đã cọc thì giữ đơn đã cọc; không có thì giữ 1 đơn chưa cọc.
+    """
+    deposited = [order for order in orders if order_counts_as_deposited(order)]
+    if deposited:
+        pool = deposited
+    else:
+        live = [
+            order
+            for order in orders
+            if _enum_value(order.payment_status) != PaymentStatus.REFUNDED.value
+        ]
+        pool = live or list(orders)
+
+    def rank(order: Order) -> tuple:
+        return (
+            _aware_dt(order.deposit_paid_at),
+            _aware_dt(order.created_at),
+            int(order.id or 0),
+        )
+
+    return max(pool, key=rank)
+
+
+def dedupe_orders_for_revenue(
+    orders: List[Order],
+    items_by_order: Optional[Dict[int, list]] = None,
+) -> List[Order]:
+    grouped: Dict[tuple, List[Order]] = {}
+    lookup = items_by_order or {}
+    for order in orders:
+        key = revenue_duplicate_key(order, lookup.get(order.id, []))
+        grouped.setdefault(key, []).append(order)
+    return [pick_revenue_representative(group) for group in grouped.values()]
+
+
+def _collected_deposit(order: Order) -> Decimal:
+    paid = Decimal(order.deposit_paid or 0)
+    if paid != 0:
+        return paid
+    return Decimal(order.deposit_amount or 0)
+
+
 def get_order_stats(
     db: Session,
     period: str = "today",
@@ -745,42 +859,55 @@ def get_order_stats(
             Order.created_at <= end_dt,
         )
 
-    orders_including_cancelled = query.count()
-    # Doanh thu và tổng đơn không gồm đơn khách (hoặc admin/hệ thống) đã hủy.
-    active_query = query.filter(Order.status != OrderStatus.CANCELLED.value)
-    total_orders = active_query.count()
-    total_revenue_result = active_query.with_entities(func.sum(Order.total_amount)).scalar()
-    total_revenue = total_revenue_result if total_revenue_result else Decimal("0")
-
-    status_counts: Dict[str, int] = {}
-    for status in OrderStatus:
-        count = query.filter(Order.status == status.value).count()
-        status_counts[f"{status.value}_orders"] = count
-
-    deposited_filter = and_(
-        Order.status != OrderStatus.CANCELLED.value,
-        Order.payment_status != PaymentStatus.REFUNDED.value,
-        or_(
-            Order.deposit_paid > 0,
-            Order.deposit_paid_at.isnot(None),
-            Order.payment_status == PaymentStatus.DEPOSIT_PAID.value,
-            Order.status == OrderStatus.DEPOSIT_PAID.value,
-        ),
-    )
-    deposited_q = query.filter(deposited_filter)
-    deposited_orders = deposited_q.count()
-    dep_rev_res = deposited_q.with_entities(func.sum(Order.total_amount)).scalar()
-    deposited_revenue = dep_rev_res if dep_rev_res else Decimal("0")
-    dep_amt_res = deposited_q.with_entities(
-        func.sum(
-            func.coalesce(
-                func.nullif(Order.deposit_paid, 0),
-                Order.deposit_amount,
-                0,
+    cancelled_orders = query.filter(Order.status == OrderStatus.CANCELLED.value).count()
+    # Doanh thu và tổng đơn không gồm đơn đã hủy.
+    # Đơn trùng (cùng SĐT + cùng hàng + cùng tổng tiền) chỉ tính 1 lần;
+    # trong nhóm có đơn đã cọc thì chỉ tính đơn đã cọc.
+    active_orders = query.filter(Order.status != OrderStatus.CANCELLED.value).all()
+    items_by_order: Dict[int, list] = {}
+    order_ids = [order.id for order in active_orders if order.id is not None]
+    if order_ids:
+        # Chỉ cột dòng hàng — không load Product (relationship joined kéo bảng products).
+        item_rows = (
+            db.query(
+                OrderItem.order_id,
+                OrderItem.product_id,
+                OrderItem.quantity,
+                OrderItem.selected_size,
+                OrderItem.selected_color,
+                OrderItem.unit_price,
+                OrderItem.price,
             )
+            .filter(OrderItem.order_id.in_(order_ids))
+            .all()
         )
-    ).scalar()
-    deposited_amount = dep_amt_res if dep_amt_res else Decimal("0")
+        for row in item_rows:
+            items_by_order.setdefault(row.order_id, []).append(row)
+    representatives = dedupe_orders_for_revenue(active_orders, items_by_order)
+    total_orders = len(representatives)
+    total_revenue = sum(
+        (Decimal(order.total_amount or 0) for order in representatives),
+        Decimal("0"),
+    )
+    orders_including_cancelled = total_orders + cancelled_orders
+
+    status_counts: Dict[str, int] = {f"{status.value}_orders": 0 for status in OrderStatus}
+    status_counts["cancelled_orders"] = cancelled_orders
+    for order in representatives:
+        key = f"{_enum_value(order.status)}_orders"
+        if key in status_counts and key != "cancelled_orders":
+            status_counts[key] += 1
+
+    deposited_orders_list = [order for order in representatives if order_counts_as_deposited(order)]
+    deposited_orders = len(deposited_orders_list)
+    deposited_revenue = sum(
+        (Decimal(order.total_amount or 0) for order in deposited_orders_list),
+        Decimal("0"),
+    )
+    deposited_amount = sum(
+        (_collected_deposit(order) for order in deposited_orders_list),
+        Decimal("0"),
+    )
 
     return {
         "total_orders": total_orders,
