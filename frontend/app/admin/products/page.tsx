@@ -2603,7 +2603,7 @@ export default function AdminProductsPage() {
         }
         const otherField = cur.field === 'cost_cny' ? 'cost_vnd' : 'cost_cny';
         const other = product[otherField];
-        if (other != null && other !== '' && Number(other) >= 0) {
+        if (other != null && Number(other) >= 0) {
           showToast('err', 'Chỉ điền một cột: giá gốc tệ hoặc giá Việt Nam');
           return;
         }
