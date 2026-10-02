@@ -22,6 +22,12 @@ _FIRST_JPG = re.compile(r"\.jpg", flags=re.I)
 _URL_IN_TEXT = re.compile(r"https?://[^\s\"'<>]+|//[^\s\"'<>]+", flags=re.I)
 _WEBP_RESIZE_SUFFIX = re.compile(r"(_\d+x\d+q?\d*|\.sum)\.(jpg|jpeg|png|webp)$", flags=re.I)
 _STATIC_IMAGE_EXT_RE = re.compile(r"\.(jpg|jpeg|png|webp)$", flags=re.I)
+# Thumb CDN ngay trước đuôi ảnh: .310x310.jpg, _300x300.jpg, .110x100.jpg, _220x220xz.jpg.
+# Không khớp kích thước trong slug (vd. 40x25x20cm).
+_DETAIL_SIZE_TOKEN = re.compile(
+    r"[._-]\d{2,4}x\d{2,4}(?:xz|q\d+)?(?:\.(?:jpe?g|png|webp|gif))?(?=$|[?#._])",
+    flags=re.I,
+)
 
 
 def truncate_alicdn_url_to_first_jpg(url: str) -> str:
@@ -90,6 +96,18 @@ def normalize_product_image_url(url: str) -> str:
     query = _strip_image_cache_query(base, query)
     out = _join_url_query(base, query)
     return "" if is_blocked_supplier_image_url(out) else out
+
+
+def is_excluded_detail_content_image(url: str) -> bool:
+    """Cột detail_images (Nội dung): bỏ PNG và URL có token kích thước (310x310, 300x300, 110x100)."""
+    u = (url or "").strip()
+    if not u:
+        return True
+    path = u.split("?", 1)[0].split("#", 1)[0]
+    lower = path.lower()
+    if lower.endswith(".png") or ".png." in lower or ".png_" in lower:
+        return True
+    return bool(_DETAIL_SIZE_TOKEN.search(path))
 
 
 def url_needs_image_normalization(url: str) -> bool:

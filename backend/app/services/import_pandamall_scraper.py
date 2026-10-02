@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from app.core.config import settings
-from app.services.alicdn_urls import normalize_product_image_url
+from app.services.alicdn_urls import is_excluded_detail_content_image, normalize_product_image_url
 from app.services.import_1688_scraper import canonical_1688_offer_pc_url, extract_offer_id
 from app.services.import_source_ids import (
     build_canonical_taobao_product_id,
@@ -806,6 +806,8 @@ def pandamall_row_to_product_data(
     detail_imgs = []
     for u in _dedupe_urls([str(x) for x in row.get("detail_images") or []]):
         if u.split("?")[0] in exclude_detail_keys:
+            continue
+        if is_excluded_detail_content_image(u):
             continue
         detail_imgs.append(u)
 

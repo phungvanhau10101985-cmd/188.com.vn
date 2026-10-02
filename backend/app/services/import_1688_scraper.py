@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.core.config import settings
-from app.services.alicdn_urls import normalize_product_image_url
+from app.services.alicdn_urls import is_excluded_detail_content_image, normalize_product_image_url
 from app.services.import_scraper_cookies import load_scraper_cookies, seed_playwright_context_cookies
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
@@ -432,10 +432,10 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
 
     gallery_candidates: List[str] = []
     for u in detail_dom:
-        if u not in seen_main:
+        if u not in seen_main and not is_excluded_detail_content_image(u):
             gallery_candidates.append(u)
     for u in regex_pool:
-        if u not in seen_main and u not in gallery_candidates:
+        if u not in seen_main and u not in gallery_candidates and not is_excluded_detail_content_image(u):
             gallery_candidates.append(u)
     gallery_sorted = _sort_product_images(gallery_candidates)[: max(max_main * 2, 32)]
     main_ordered = _dedupe(main_ordered)
@@ -451,7 +451,7 @@ def normalize_1688_payload(source_url: str, offer_id: Optional[str], payload: Di
         carousel_only_for_export = pick[:max_main]
     detail_block_only: List[str] = []
     for u in _sort_product_images(detail_dom):
-        if u in seen_main:
+        if u in seen_main or is_excluded_detail_content_image(u):
             continue
         detail_block_only.append(u)
     detail_block_only = _dedupe(detail_block_only)[: max(max_main * 3, 64)]
