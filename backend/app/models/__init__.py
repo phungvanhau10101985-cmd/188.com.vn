@@ -63,6 +63,8 @@ from app.models.vps_backup import VpsBackupSettings, VpsBackupRun
 print("[OK] VpsBackup models loaded")
 from app.models.ad_spend import AdSpendOrderCost, AdSpendSettings
 print("[OK] AdSpendSettings model loaded")
+from app.models.api_usage_log import ApiUsageLog
+print("[OK] ApiUsageLog model loaded")
 from app.models.push_subscription import UserPushSubscription
 print("[OK] UserPushSubscription model loaded")
 
@@ -245,6 +247,7 @@ __all__ = [
     "VpsBackupSettings",
     "VpsBackupRun",
     "AdSpendSettings",
+    "ApiUsageLog",
     "AdSpendOrderCost",
     "UserPushSubscription",
     "UserAddress",

@@ -26,6 +26,13 @@ def _get_app_config():
 
 _settings = _get_app_config()
 
+try:
+    from app.services.ai_usage_tracker import install_ai_usage_tracking
+
+    install_ai_usage_tracking()
+except Exception as _ai_usage_exc:
+    print(f"⚠️  Không bật ghi log chi phí API AI: {_ai_usage_exc}")
+
 
 def _setup_file_logging() -> None:
     """Ghi log ra LOG_FILE (.env) — trước đây biến này tồn tại nhưng không được gắn handler."""
@@ -209,6 +216,7 @@ def load_api_routes():
         ("admin", "/admin", "admin"),
         ("vps_backup_admin", "/admin/vps-backup", "admin-vps-backup"),
         ("ad_spend_admin", "/admin/ad-spend", "admin-ad-spend"),
+        ("api_stats_admin", "/admin/api-stats", "admin-api-stats"),
         ("embed_codes", "/embed-codes", "embed-codes"),
         ("shop_video_fab", "/shop-video-fab", "shop-video-fab"),
         ("categories", "/categories", "categories"),

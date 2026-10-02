@@ -32,6 +32,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "affiliate",
     "embed_codes",
     "ad_spend",
+    "api_stats",
     "chat_embeds",
     "shop_video_fab",
     "api_keys",

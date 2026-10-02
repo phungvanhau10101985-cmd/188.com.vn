@@ -71,6 +71,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         moduleKey: 'ad_spend',
         privilegedOnly: true,
       },
+      {
+        href: '/admin/api-stats',
+        label: 'Chi phí API AI',
+        moduleKey: 'api_stats',
+        privilegedOnly: true,
+      },
       { href: '/admin/bunny-cdn', label: 'Ảnh Bunny CDN', moduleKey: 'bunny_cdn' },
       { href: '/admin/api-keys', label: 'API & tích hợp', moduleKey: 'api_keys', privilegedOnly: true },
       { href: '/admin/vps-backup', label: 'Backup VPS', moduleKey: 'vps_backup', privilegedOnly: true },

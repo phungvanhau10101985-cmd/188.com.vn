@@ -2805,6 +2805,90 @@ export const adminAdSpendAPI = {
     }),
 };
 
+export type ApiStatsBucket = {
+  key: string;
+  label: string;
+  calls: number;
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costVnd: number;
+  inputCostVnd: number;
+  outputCostVnd: number;
+  calls1K?: number;
+  calls2K?: number;
+  calls4K?: number;
+  callsNoImage?: number;
+  listedPrice?: boolean;
+};
+
+export type ApiStatsDailyRow = {
+  dateKey: string;
+  dateLabel: string;
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  inputCostVnd: number;
+  outputCostVnd: number;
+  totalCostVnd: number;
+};
+
+export type ApiStatsReport = {
+  from: string;
+  to: string;
+  usdToVnd: number;
+  revenueVnd: number;
+  apiCostVnd: number;
+  apiCostUsd: number;
+  profitVnd: number;
+  callCount: number;
+  totals: {
+    calls: number;
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    inputCostVnd: number;
+    outputCostVnd: number;
+    totalCostVnd: number;
+  };
+  byModel: ApiStatsBucket[];
+  byFeature: ApiStatsBucket[];
+  byImageSize: ApiStatsBucket[];
+  recentLogs: Array<{
+    id: number;
+    model: string;
+    modelLabel: string;
+    feature: string;
+    featureLabel: string;
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    imageSize: string | null;
+    inputCostVnd: number;
+    outputCostVnd: number;
+    costVnd: number;
+    listedPrice: boolean;
+    createdAt: string | null;
+  }>;
+  charts: {
+    daily: ApiStatsDailyRow[];
+    modelKeys: string[];
+    modelLabels: Record<string, string>;
+    tokensByModelRows: Array<Record<string, string | number>>;
+    requestsByModelRows: Array<Record<string, string | number>>;
+    costByModelRows: Array<Record<string, string | number>>;
+    showOtherSeries: boolean;
+    otherKey: string;
+  };
+};
+
+export const adminApiStatsAPI = {
+  getReport: (dateFrom: string, dateTo: string) => {
+    const sp = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+    return fetchAdmin<ApiStatsReport>(`/admin/api-stats/report?${sp.toString()}`);
+  },
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: {
     status?: string;
