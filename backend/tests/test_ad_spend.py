@@ -182,6 +182,7 @@ def test_profit_uses_cny_rate_shipping_and_ads():
     from app.services.ad_spend_profit import (
         goods_cny_from_lines,
         goods_cny_matching_listing,
+        import_cost_parts,
         order_cost_vnd,
         period_profit,
         stored_cny_price,
@@ -242,6 +243,16 @@ def test_profit_uses_cny_rate_shipping_and_ads():
         vnd_per_cny=rate,
     )
     assert cost == Decimal("511000")
+    parts = import_cost_parts(
+        goods_cny=Decimal("100"),
+        goods_vnd=Decimal("0"),
+        uses_china_ship=True,
+        ship_china_cny=Decimal("10"),
+        ship_border_cny=Decimal("20"),
+        ship_hanoi_vnd=Decimal("30000"),
+        vnd_per_cny=rate,
+    )
+    assert parts == (Decimal("370000"), Decimal("141000"))
     revenue = Decimal("1000000")
     assert period_profit(revenue_vnd=revenue, cost_vnd=cost, ad_spend_vnd=Decimal("200000")) == Decimal("289000")
     assert period_profit(revenue_vnd=revenue, cost_vnd=None, ad_spend_vnd=Decimal("1")) is None

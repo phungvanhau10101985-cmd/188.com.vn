@@ -16,6 +16,9 @@ from app.services.ai_token_cost import IMAGE_TOKENS
 logger = logging.getLogger(__name__)
 
 _GEMINI_MODEL_RE = re.compile(r"/models/([^/:?]+):generateContent", re.IGNORECASE)
+_USAGE_FIELD_RE = re.compile(
+    r'"(promptTokenCount|prompt_token_count|candidatesTokenCount|candidates_token_count|totalTokenCount|total_token_count)"\s*:\s*(\d+)'
+)
 _HOOKED = False
 _HOOK_LOCK = threading.Lock()
 _QUEUE: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue(maxsize=5000)
@@ -194,6 +197,24 @@ def _is_tracked_url(url: str) -> bool:
     return False
 
 
+def _usage_body_from_tail(content: bytes) -> Dict[str, Any]:
+    """Ảnh Nano Banana trả JSON rất lớn. usageMetadata nằm cuối body, không cần parse cả ảnh."""
+    tail = content[-80_000:]
+    text = tail.decode("utf-8", errors="ignore")
+    found: Dict[str, int] = {}
+    for match in _USAGE_FIELD_RE.finditer(text):
+        found[match.group(1)] = int(match.group(2))
+    if not found:
+        return {}
+    return {
+        "usageMetadata": {
+            "promptTokenCount": found.get("promptTokenCount", found.get("prompt_token_count")),
+            "candidatesTokenCount": found.get("candidatesTokenCount", found.get("candidates_token_count")),
+            "totalTokenCount": found.get("totalTokenCount", found.get("total_token_count")),
+        }
+    }
+
+
 def parse_tracked_call(url: str, kwargs: Dict[str, Any], response: Any) -> Optional[Dict[str, Any]]:
     """Trả dict để ghi log, hoặc None nếu không phải lượt AI thành công."""
     if not _is_tracked_url(url):
@@ -202,14 +223,15 @@ def parse_tracked_call(url: str, kwargs: Dict[str, Any], response: Any) -> Optio
     if status is None or int(status) < 200 or int(status) >= 300:
         return None
     content = getattr(response, "content", b"") or b""
-    if len(content) > 25_000_000:
-        return None
-    try:
-        body = response.json()
-    except Exception:
-        return None
-    if not isinstance(body, dict):
-        return None
+    body: Dict[str, Any]
+    if len(content) > 8_000_000:
+        body = _usage_body_from_tail(content)
+    else:
+        try:
+            parsed_body = response.json()
+        except Exception:
+            parsed_body = None
+        body = parsed_body if isinstance(parsed_body, dict) else {}
     model = _model_from_call(url, kwargs) or str(body.get("model") or "").strip()
     if not model:
         return None

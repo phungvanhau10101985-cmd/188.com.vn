@@ -2838,9 +2838,18 @@ export type ApiStatsReport = {
   to: string;
   usdToVnd: number;
   revenueVnd: number;
+  orderCount: number;
+  goodsCostVnd: number | null;
+  shipCostVnd: number | null;
+  costReady: boolean;
+  missingGoodsCount: number;
+  costNote: string;
+  adSpendVnd: number | null;
+  adSpendReady: boolean;
+  adSpendNote: string;
   apiCostVnd: number;
   apiCostUsd: number;
-  profitVnd: number;
+  profitVnd: number | null;
   callCount: number;
   totals: {
     calls: number;
@@ -2885,7 +2894,7 @@ export type ApiStatsReport = {
 export const adminApiStatsAPI = {
   getReport: (dateFrom: string, dateTo: string) => {
     const sp = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
-    return fetchAdmin<ApiStatsReport>(`/admin/api-stats/report?${sp.toString()}`);
+    return fetchAdmin<ApiStatsReport>(`/admin/api-stats/report?${sp.toString()}`, { timeoutMs: 120000 });
   },
 };
 

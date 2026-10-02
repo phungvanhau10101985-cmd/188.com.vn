@@ -234,6 +234,30 @@ def summarize_stored_import(lines: Sequence[Tuple[Any, Any, Any, bool]]) -> Opti
     }
 
 
+def import_cost_parts(
+    *,
+    goods_cny: Optional[Decimal],
+    goods_vnd: Decimal,
+    uses_china_ship: bool,
+    ship_china_cny: Decimal,
+    ship_border_cny: Decimal,
+    ship_hanoi_vnd: Decimal,
+    vnd_per_cny: Optional[Decimal],
+) -> Optional[Tuple[Decimal, Decimal]]:
+    """(giá vốn đồng, ship đồng). Đơn chỉ có hàng đồng thì không cộng ship Trung Quốc."""
+    cny_goods = goods_cny if goods_cny is not None else Decimal("0")
+    ship_cny = ship_china_cny + ship_border_cny if uses_china_ship else Decimal("0")
+    needs_rate = uses_china_ship or cny_goods > 0 or ship_cny > 0
+    if needs_rate and (vnd_per_cny is None or vnd_per_cny <= 0):
+        return None
+    if uses_china_ship and goods_cny is None:
+        return None
+    rate = vnd_per_cny if vnd_per_cny is not None else Decimal("0")
+    capital = goods_vnd + cny_goods * rate
+    shipping = ship_cny * rate + ship_hanoi_vnd
+    return capital, shipping
+
+
 def order_cost_from_import(
     *,
     goods_cny: Optional[Decimal],
@@ -244,16 +268,19 @@ def order_cost_from_import(
     ship_hanoi_vnd: Decimal,
     vnd_per_cny: Optional[Decimal],
 ) -> Optional[Decimal]:
-    """Hàng tệ đổi ra đồng rồi cộng giá nhập Việt Nam. Đơn chỉ có hàng đồng thì không cộng ship Trung Quốc."""
-    cny_goods = goods_cny if goods_cny is not None else Decimal("0")
-    ship_cny = ship_china_cny + ship_border_cny if uses_china_ship else Decimal("0")
-    needs_rate = uses_china_ship or cny_goods > 0 or ship_cny > 0
-    if needs_rate and (vnd_per_cny is None or vnd_per_cny <= 0):
+    """Hàng tệ đổi ra đồng rồi cộng giá nhập Việt Nam và ship."""
+    parts = import_cost_parts(
+        goods_cny=goods_cny,
+        goods_vnd=goods_vnd,
+        uses_china_ship=uses_china_ship,
+        ship_china_cny=ship_china_cny,
+        ship_border_cny=ship_border_cny,
+        ship_hanoi_vnd=ship_hanoi_vnd,
+        vnd_per_cny=vnd_per_cny,
+    )
+    if parts is None:
         return None
-    if uses_china_ship and goods_cny is None:
-        return None
-    rate = vnd_per_cny if vnd_per_cny is not None else Decimal("0")
-    return goods_vnd + (cny_goods + ship_cny) * rate + ship_hanoi_vnd
+    return parts[0] + parts[1]
 
 
 def revenue_to_cny(goods_cny: Optional[Decimal]) -> Optional[Decimal]:
@@ -410,6 +437,8 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
     payload_orders: List[dict] = []
     revenue_total = Decimal("0")
     cost_total = Decimal("0")
+    goods_cost_total = Decimal("0")
+    ship_cost_total = Decimal("0")
     cost_complete = True
     missing_goods = 0
     for order in orders:
@@ -453,7 +482,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
             ship_china = ship_china_override if ship_china_override is not None else Decimal("0")
             ship_border = ship_border_override if ship_border_override is not None else Decimal("0")
         charge_china_ship = uses_china_ship or ship_china_override is not None or ship_border_override is not None
-        cost = order_cost_from_import(
+        parts = import_cost_parts(
             goods_cny=goods,
             goods_vnd=direct_vnd,
             uses_china_ship=charge_china_ship,
@@ -462,11 +491,14 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
             ship_hanoi_vnd=ship_hanoi,
             vnd_per_cny=rate,
         )
+        cost = None if parts is None else parts[0] + parts[1]
         if cost is None:
             cost_complete = False
             missing_goods += 1
         else:
             cost_total += cost
+            goods_cost_total += parts[0]
+            ship_cost_total += parts[1]
         deposited = order.deposit_paid_at or order.created_at
         payload_orders.append(
             {
@@ -515,6 +547,8 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
         "revenue_vnd": _money(revenue_total) or 0,
         "revenue_cny": _money(revenue_cny),
         "cost_vnd": _money(cost_total) if cost_complete else None,
+        "goods_cost_vnd": _money(goods_cost_total) if cost_complete else None,
+        "ship_cost_vnd": _money(ship_cost_total) if cost_complete else None,
         "orders": payload_orders,
     }
 

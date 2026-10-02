@@ -6,11 +6,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.api_usage_log import ApiUsageLog
-from app.models.order import Order, OrderStatus, PaymentStatus
 from app.services.ai_token_cost import (
     calc_cost_vnd_split,
     feature_label,
@@ -115,25 +113,96 @@ def _bucket_row(key: str, label: str, bucket: Dict[str, int], *, listed: Optiona
     return row
 
 
-def _revenue_vnd(db: Session, start: datetime, end: datetime) -> int:
-    paid = (PaymentStatus.PAID, PaymentStatus.DEPOSIT_PAID, PaymentStatus.PARTIALLY_PAID)
-    amount = (
-        db.query(func.coalesce(func.sum(Order.total_amount), 0))
-        .filter(
-            Order.created_at >= start,
-            Order.created_at <= end,
-            Order.payment_status.in_(paid),
-            Order.status != OrderStatus.CANCELLED,
-        )
-        .scalar()
-    )
+def _money_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
     try:
-        return int(round(float(amount or 0)))
+        return int(round(float(value)))
     except (TypeError, ValueError):
-        return 0
+        return None
 
 
-def build_api_usage_report(db: Session, from_ymd: str, to_ymd: str, *, ensure_table: bool = True) -> Dict[str, Any]:
+def commerce_costs_for_range(db: Session, date_from: str, date_to: str) -> Dict[str, Any]:
+    """Doanh thu đã cọc, giá vốn, ship và quảng cáo — cùng nguồn với bảng lợi nhuận chi phí quảng cáo."""
+    from app.services.ad_spend_profit import load_profit_sheet
+    from app.services.ad_spend_service import load_report
+
+    sheet = load_profit_sheet(db, date_from, date_to)
+    cost_ready = sheet.get("cost_vnd") is not None
+    missing = int(sheet.get("missing_goods_count") or 0)
+    goods = _money_int(sheet.get("goods_cost_vnd")) if cost_ready else None
+    ship = _money_int(sheet.get("ship_cost_vnd")) if cost_ready else None
+    if cost_ready:
+        cost_note = "Giá nhập và ship của đơn đã cọc, cùng công thức bảng chi phí quảng cáo"
+    elif missing:
+        cost_note = f"{missing} đơn còn thiếu giá nhập"
+    else:
+        cost_note = "Chưa đủ giá vốn và ship"
+
+    ad_spend = None
+    ad_ready = False
+    ad_note = "Chưa đọc được chi phí quảng cáo"
+    try:
+        ads = load_report(db, date_from, date_to)
+    except Exception as exc:
+        ads = None
+        ad_note = str(exc)
+    if ads is not None:
+        status = ads.get("total_status")
+        currency = str(ads.get("total_currency") or "").upper()
+        spend = ads.get("total_spend")
+        google = ads.get("google") or {}
+        facebook = ads.get("facebook") or {}
+        if status == "ok" and spend is not None and currency == "VND":
+            ad_spend = _money_int(spend)
+            ad_ready = ad_spend is not None
+            ad_note = "Google + Facebook"
+        elif status == "mixed_currency":
+            ad_note = "Google và Facebook không cùng đơn vị tiền"
+        elif currency and currency != "VND":
+            ad_note = f"Quảng cáo đang tính bằng {currency}, chưa quy đổi VND"
+        elif not google.get("configured") and not facebook.get("configured"):
+            ad_note = "Chưa cấu hình quảng cáo"
+        else:
+            errors = []
+            for name, block in (("Google Ads", google), ("Facebook Ads", facebook)):
+                if block.get("configured") and not block.get("ok") and block.get("error"):
+                    errors.append(f"{name}: {block['error']}")
+            ad_note = errors[0] if errors else "Chưa đọc đủ chi phí quảng cáo"
+    return {
+        "revenueVnd": _money_int(sheet.get("revenue_vnd")) or 0,
+        "orderCount": int(sheet.get("order_count") or 0),
+        "goodsCostVnd": goods,
+        "shipCostVnd": ship,
+        "costReady": bool(cost_ready and goods is not None and ship is not None),
+        "missingGoodsCount": missing,
+        "costNote": cost_note,
+        "adSpendVnd": ad_spend,
+        "adSpendReady": ad_ready,
+        "adSpendNote": ad_note,
+    }
+
+
+def period_profit_vnd(commerce: Dict[str, Any], api_cost: int) -> Optional[int]:
+    """Thu đã cọc − giá vốn − ship − quảng cáo − chi API. Thiếu một khoản thì chưa chốt lãi."""
+    if not commerce.get("costReady") or not commerce.get("adSpendReady"):
+        return None
+    goods = commerce.get("goodsCostVnd")
+    ship = commerce.get("shipCostVnd")
+    ads = commerce.get("adSpendVnd")
+    if goods is None or ship is None or ads is None:
+        return None
+    return int(commerce.get("revenueVnd") or 0) - int(goods) - int(ship) - int(ads) - int(api_cost)
+
+
+def build_api_usage_report(
+    db: Session,
+    from_ymd: str,
+    to_ymd: str,
+    *,
+    ensure_table: bool = True,
+    commerce: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     if ensure_table:
         from app.db.session import engine
 
@@ -249,7 +318,8 @@ def build_api_usage_report(db: Session, from_ymd: str, to_ymd: str, *, ensure_ta
     tokens_by_model = series_rows("inputTokens")
     show_other = other_any and any(int(row.get(CHART_OTHER_KEY) or 0) > 0 for row in tokens_by_model)
     api_cost = totals["costVnd"]
-    revenue = _revenue_vnd(db, start, end)
+    commerce_row = commerce if commerce is not None else commerce_costs_for_range(db, from_date, to_date)
+    profit = period_profit_vnd(commerce_row, api_cost)
     recent = []
     for item in prepared[:100]:
         recent.append(
@@ -275,10 +345,19 @@ def build_api_usage_report(db: Session, from_ymd: str, to_ymd: str, *, ensure_ta
         "from": from_date,
         "to": to_date,
         "usdToVnd": usd_to_vnd,
-        "revenueVnd": revenue,
+        "revenueVnd": int(commerce_row.get("revenueVnd") or 0),
+        "orderCount": int(commerce_row.get("orderCount") or 0),
+        "goodsCostVnd": commerce_row.get("goodsCostVnd"),
+        "shipCostVnd": commerce_row.get("shipCostVnd"),
+        "costReady": bool(commerce_row.get("costReady")),
+        "missingGoodsCount": int(commerce_row.get("missingGoodsCount") or 0),
+        "costNote": commerce_row.get("costNote") or "",
+        "adSpendVnd": commerce_row.get("adSpendVnd"),
+        "adSpendReady": bool(commerce_row.get("adSpendReady")),
+        "adSpendNote": commerce_row.get("adSpendNote") or "",
         "apiCostVnd": api_cost,
         "apiCostUsd": round(api_cost / usd_to_vnd, 4) if usd_to_vnd else 0,
-        "profitVnd": revenue - api_cost,
+        "profitVnd": profit,
         "callCount": totals["calls"],
         "totals": {
             "calls": totals["calls"],

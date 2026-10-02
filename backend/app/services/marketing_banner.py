@@ -26,6 +26,7 @@ from app.services.birthday_discount import BIRTHDAY_DISCOUNT_PERCENT
 from app.services.bunny_storage import (
     build_public_object_url,
     delete_bunny_storage_objects_for_urls,
+    delete_file_from_zone,
     upload_file_to_zone,
 )
 from app.services.category_size_guide_gemini import gemini_generate_image_from_text
@@ -37,6 +38,8 @@ VN_TZ = timezone(timedelta(hours=7))
 ASPECT_RATIO = "21:9"
 BANNER_KINDS = ("sale", "birthday", "warehouse")
 WAREHOUSE_DATE_KEY = "kho"
+MAX_BANNER_CREATE_ATTEMPTS = 3
+ADMIN_NOTIFIED_MARKER = "[đã báo admin]"
 
 
 def _pct_key(value: float | Decimal) -> str:
@@ -215,6 +218,56 @@ def _image_dimensions(data: bytes) -> tuple[Optional[int], Optional[int], str]:
             return width, height, ext if ext in (".png", ".jpg", ".webp") else ".png"
     except Exception:
         return None, None, ".png"
+
+
+def _delete_bunny_probe(zone: str, access_key: str, remote_path: str) -> None:
+    """Xóa file thử ngay. Cùng một path nên lần sau ghi đè nếu lần xóa này chưa kịp."""
+    for attempt in range(3):
+        try:
+            if delete_file_from_zone(
+                zone_name=zone,
+                access_key=access_key,
+                remote_path=remote_path,
+                timeout_sec=20,
+            ):
+                return
+        except Exception:
+            logger.warning(
+                "Xóa file thử Bunny lần %s lỗi: %s", attempt + 1, remote_path, exc_info=True
+            )
+    logger.warning("Đã ghi file thử Bunny nhưng không xóa được %s", remote_path)
+
+
+def _probe_bunny_before_image(*, kind: str, key: str, version: int) -> None:
+    """Ghi một file nhỏ lên Bunny trước khi gọi model ảnh, rồi xóa ngay. 401 thì dừng."""
+    zone = (getattr(settings, "BUNNY_STORAGE_ZONE_NAME", "") or "").strip()
+    access_key = (getattr(settings, "BUNNY_STORAGE_ACCESS_KEY", "") or "").strip()
+    public_base = (getattr(settings, "BUNNY_CDN_PUBLIC_BASE", "") or "").strip()
+    if not zone or not access_key or not public_base:
+        raise RuntimeError("Thiếu cấu hình Bunny Storage/CDN cho banner. Chưa gọi model ảnh.")
+    prefix = (getattr(settings, "BUNNY_UPLOAD_PATH_PREFIX", "") or "site").strip("/")
+    remote_path = f"{prefix}/marketing-banners/_probe/write-check.txt"
+    uploaded = False
+    try:
+        upload_file_to_zone(
+            zone_name=zone,
+            access_key=access_key,
+            remote_path=remote_path,
+            data=b"ok",
+            content_type="text/plain",
+            timeout_sec=20,
+        )
+        uploaded = True
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Bunny PUT 401" in message:
+            raise RuntimeError(
+                "Bunny từ chối ghi file thử (401). Không gọi model ảnh. Kiểm tra BUNNY_STORAGE_ACCESS_KEY."
+            ) from exc
+        raise RuntimeError(f"Không ghi được file thử lên Bunny. Chưa gọi model ảnh. {message}") from exc
+    finally:
+        if uploaded:
+            _delete_bunny_probe(zone, access_key, remote_path)
 
 
 def _upload_banner(data: bytes, *, kind: str, key: str, version: int) -> str:
@@ -398,8 +451,8 @@ def find_test_birthday_asset(
     return row, target
 
 
-def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
-    recipients = [
+def _admin_recipient_emails(db: Session) -> list[str]:
+    return [
         email
         for (email,) in (
             db.query(AdminUser.email)
@@ -410,6 +463,78 @@ def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
         )
         if email
     ]
+
+
+def _campaign_attempt_count(db: Session, *, kind: str, key: str) -> int:
+    latest = (
+        db.query(MarketingBannerAsset.version)
+        .filter(
+            MarketingBannerAsset.kind == kind,
+            MarketingBannerAsset.campaign_key == key,
+        )
+        .order_by(MarketingBannerAsset.version.desc())
+        .first()
+    )
+    if not latest:
+        return 0
+    return int(latest[0] or 0)
+
+
+def _notify_banner_error(db: Session, row: MarketingBannerAsset, *, reason: str) -> None:
+    """Báo admin mỗi lần tạo banner lỗi. Cùng một bản ghi chỉ gửi một email."""
+    try:
+        _send_banner_error_email(db, row, reason=reason)
+    except Exception:
+        logger.exception("Không gửi được email lỗi banner %s", row.campaign_key)
+        db.rollback()
+
+
+def _send_banner_error_email(db: Session, row: MarketingBannerAsset, *, reason: str) -> None:
+    current = row.error_message or ""
+    if ADMIN_NOTIFIED_MARKER in current:
+        return
+    title = {"birthday": "sinh nhật", "warehouse": "sale kho"}.get(row.kind, "sale")
+    admin_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/admin/promotions#ai-banners"
+    reason_text = (reason or current or "Không tạo được ảnh.").strip()
+    if ADMIN_NOTIFIED_MARKER in reason_text:
+        reason_text = reason_text.replace(ADMIN_NOTIFIED_MARKER, "").strip()
+    attempt = int(row.version or 0)
+    stopped = attempt >= MAX_BANNER_CREATE_ATTEMPTS
+    if stopped:
+        subject = f"[188.com.vn] Banner {title} {row.date_key} lỗi lần {attempt} — dừng tạo"
+        follow = "Hệ thống không tự tạo thêm. Có thể tạo lại thủ công."
+    else:
+        subject = f"[188.com.vn] Banner {title} {row.date_key} lỗi lần {attempt}"
+        follow = f"Hệ thống sẽ thử lại, tối đa {MAX_BANNER_CREATE_ATTEMPTS} lần."
+    body = (
+        f"Banner {title} {row.date_key}, giảm {float(row.discount_percent):g}% "
+        f"lỗi ở lần tạo {attempt}.\n"
+        f"Lỗi: {reason_text[:1000]}\n"
+        f"{follow}\n{admin_url}"
+    )
+    html_body = (
+        f"<p>Banner <strong>{html.escape(title)} {html.escape(row.date_key)}</strong>, "
+        f"giảm <strong>{float(row.discount_percent):g}%</strong> "
+        f"lỗi ở lần tạo <strong>{attempt}</strong>.</p>"
+        f"<p>Lỗi: {html.escape(reason_text[:1000])}</p>"
+        f"<p>{html.escape(follow)}</p>"
+        f'<p><a href="{html.escape(admin_url, quote=True)}">Mở quản trị banner</a></p>'
+    )
+    for recipient in _admin_recipient_emails(db):
+        try:
+            send_email(recipient, subject, body, html_body, prevent_threading=True)
+        except Exception:
+            logger.exception("Không gửi được email lỗi banner tới %s", recipient)
+            return
+    note = current
+    if ADMIN_NOTIFIED_MARKER not in note:
+        note = f"{note}\n{ADMIN_NOTIFIED_MARKER}".strip()
+    row.error_message = note[:4000]
+    db.commit()
+
+
+def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
+    recipients = _admin_recipient_emails(db)
     if not recipients:
         return
     admin_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/admin/promotions#ai-banners"
@@ -459,6 +584,7 @@ def _mark_stale_generating(db: Session, row: MarketingBannerAsset) -> None:
     row.is_active = False
     row.error_message = "Tạo banner bị treo (generating quá hạn)."
     db.commit()
+    _notify_banner_error(db, row, reason=row.error_message)
 
 
 def _find_generating_asset(
@@ -533,6 +659,23 @@ def generate_banner(
             return generating
         if generating:
             _mark_stale_generating(db, generating)
+        if _campaign_attempt_count(db, kind=kind, key=key) >= MAX_BANNER_CREATE_ATTEMPTS:
+            latest_stopped = (
+                db.query(MarketingBannerAsset)
+                .filter(
+                    MarketingBannerAsset.kind == kind,
+                    MarketingBannerAsset.campaign_key == key,
+                )
+                .order_by(MarketingBannerAsset.version.desc())
+                .first()
+            )
+            if latest_stopped is not None:
+                _notify_banner_error(
+                    db,
+                    latest_stopped,
+                    reason=latest_stopped.error_message or "Đã hết 3 lần tạo.",
+                )
+                return latest_stopped
 
     latest = (
         db.query(MarketingBannerAsset)
@@ -595,6 +738,7 @@ def generate_banner(
     asset_id = int(row.id)
 
     try:
+        _probe_bunny_before_image(kind=kind, key=key, version=version)
         # Không refresh/giữ transaction lúc gọi Gemini ảnh (30–120s).
         raw = gemini_generate_image_from_text(
             prompt,
@@ -649,6 +793,7 @@ def generate_banner(
             row.error_message = str(exc)[:4000]
             row.is_active = False
             db.commit()
+            _notify_banner_error(db, row, reason=str(exc))
         logger.exception("Tạo banner %s thất bại", key)
         raise
 
@@ -692,7 +837,7 @@ def _birthday_dates_with_customers(db: Session, today: date) -> list[date]:
 
 
 def _empty_kind_stats(*, extra: Optional[Dict[str, int]] = None) -> Dict[str, int]:
-    stats = {"created": 0, "reused": 0, "failed": 0, "pending": 0}
+    stats = {"created": 0, "reused": 0, "failed": 0, "pending": 0, "stopped": 0}
     if extra:
         stats.update(extra)
     return stats
@@ -734,6 +879,24 @@ def ensure_daily_banners(
             return
         if generating:
             _mark_stale_generating(db, generating)
+        if _campaign_attempt_count(db, kind=kind, key=key) >= MAX_BANNER_CREATE_ATTEMPTS:
+            latest_stopped = (
+                db.query(MarketingBannerAsset)
+                .filter(
+                    MarketingBannerAsset.kind == kind,
+                    MarketingBannerAsset.campaign_key == key,
+                )
+                .order_by(MarketingBannerAsset.version.desc())
+                .first()
+            )
+            if latest_stopped is not None:
+                _notify_banner_error(
+                    db,
+                    latest_stopped,
+                    reason=latest_stopped.error_message or "Đã hết 3 lần tạo.",
+                )
+            result[bucket]["stopped"] += 1
+            return
         if budget <= 0:
             result[bucket]["pending"] += 1
             return

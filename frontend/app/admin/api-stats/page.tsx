@@ -24,6 +24,10 @@ function formatVnd(n: number): string {
   return `${Math.round(n).toLocaleString('vi-VN')}₫`;
 }
 
+function formatVndOrDash(n: number | null | undefined): string {
+  return n == null ? '—' : formatVnd(n);
+}
+
 function formatShare(part: number, whole: number): string {
   if (!(whole > 0)) return '—';
   const pct = (part / whole) * 100;
@@ -200,11 +204,26 @@ function AdminApiStatsBody() {
           <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-6 shadow-sm">
             <h3 className="text-lg font-semibold text-slate-900">Thu chi & lợi nhuận</h3>
             <p className="text-sm text-slate-500">{formatRange(report.from, report.to)}</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div>
-                <p className="text-sm font-medium text-slate-500">Thu (doanh thu đơn)</p>
+                <p className="text-sm font-medium text-slate-500">Thu (doanh thu đã cọc)</p>
                 <p className="text-2xl font-bold text-emerald-700">{formatVnd(report.revenueVnd)}</p>
-                <p className="text-xs text-slate-500">Đơn đã thanh toán hoặc đã cọc, trừ đơn hủy</p>
+                <p className="text-xs text-slate-500">{formatNum(report.orderCount)} đơn đã cọc, cùng kỳ bảng chi phí quảng cáo</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Chi phí vốn</p>
+                <p className="text-2xl font-bold text-slate-800">{formatVndOrDash(report.goodsCostVnd)}</p>
+                <p className="text-xs text-slate-500">{report.costNote || 'Giá nhập hàng'}</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Chi phí ship</p>
+                <p className="text-2xl font-bold text-slate-800">{formatVndOrDash(report.shipCostVnd)}</p>
+                <p className="text-xs text-slate-500">Ship Trung Quốc, cửa khẩu và Hà Nội</p>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Chi phí quảng cáo</p>
+                <p className="text-2xl font-bold text-orange-700">{formatVndOrDash(report.adSpendVnd)}</p>
+                <p className="text-xs text-slate-500">{report.adSpendNote || 'Google + Facebook'}</p>
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-500">Chi (API)</p>
@@ -215,10 +234,10 @@ function AdminApiStatsBody() {
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-500">Lợi nhuận</p>
-                <p className={`text-2xl font-bold ${report.profitVnd >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                  {formatVnd(report.profitVnd)}
+                <p className={`text-2xl font-bold ${report.profitVnd == null ? 'text-slate-400' : report.profitVnd >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
+                  {formatVndOrDash(report.profitVnd)}
                 </p>
-                <p className="text-xs text-slate-500">Doanh thu đơn − chi api_usage_log trong cùng khoảng ngày</p>
+                <p className="text-xs text-slate-500">Doanh thu đã cọc − vốn − ship − quảng cáo − chi API</p>
               </div>
             </div>
           </section>

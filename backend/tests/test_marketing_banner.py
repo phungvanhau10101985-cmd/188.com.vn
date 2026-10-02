@@ -10,6 +10,10 @@ from app.models.user import User
 from app.services import marketing_banner as svc
 
 
+def _allow_bunny_probe(monkeypatch):
+    monkeypatch.setattr(svc, "_probe_bunny_before_image", lambda **kwargs: None)
+
+
 def _png_bytes() -> bytes:
     stream = BytesIO()
     Image.new("RGB", (2100, 900), "#ea580c").save(stream, format="PNG")
@@ -83,6 +87,7 @@ def test_generate_deduplicates_and_force_replaces_previous_image(monkeypatch):
     db = _session()
     raw = _png_bytes()
     deleted_urls: list[str] = []
+    _allow_bunny_probe(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -147,6 +152,7 @@ def test_generate_deduplicates_and_force_replaces_previous_image(monkeypatch):
 def test_failed_force_keeps_previous_ready_image(monkeypatch):
     db = _session()
     raw = _png_bytes()
+    _allow_bunny_probe(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -218,6 +224,7 @@ def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatc
     )
     db.commit()
     raw = _png_bytes()
+    _allow_bunny_probe(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -275,6 +282,151 @@ def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatc
         .count()
     )
     assert ready == 3
+
+
+def test_bunny_401_is_recorded_and_skips_image_model(monkeypatch):
+    db = _session()
+    image_calls = {"n": 0}
+
+    def _image(*_a, **_k):
+        image_calls["n"] += 1
+        return _png_bytes()
+
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", _image)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Tuổi mới an vui - quà riêng trao tay",
+            "cta": "NHẬN QUÀ CỦA TÔI",
+            "art_direction": "ấm áp sang trọng",
+        },
+    )
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ZONE_NAME", "zone-test")
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ACCESS_KEY", "bad-key")
+    monkeypatch.setattr(svc.settings, "BUNNY_CDN_PUBLIC_BASE", "https://cdn.test")
+
+    def _put(**_kwargs):
+        raise RuntimeError("Bunny PUT 401: Unauthorized")
+
+    monkeypatch.setattr(svc, "upload_file_to_zone", _put)
+    deleted = {"n": 0}
+    monkeypatch.setattr(svc, "delete_file_from_zone", lambda **_kwargs: deleted.__setitem__("n", deleted["n"] + 1))
+    monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
+    sent = {"n": 0}
+    monkeypatch.setattr(
+        svc,
+        "_notify_banner_error",
+        lambda db, row, *, reason: sent.__setitem__("n", sent["n"] + 1),
+    )
+
+    try:
+        svc.generate_banner(db, kind="birthday", day=7, month=9, discount_percent=10, notify_admin=False)
+    except RuntimeError as exc:
+        assert "401" in str(exc)
+        assert "Không gọi model ảnh" in str(exc)
+    else:
+        raise AssertionError("probe 401 phải dừng trước Gemini")
+
+    assert image_calls["n"] == 0
+    assert deleted["n"] == 0
+    failed = db.query(MarketingBannerAsset).filter_by(status="failed").one()
+    assert "401" in (failed.error_message or "")
+    assert sent["n"] == 1
+
+
+def test_bunny_probe_deletes_small_file_after_successful_write(monkeypatch):
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ZONE_NAME", "zone-test")
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ACCESS_KEY", "good-key")
+    monkeypatch.setattr(svc.settings, "BUNNY_CDN_PUBLIC_BASE", "https://cdn.test")
+    uploaded = {}
+
+    def _put(**kwargs):
+        uploaded["path"] = kwargs["remote_path"]
+        uploaded["data"] = kwargs["data"]
+
+    deleted = {"n": 0, "path": ""}
+    monkeypatch.setattr(svc, "upload_file_to_zone", _put)
+
+    def _delete(**kwargs):
+        deleted["n"] += 1
+        deleted["path"] = kwargs["remote_path"]
+        return True
+
+    monkeypatch.setattr(svc, "delete_file_from_zone", _delete)
+
+    svc._probe_bunny_before_image(kind="sale", key="sale-10-10-p8", version=1)
+    assert uploaded["data"] == b"ok"
+    assert uploaded["path"].endswith("/marketing-banners/_probe/write-check.txt")
+    assert deleted["path"] == uploaded["path"]
+    assert deleted["n"] == 1
+
+
+def test_bunny_probe_retries_delete_so_the_file_does_not_stay(monkeypatch):
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ZONE_NAME", "zone-test")
+    monkeypatch.setattr(svc.settings, "BUNNY_STORAGE_ACCESS_KEY", "good-key")
+    monkeypatch.setattr(svc.settings, "BUNNY_CDN_PUBLIC_BASE", "https://cdn.test")
+    monkeypatch.setattr(svc, "upload_file_to_zone", lambda **kwargs: None)
+    calls = {"n": 0}
+
+    def _delete(**_kwargs):
+        calls["n"] += 1
+        return calls["n"] >= 2
+
+    monkeypatch.setattr(svc, "delete_file_from_zone", _delete)
+    svc._probe_bunny_before_image(kind="sale", key="sale-10-10-p8", version=1)
+    assert calls["n"] == 2
+
+
+def test_banner_stops_after_three_failures_and_emails_admin_once(monkeypatch):
+    db = _session(with_users=True)
+    db.add(User(email="a@example.com", date_of_birth=date(1990, 9, 7), is_active=True))
+    db.commit()
+    calls = {"image": 0, "email": []}
+
+    def _boom(*_a, **_k):
+        calls["image"] += 1
+        raise RuntimeError("gemini down")
+
+    _allow_bunny_probe(monkeypatch)
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", _boom)
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Tuổi mới an vui - quà riêng trao tay",
+            "cta": "NHẬN QUÀ CỦA TÔI",
+            "art_direction": "ấm áp sang trọng",
+        },
+    )
+    monkeypatch.setattr(svc, "_admin_recipient_emails", lambda db: ["admin@example.com"])
+    monkeypatch.setattr(
+        svc,
+        "send_email",
+        lambda to, subject, body, html_body, prevent_threading=True: calls["email"].append(subject),
+    )
+    monkeypatch.setattr(svc, "list_upcoming_events", lambda db, limit=12: [])
+
+    import app.services.warehouse_clearance as warehouse_svc
+
+    monkeypatch.setattr(warehouse_svc, "get_warehouse_clearance_settings", lambda db: (False, 0))
+
+    for _ in range(3):
+        result = svc.ensure_daily_banners(db, today=date(2026, 9, 7), max_create=1, notify_admin=False)
+        assert result["birthday"]["failed"] == 1
+        assert result["birthday"]["stopped"] == 0
+    assert calls["image"] == 3
+    assert calls["email"] == [
+        "[188.com.vn] Banner sinh nhật 09-07 lỗi lần 1",
+        "[188.com.vn] Banner sinh nhật 09-07 lỗi lần 2",
+        "[188.com.vn] Banner sinh nhật 09-07 lỗi lần 3 — dừng tạo",
+    ]
+
+    stopped = svc.ensure_daily_banners(db, today=date(2026, 9, 7), max_create=1, notify_admin=False)
+    assert stopped["birthday"]["stopped"] == 1
+    assert stopped["birthday"]["failed"] == 0
+    assert calls["image"] == 3
+    assert len(calls["email"]) == 3
 
 
 def test_birthday_targets_only_dates_with_active_customers():
@@ -335,6 +487,7 @@ def test_birthday_test_prefers_existing_asset_inside_next_seven_days():
 def test_warehouse_banner_reuses_percent_and_creates_new_percent(monkeypatch):
     db = _session()
     raw = _png_bytes()
+    _allow_bunny_probe(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,

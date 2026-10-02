@@ -33,6 +33,23 @@ def test_parse_gemini_usage_and_image_size():
     assert parsed["total_token_count"] == 160
 
 
+def test_large_nano_banana_response_still_logs_usage_tail():
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent"
+    payload = {"generationConfig": {"imageConfig": {"imageSize": "4K"}}}
+    tail = b'padding' + (
+        b'"usageMetadata":{"promptTokenCount":800,"candidatesTokenCount":2000,"totalTokenCount":2800}'
+    )
+    content = b"x" * 8_000_001 + tail
+
+    resp = SimpleNamespace(status_code=200, content=content, json=lambda: (_ for _ in ()).throw(AssertionError("không parse cả body ảnh")))
+    parsed = parse_tracked_call(url, {"json": payload}, resp)
+    assert parsed is not None
+    assert parsed["model"] == "gemini-3-pro-image-preview"
+    assert parsed["image_size"] == "4K"
+    assert parsed["prompt_token_count"] == 800
+    assert parsed["total_token_count"] == 2800
+
+
 def test_report_aggregates_without_touching_database():
     class Row:
         def __init__(self):
@@ -71,10 +88,27 @@ def test_report_aggregates_without_touching_database():
                 return Query([Row()])
             return Query(scalar_value=100_000)
 
-    report = build_api_usage_report(Db(), "2026-10-01", "2026-10-02", ensure_table=False)
+    commerce = {
+        "revenueVnd": 100_000,
+        "orderCount": 2,
+        "goodsCostVnd": 20_000,
+        "shipCostVnd": 5_000,
+        "costReady": True,
+        "missingGoodsCount": 0,
+        "costNote": "ok",
+        "adSpendVnd": 10_000,
+        "adSpendReady": True,
+        "adSpendNote": "Google + Facebook",
+    }
+    report = build_api_usage_report(Db(), "2026-10-01", "2026-10-02", ensure_table=False, commerce=commerce)
     assert report["callCount"] == 1
     assert report["apiCostVnd"] == 7500
     assert report["revenueVnd"] == 100_000
-    assert report["profitVnd"] == 92_500
+    assert report["goodsCostVnd"] == 20_000
+    assert report["shipCostVnd"] == 5_000
+    assert report["adSpendVnd"] == 10_000
+    assert report["profitVnd"] == 57_500
+    blocked = dict(commerce, adSpendReady=False, adSpendVnd=None)
+    assert build_api_usage_report(Db(), "2026-10-01", "2026-10-02", ensure_table=False, commerce=blocked)["profitVnd"] is None
     assert report["byFeature"][0]["label"] == "SEO danh mục"
     assert report["byModel"][0]["listedPrice"] is True

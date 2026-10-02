@@ -242,6 +242,14 @@ def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> No
     try:
         _set_worker_process_title(job_id)
         _apply_worker_address_space_limit()
+        # Process spawn không chạy main.py nên hook requests chưa được bật.
+        # Không gắn thì lượt Nano Banana (generateContent) không vào api_usage_log.
+        try:
+            from app.services.ai_usage_tracker import install_ai_usage_tracking
+
+            install_ai_usage_tracking()
+        except Exception:
+            logger.exception("Không bật ghi log chi phí API trong worker bản địa hóa ảnh")
         from app.api.endpoints.image_localization import StartImageLocalizationPayload, _run_job
 
         payload = StartImageLocalizationPayload(**payload_dict)
