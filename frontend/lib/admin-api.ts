@@ -2654,6 +2654,8 @@ export type AdSpendDay = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions?: number;
+  conversion_value?: number;
 };
 
 export type AdSpendCampaign = {
@@ -2662,6 +2664,8 @@ export type AdSpendCampaign = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions?: number;
+  conversion_value?: number;
 };
 
 export type AdSpendPlatformReport = {
@@ -2672,6 +2676,8 @@ export type AdSpendPlatformReport = {
   spend: number;
   impressions: number;
   clicks: number;
+  conversions?: number;
+  conversion_value?: number;
   daily: AdSpendDay[];
   campaigns: AdSpendCampaign[];
   partial?: boolean;

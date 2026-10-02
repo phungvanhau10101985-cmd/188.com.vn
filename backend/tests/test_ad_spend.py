@@ -30,13 +30,25 @@ def test_flatten_and_aggregate_google_cost():
         [
             {
                 "campaign": {"id": "11", "name": "Brand"},
-                "metrics": {"costMicros": "1500000", "impressions": "10", "clicks": "2"},
+                "metrics": {
+                    "costMicros": "1500000",
+                    "impressions": "10",
+                    "clicks": "2",
+                    "conversions": "1.5",
+                    "conversionsValue": "40000",
+                },
                 "segments": {"date": "2026-09-02"},
                 "customer": {"currencyCode": "VND"},
             },
             {
                 "campaign": {"id": "11", "name": "Brand"},
-                "metrics": {"costMicros": "500000", "impressions": "4", "clicks": "1"},
+                "metrics": {
+                    "costMicros": "500000",
+                    "impressions": "4",
+                    "clicks": "1",
+                    "conversions": 1,
+                    "conversions_value": "10000",
+                },
                 "segments": {"date": "2026-09-01"},
                 "customer": {"currencyCode": "VND"},
             },
@@ -56,9 +68,34 @@ def test_flatten_and_aggregate_google_cost():
     assert out["currency"] == "VND"
     assert out["spend"] == 2.0
     assert out["clicks"] == 3
+    assert out["conversions"] == 2.5
+    assert out["conversion_value"] == 50000
     assert out["daily"][0]["date"] == "2026-09-02"
+    assert out["daily"][0]["conversions"] == 1.5
     assert out["campaigns"][0]["name"] == "Brand"
     assert out["campaigns"][0]["spend"] == 2.0
+    assert out["campaigns"][0]["conversion_value"] == 50000
+
+
+def test_meta_purchase_prefers_omni_and_does_not_double_count():
+    actions = [
+        {"action_type": "link_click", "value": "80"},
+        {"action_type": "omni_purchase", "value": "4"},
+        {"action_type": "purchase", "value": "4"},
+        {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "3"},
+    ]
+    values = [
+        {"action_type": "omni_purchase", "value": "900000"},
+        {"action_type": "purchase", "value": "900000"},
+        {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "700000"},
+    ]
+    assert svc.meta_action_amount(actions, svc._META_PURCHASE_TYPES) == 4
+    assert svc.meta_action_amount(values, svc._META_PURCHASE_TYPES) == 900000
+    assert svc.meta_action_amount(
+        [{"action_type": "offsite_conversion.fb_pixel_purchase", "value": "2"}],
+        svc._META_PURCHASE_TYPES,
+    ) == 2
+    assert svc.meta_action_amount(None, svc._META_PURCHASE_TYPES) == 0
 
 
 def test_google_oauth_error_message():

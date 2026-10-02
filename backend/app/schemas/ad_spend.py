@@ -39,6 +39,8 @@ class AdSpendDay(BaseModel):
     spend: float
     impressions: int
     clicks: int
+    conversions: float = 0
+    conversion_value: float = 0
 
 
 class AdSpendCampaign(BaseModel):
@@ -47,6 +49,8 @@ class AdSpendCampaign(BaseModel):
     spend: float
     impressions: int
     clicks: int
+    conversions: float = 0
+    conversion_value: float = 0
 
 
 class AdSpendPlatformReport(BaseModel):
@@ -57,6 +61,8 @@ class AdSpendPlatformReport(BaseModel):
     spend: float = 0
     impressions: int = 0
     clicks: int = 0
+    conversions: float = 0
+    conversion_value: float = 0
     daily: List[AdSpendDay] = Field(default_factory=list)
     campaigns: List[AdSpendCampaign] = Field(default_factory=list)
     partial: bool = False

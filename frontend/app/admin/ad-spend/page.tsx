@@ -113,14 +113,18 @@ function sumDaily(days: AdSpendDay[], from: string, to: string) {
   let spend = 0;
   let clicks = 0;
   let impressions = 0;
+  let conversions = 0;
+  let conversionValue = 0;
   for (const row of days) {
     if (row.date >= from && row.date <= to) {
       spend += row.spend;
       clicks += row.clicks;
       impressions += row.impressions;
+      conversions += row.conversions || 0;
+      conversionValue += row.conversion_value || 0;
     }
   }
-  return { spend, clicks, impressions };
+  return { spend, clicks, impressions, conversions, conversionValue };
 }
 
 function formatMoney(amount: number, currency: string | null): string {
@@ -146,6 +150,11 @@ function formatCount(n: number): string {
   return new Intl.NumberFormat('vi-VN').format(n || 0);
 }
 
+function formatConversions(n: number): string {
+  const rounded = Math.round((n || 0) * 100) / 100;
+  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(rounded);
+}
+
 function sourceLabel(source: string): string {
   if (source === 'database') return 'Đang dùng khóa đã lưu trên quản trị.';
   if (source === 'environment') return 'Đang dùng biến môi trường trên server.';
@@ -157,6 +166,8 @@ type Slice = {
   amount: number | null;
   clicks: number;
   impressions: number;
+  conversions: number;
+  conversionValue: number;
   currency: string | null;
   configured: boolean;
   ok: boolean;
@@ -168,6 +179,8 @@ function platformSlice(report: AdSpendPlatformReport, from: string, to: string, 
       amount: null,
       clicks: 0,
       impressions: 0,
+      conversions: 0,
+      conversionValue: 0,
       currency: report.currency,
       configured: report.configured,
       ok: report.ok,
@@ -178,6 +191,8 @@ function platformSlice(report: AdSpendPlatformReport, from: string, to: string, 
       amount: report.spend,
       clicks: report.clicks,
       impressions: report.impressions,
+      conversions: report.conversions || 0,
+      conversionValue: report.conversion_value || 0,
       currency: report.currency,
       configured: true,
       ok: true,
@@ -188,6 +203,8 @@ function platformSlice(report: AdSpendPlatformReport, from: string, to: string, 
     amount: summed.spend,
     clicks: summed.clicks,
     impressions: summed.impressions,
+    conversions: summed.conversions,
+    conversionValue: summed.conversionValue,
     currency: report.currency,
     configured: true,
     ok: true,
@@ -217,9 +234,15 @@ function platformText(slice: Slice | null | undefined, loading: boolean): string
   return formatMoney(slice.amount, slice.currency);
 }
 
-function platformHint(slice: Slice | null | undefined): string | undefined {
+function platformLines(slice: Slice | null | undefined): string[] | undefined {
   if (!slice?.ok || slice.amount == null) return undefined;
-  return `${formatCount(slice.clicks)} lượt nhấn · ${formatCount(slice.impressions)} lượt hiển thị`;
+  const each =
+    slice.conversions > 0 ? `${formatMoney(slice.amount / slice.conversions, slice.currency)} / chuyển đổi` : '— / chuyển đổi';
+  return [
+    `${formatCount(slice.clicks)} lượt nhấn · ${formatCount(slice.impressions)} lượt hiển thị`,
+    `${formatConversions(slice.conversions)} lượt chuyển đổi · ${each}`,
+    `Giá trị chuyển đổi ${formatMoney(slice.conversionValue, slice.currency)}`,
+  ];
 }
 
 function dayTotal(google: number | undefined, facebook: number | undefined, source: AdSpendReport): string {
@@ -640,11 +663,11 @@ export default function AdminAdSpendPage() {
           <HeroStat label="Lợi nhuận" value={profitText} hint={profitHint} negative={profitNegative} />
         </div>
         <div className="grid grid-cols-2 gap-px border-t border-orange-100 bg-orange-100 lg:grid-cols-4">
-          <MiniStat label="Google Ads" value={platformText(focusSpend?.google, spendLoading)} hint={platformHint(focusSpend?.google)} />
+          <MiniStat label="Google Ads" value={platformText(focusSpend?.google, spendLoading)} lines={platformLines(focusSpend?.google)} />
           <MiniStat
             label="Facebook Ads"
             value={platformText(focusSpend?.facebook, spendLoading)}
-            hint={platformHint(focusSpend?.facebook)}
+            lines={platformLines(focusSpend?.facebook)}
           />
           <MiniStat
             label="Doanh thu đã cọc"
@@ -893,12 +916,22 @@ function HeroStat({
   );
 }
 
-function MiniStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MiniStat({ label, value, hint, lines }: { label: string; value: string; hint?: string; lines?: string[] }) {
   return (
     <div className="bg-white px-4 py-3">
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 text-base font-bold tabular-nums text-[#ea580c]">{value}</p>
-      {hint ? <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p> : null}
+      {lines?.length ? (
+        <div className="mt-1 space-y-0.5">
+          {lines.map((line, index) => (
+            <p key={index} className="text-[11px] leading-snug text-slate-500">
+              {line}
+            </p>
+          ))}
+        </div>
+      ) : hint ? (
+        <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p>
+      ) : null}
     </div>
   );
 }
@@ -947,16 +980,27 @@ function CampaignTable({ title, report }: { title: string; report: AdSpendPlatfo
                 <th className="px-4 py-2 font-medium">Chiến dịch</th>
                 <th className="px-4 py-2 font-medium">Chi phí</th>
                 <th className="px-4 py-2 font-medium">Nhấn</th>
+                <th className="px-4 py-2 font-medium">Chuyển đổi</th>
+                <th className="px-4 py-2 font-medium">Chi phí/lượt</th>
+                <th className="px-4 py-2 font-medium">Giá trị</th>
               </tr>
             </thead>
             <tbody>
-              {report.campaigns.map((row) => (
-                <tr key={row.id} className="border-t border-slate-100">
-                  <td className="px-4 py-2 text-slate-800">{row.name}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{formatMoney(row.spend, report.currency)}</td>
-                  <td className="px-4 py-2">{formatCount(row.clicks)}</td>
-                </tr>
-              ))}
+              {report.campaigns.map((row) => {
+                const conversions = row.conversions || 0;
+                return (
+                  <tr key={row.id} className="border-t border-slate-100">
+                    <td className="px-4 py-2 text-slate-800">{row.name}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatMoney(row.spend, report.currency)}</td>
+                    <td className="px-4 py-2">{formatCount(row.clicks)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatConversions(conversions)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {conversions > 0 ? formatMoney(row.spend / conversions, report.currency) : '—'}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatMoney(row.conversion_value || 0, report.currency)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

@@ -22,7 +22,19 @@ logger = logging.getLogger(__name__)
 
 MAX_RANGE_DAYS = 366
 _CACHE_TTL_SECONDS = 180
+_METRICS_VERSION = "conv1"
 _cache: Dict[str, Tuple[float, dict]] = {}
+
+# Một sự kiện mua có thể xuất hiện ở nhiều action_type. Chỉ lấy loại đầu tiên có số,
+# ưu tiên omni_purchase vì Meta đã gộp và khử trùng kênh.
+_META_PURCHASE_TYPES = (
+    "omni_purchase",
+    "purchase",
+    "offsite_conversion.fb_pixel_purchase",
+    "onsite_web_purchase",
+    "web_in_store_purchase",
+    "onsite_conversion.purchase",
+)
 
 class AdSpendApiError(Exception):
     pass
@@ -242,6 +254,24 @@ def meta_error_message(payload: Any) -> str:
     return "Facebook từ chối yêu cầu."
 
 
+def _metric_bucket() -> Dict[str, float]:
+    return {
+        "spend": 0.0,
+        "impressions": 0.0,
+        "clicks": 0.0,
+        "conversions": 0.0,
+        "conversion_value": 0.0,
+    }
+
+
+def _add_metrics(bucket: Dict[str, float], spend: float, impressions: int, clicks: int, conversions: float, conversion_value: float) -> None:
+    bucket["spend"] += spend
+    bucket["impressions"] += impressions
+    bucket["clicks"] += clicks
+    bucket["conversions"] += conversions
+    bucket["conversion_value"] += conversion_value
+
+
 def aggregate_metric_rows(
     rows: List[dict],
     *,
@@ -253,6 +283,8 @@ def aggregate_metric_rows(
     campaign_name_key: str,
     currency_key: str,
     spend_is_micros: bool,
+    conversions_key: str = "conversions",
+    conversion_value_key: str = "conversion_value",
 ) -> dict:
     daily: Dict[str, Dict[str, float]] = {}
     campaigns: Dict[str, Dict[str, Any]] = {}
@@ -263,14 +295,14 @@ def aggregate_metric_rows(
         spend = micros_to_amount(raw_spend) if spend_is_micros else _as_float(raw_spend)
         impressions = _as_int(row.get(impressions_key))
         clicks = _as_int(row.get(clicks_key))
+        conversions = _as_float(row.get(conversions_key))
+        conversion_value = _as_float(row.get(conversion_value_key))
         code = str(row.get(currency_key) or "").strip()
         if code and not currency:
             currency = code
         if day:
-            bucket = daily.setdefault(day, {"spend": 0.0, "impressions": 0, "clicks": 0})
-            bucket["spend"] += spend
-            bucket["impressions"] += impressions
-            bucket["clicks"] += clicks
+            bucket = daily.setdefault(day, _metric_bucket())
+            _add_metrics(bucket, spend, impressions, clicks, conversions, conversion_value)
         cid = str(row.get(campaign_id_key) or "").strip() or str(row.get(campaign_name_key) or "").strip()
         if not cid:
             continue
@@ -279,14 +311,10 @@ def aggregate_metric_rows(
             {
                 "id": cid,
                 "name": str(row.get(campaign_name_key) or cid),
-                "spend": 0.0,
-                "impressions": 0,
-                "clicks": 0,
+                **_metric_bucket(),
             },
         )
-        camp["spend"] += spend
-        camp["impressions"] += impressions
-        camp["clicks"] += clicks
+        _add_metrics(camp, spend, impressions, clicks, conversions, conversion_value)
 
     daily_rows = [
         {
@@ -294,6 +322,8 @@ def aggregate_metric_rows(
             "spend": round(values["spend"], 2),
             "impressions": int(values["impressions"]),
             "clicks": int(values["clicks"]),
+            "conversions": round(values["conversions"], 2),
+            "conversion_value": round(values["conversion_value"], 2),
         }
         for day, values in sorted(daily.items(), reverse=True)
     ]
@@ -302,12 +332,16 @@ def aggregate_metric_rows(
         item["spend"] = round(float(item["spend"]), 2)
         item["impressions"] = int(item["impressions"])
         item["clicks"] = int(item["clicks"])
+        item["conversions"] = round(float(item["conversions"]), 2)
+        item["conversion_value"] = round(float(item["conversion_value"]), 2)
     spend_total = round(sum(item["spend"] for item in daily_rows), 2)
     return {
         "currency": currency,
         "spend": spend_total,
         "impressions": sum(item["impressions"] for item in daily_rows),
         "clicks": sum(item["clicks"] for item in daily_rows),
+        "conversions": round(sum(item["conversions"] for item in daily_rows), 2),
+        "conversion_value": round(sum(item["conversion_value"] for item in daily_rows), 2),
         "daily": daily_rows,
         "campaigns": campaign_rows,
     }
@@ -328,6 +362,8 @@ def flatten_google_results(results: List[dict]) -> List[dict]:
                 "spend_micros": metrics.get("costMicros", metrics.get("cost_micros")),
                 "impressions": metrics.get("impressions"),
                 "clicks": metrics.get("clicks"),
+                "conversions": metrics.get("conversions"),
+                "conversion_value": metrics.get("conversionsValue", metrics.get("conversions_value")),
                 "campaign_id": campaign.get("id"),
                 "campaign_name": campaign.get("name"),
                 "currency": customer.get("currencyCode") or customer.get("currency_code"),
@@ -350,6 +386,25 @@ def _as_int(value: Any) -> int:
         return 0
 
 
+def meta_action_amount(actions: Any, preferred: Tuple[str, ...]) -> float:
+    """Lấy một action_type, không cộng các loại trùng cùng một lượt mua."""
+    if not isinstance(actions, list):
+        return 0.0
+    found: Dict[str, float] = {}
+    for item in actions:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("action_type") or "").strip()
+        if not name:
+            continue
+        found[name] = _as_float(item.get("value"))
+    for name in preferred:
+        amount = found.get(name) or 0.0
+        if amount:
+            return amount
+    return 0.0
+
+
 def _empty_platform(*, configured: bool, error: Optional[str] = None) -> dict:
     return {
         "configured": configured,
@@ -359,6 +414,8 @@ def _empty_platform(*, configured: bool, error: Optional[str] = None) -> dict:
         "spend": 0,
         "impressions": 0,
         "clicks": 0,
+        "conversions": 0,
+        "conversion_value": 0,
         "daily": [],
         "campaigns": [],
         "partial": False,
@@ -522,7 +579,8 @@ def fetch_google_rows(creds: dict, start: date, end: date) -> Tuple[List[dict], 
         )
     query = (
         "SELECT segments.date, campaign.id, campaign.name, "
-        "metrics.cost_micros, metrics.impressions, metrics.clicks, customer.currency_code "
+        "metrics.cost_micros, metrics.impressions, metrics.clicks, "
+        "metrics.conversions, metrics.conversions_value, customer.currency_code "
         "FROM campaign "
         f"WHERE segments.date BETWEEN '{start.isoformat()}' AND '{end.isoformat()}' "
         "AND metrics.cost_micros > 0"
@@ -541,7 +599,10 @@ def fetch_meta_rows(access_token: str, ad_account_id: str, start: date, end: dat
     version = _meta_graph_version()
     url = f"https://graph.facebook.com/{version}/act_{ad_account_id}/insights"
     params = {
-        "fields": "campaign_id,campaign_name,spend,impressions,clicks,date_start,account_currency",
+        "fields": (
+            "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,"
+            "date_start,account_currency"
+        ),
         "level": "campaign",
         "time_increment": "1",
         "time_range": json.dumps({"since": start.isoformat(), "until": end.isoformat()}),
@@ -576,6 +637,8 @@ def fetch_meta_rows(access_token: str, ad_account_id: str, start: date, end: dat
                         "spend": item.get("spend"),
                         "impressions": item.get("impressions"),
                         "clicks": item.get("clicks"),
+                        "conversions": meta_action_amount(item.get("actions"), _META_PURCHASE_TYPES),
+                        "conversion_value": meta_action_amount(item.get("action_values"), _META_PURCHASE_TYPES),
                         "campaign_id": item.get("campaign_id"),
                         "campaign_name": item.get("campaign_name"),
                         "currency": item.get("account_currency"),
@@ -604,6 +667,7 @@ def _cache_key(kind: str, creds: dict, start: date, end: date) -> str:
                 start.isoformat(),
                 end.isoformat(),
                 _google_api_version(),
+                _METRICS_VERSION,
             ]
         )
     else:
@@ -615,6 +679,7 @@ def _cache_key(kind: str, creds: dict, start: date, end: date) -> str:
                 start.isoformat(),
                 end.isoformat(),
                 _meta_graph_version(),
+                _METRICS_VERSION,
             ]
         )
     return hashlib.sha256(material.encode()).hexdigest()
