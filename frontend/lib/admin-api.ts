@@ -2739,6 +2739,8 @@ export type AdSpendProfitOrder = {
   deposited_on: string | null;
   revenue_vnd: number;
   merchandise_vnd: number;
+  returned?: boolean;
+  uncollected_vnd?: number;
   catalog_goods_cny: number | null;
   goods_vnd?: number;
   uses_china_ship?: boolean;

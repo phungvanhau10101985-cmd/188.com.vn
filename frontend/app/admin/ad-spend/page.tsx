@@ -155,6 +155,11 @@ function formatConversions(n: number): string {
   return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 }).format(rounded);
 }
 
+function formatRoas(value: number, spend: number): string {
+  if (!spend) return '—';
+  return new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value / spend);
+}
+
 function sourceLabel(source: string): string {
   if (source === 'database') return 'Đang dùng khóa đã lưu trên quản trị.';
   if (source === 'environment') return 'Đang dùng biến môi trường trên server.';
@@ -219,6 +224,8 @@ function sameSummary(prev: AdSpendProfitSummary, next: AdSpendProfitSummary): bo
     prev.orderCount === next.orderCount &&
     prev.revenue === next.revenue &&
     prev.revenueCny === next.revenueCny &&
+    prev.returnedCount === next.returnedCount &&
+    prev.uncollected === next.uncollected &&
     prev.cost === next.cost &&
     prev.missing === next.missing &&
     prev.gross === next.gross &&
@@ -242,6 +249,7 @@ function platformLines(slice: Slice | null | undefined): string[] | undefined {
     `${formatCount(slice.clicks)} lượt nhấn · ${formatCount(slice.impressions)} lượt hiển thị`,
     `${formatConversions(slice.conversions)} lượt chuyển đổi · ${each}`,
     `Giá trị chuyển đổi ${formatMoney(slice.conversionValue, slice.currency)}`,
+    `ROAS ${formatRoas(slice.conversionValue, slice.amount)}`,
   ];
 }
 
@@ -672,7 +680,13 @@ export default function AdminAdSpendPage() {
           <MiniStat
             label="Doanh thu đã cọc"
             value={profitLoading ? 'Đang tính…' : formatMoney(profitForFocus?.revenue ?? 0, 'VND')}
-            hint={profitLoading ? undefined : `${profitForFocus?.orderCount ?? 0} đơn`}
+            hint={
+              profitLoading
+                ? undefined
+                : profitForFocus?.returnedCount
+                  ? `${profitForFocus.orderCount} đơn · trừ ${formatMoney(profitForFocus.uncollected, 'VND')} chưa cọc của ${profitForFocus.returnedCount} đơn hoàn`
+                  : `${profitForFocus?.orderCount ?? 0} đơn`
+            }
           />
           <MiniStat
             label="Giá vốn"
@@ -983,11 +997,13 @@ function CampaignTable({ title, report }: { title: string; report: AdSpendPlatfo
                 <th className="px-4 py-2 font-medium">Chuyển đổi</th>
                 <th className="px-4 py-2 font-medium">Chi phí/lượt</th>
                 <th className="px-4 py-2 font-medium">Giá trị</th>
+                <th className="px-4 py-2 font-medium">ROAS</th>
               </tr>
             </thead>
             <tbody>
               {report.campaigns.map((row) => {
                 const conversions = row.conversions || 0;
+                const conversionValue = row.conversion_value || 0;
                 return (
                   <tr key={row.id} className="border-t border-slate-100">
                     <td className="px-4 py-2 text-slate-800">{row.name}</td>
@@ -997,7 +1013,8 @@ function CampaignTable({ title, report }: { title: string; report: AdSpendPlatfo
                     <td className="px-4 py-2 whitespace-nowrap">
                       {conversions > 0 ? formatMoney(row.spend / conversions, report.currency) : '—'}
                     </td>
-                    <td className="px-4 py-2 whitespace-nowrap">{formatMoney(row.conversion_value || 0, report.currency)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatMoney(conversionValue, report.currency)}</td>
+                    <td className="px-4 py-2 whitespace-nowrap">{formatRoas(conversionValue, row.spend)}</td>
                   </tr>
                 );
               })}

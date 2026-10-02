@@ -302,6 +302,19 @@ def test_profit_uses_cny_rate_shipping_and_ads():
     ) is None
 
 
+def test_returned_order_drops_uncollected_goods_and_keeps_deposit():
+    from decimal import Decimal
+
+    from app.services.ad_spend_profit import recognized_goods_vnd
+
+    goods = Decimal("1000000")
+    assert recognized_goods_vnd(goods, Decimal("300000"), returned=False) == goods
+    assert recognized_goods_vnd(goods, Decimal("300000"), returned=True) == Decimal("300000")
+    assert recognized_goods_vnd(goods, Decimal("1000000"), returned=True) == goods
+    assert recognized_goods_vnd(goods, Decimal("1200000"), returned=True) == goods
+    assert recognized_goods_vnd(goods, 0, returned=True) == Decimal("0")
+
+
 def test_profit_uses_stored_import_and_collected_sale_price():
     from decimal import Decimal
 

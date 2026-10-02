@@ -17,6 +17,8 @@ export type AdSpendProfitSummary = {
   orderCount: number;
   revenue: number;
   revenueCny: number | null;
+  returnedCount: number;
+  uncollected: number;
   cost: number | null;
   missing: number;
   gross: number | null;
@@ -38,6 +40,8 @@ type ProfitRow = {
   depositedOn: string | null;
   revenueVnd: number;
   merchandiseVnd: number;
+  returned: boolean;
+  uncollectedVnd: number;
   lines: ProfitLine[];
   catalogGoodsCny: number | null;
   goodsVnd: number;
@@ -135,6 +139,8 @@ function rowsFromSheet(sheet: AdSpendProfitSheet): ProfitRow[] {
     depositedOn: order.deposited_on,
     revenueVnd: order.revenue_vnd,
     merchandiseVnd: order.merchandise_vnd || 0,
+    returned: order.returned === true,
+    uncollectedVnd: order.uncollected_vnd || 0,
     lines: (order.lines || []).map((line) => ({
       quantity: line.quantity,
       unitPriceVnd: line.unit_price_vnd,
@@ -287,6 +293,8 @@ export function AdSpendProfitSection({
 
   const summary = useMemo(() => {
     const revenue = rows.reduce((sum, row) => sum + row.revenueVnd, 0);
+    const returnedCount = rows.reduce((sum, row) => sum + (row.returned ? 1 : 0), 0);
+    const uncollected = rows.reduce((sum, row) => sum + (row.returned ? row.uncollectedVnd : 0), 0);
     let goodsSum = 0;
     let goodsMissing = 0;
     for (const row of rows) {
@@ -305,7 +313,7 @@ export function AdSpendProfitSection({
     const costReady = missing === 0;
     const gross = costReady ? revenue - cost : null;
     const profit = costReady && adSpendState === 'ready' && adSpend != null ? revenue - cost - adSpend : null;
-    return { revenue, revenueCny, cost: costReady ? cost : null, missing, gross, profit };
+    return { revenue, revenueCny, returnedCount, uncollected, cost: costReady ? cost : null, missing, gross, profit };
   }, [rows, rateNumber, adSpend, adSpendState]);
 
   useEffect(() => {
@@ -316,6 +324,8 @@ export function AdSpendProfitSection({
       orderCount: rows.length,
       revenue: summary.revenue,
       revenueCny: summary.revenueCny,
+      returnedCount: summary.returnedCount,
+      uncollected: summary.uncollected,
       cost: summary.cost,
       missing: summary.missing,
       gross: summary.gross,
@@ -514,8 +524,20 @@ export function AdSpendProfitSection({
                       <tr key={row.orderId} className="border-t border-slate-100">
                         <td className="px-3 py-2 font-medium text-slate-800">{row.orderCode}</td>
                         <td className="px-3 py-2 whitespace-nowrap text-slate-600">{row.depositedOn || '—'}</td>
-                        <td className="px-3 py-2 whitespace-nowrap" title="Tiền hàng sau sale, không gồm phí ship khách trả">
+                        <td
+                          className="px-3 py-2 whitespace-nowrap"
+                          title={
+                            row.returned
+                              ? 'Đơn hoàn: giữ tiền cọc, trừ phần hàng khách chưa trả'
+                              : 'Tiền hàng sau sale, không gồm phí ship khách trả'
+                          }
+                        >
                           {formatVnd(row.revenueVnd)}
+                          {row.returned ? (
+                            <p className="mt-0.5 text-[11px] font-normal text-amber-700">
+                              Hoàn · trừ {formatVnd(row.uncollectedVnd)} chưa cọc
+                            </p>
+                          ) : null}
                         </td>
                         <td className="px-3 py-2">
                           <input

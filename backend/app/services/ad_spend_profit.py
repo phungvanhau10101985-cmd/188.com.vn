@@ -4,6 +4,7 @@ Giá thu = tiền hàng sau mọi chương trình sale (tạm tính dòng trừ 
 Giá vốn hàng Trung Quốc = giá gốc tệ × tỷ giá. Hàng Việt Nam, kể cả sale thanh lý kho, dùng giá nhập đồng (sale = 0đ).
 Ship Trung Quốc và cửa khẩu chỉ cộng vào đơn còn hàng tệ.
 Lợi nhuận = giá thu − giá vốn − ship − quảng cáo. Quảng cáo trừ một lần ở tổng kỳ, không chia vào từng đơn.
+Đơn hoàn (khách nhận hàng rồi không lấy) vẫn giữ cọc: giá thu chỉ còn phần đã cọc, trừ phần hàng chưa thu. Giá vốn không đổi.
 """
 
 from __future__ import annotations
@@ -154,6 +155,27 @@ def order_cost_vnd(
         return None
     cny = goods_cny + ship_china_cny + ship_border_cny
     return cny * vnd_per_cny + ship_hanoi_vnd
+
+
+def uncollected_goods_vnd(merchandise_vnd: Decimal, deposit_paid: Any) -> Decimal:
+    """Phần giá hàng chưa nằm trong tiền cọc đã thu. Không gồm phí ship."""
+    paid = _dec(deposit_paid) or Decimal("0")
+    if paid < 0:
+        paid = Decimal("0")
+    gap = merchandise_vnd - paid
+    return gap if gap > 0 else Decimal("0")
+
+
+def recognized_goods_vnd(merchandise_vnd: Decimal, deposit_paid: Any, *, returned: bool) -> Decimal:
+    """Đơn thường giữ nguyên giá hàng. Đơn hoàn chỉ giữ phần đã cọc."""
+    if not returned:
+        return merchandise_vnd
+    return merchandise_vnd - uncollected_goods_vnd(merchandise_vnd, deposit_paid)
+
+
+def _order_status(order: Order) -> str:
+    status = order.status
+    return str(getattr(status, "value", status) or "")
 
 
 def collected_goods_vnd(
@@ -442,13 +464,16 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
     cost_complete = True
     missing_goods = 0
     for order in orders:
-        revenue = collected_goods_vnd(
+        merchandise = collected_goods_vnd(
             order.subtotal,
             order.discount_amount,
             order.total_amount,
             order.shipping_fee,
             order.wallet_amount_used,
         )
+        returned = _order_status(order) == OrderStatus.RETURNED.value
+        uncollected = uncollected_goods_vnd(merchandise, order.deposit_paid) if returned else Decimal("0")
+        revenue = merchandise - uncollected
         revenue_total += revenue
         order_lines = lines_by_order.get(order.id) or []
         stored = summarize_stored_import(
@@ -467,7 +492,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
             catalog = goods_cny_matching_listing(
                 [(line["quantity"], line["unit"], line["raw"], line["line_total"]) for line in order_lines],
                 rate,
-                revenue,
+                merchandise,
             )
         override = overrides.get(order.id)
         goods_override = _dec(override.goods_cny) if override is not None else None
@@ -506,7 +531,9 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 "order_code": order.order_code,
                 "deposited_on": _vn_day(deposited),
                 "revenue_vnd": _money(revenue) or 0,
-                "merchandise_vnd": _money(revenue) or 0,
+                "merchandise_vnd": _money(merchandise) or 0,
+                "returned": returned,
+                "uncollected_vnd": _money(uncollected) or 0,
                 "catalog_goods_cny": _money(catalog),
                 "goods_vnd": _money(direct_vnd) or 0,
                 "uses_china_ship": uses_china_ship,
