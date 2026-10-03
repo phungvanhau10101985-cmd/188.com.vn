@@ -12,6 +12,7 @@ class NotificationCreate(NotificationBase):
     user_id: int
     expires_at: Optional[datetime] = None
     dedupe_key: Optional[str] = None
+    action_url: Optional[str] = None
 
 class NotificationUpdate(BaseModel):
     is_read: Optional[bool] = None
@@ -22,6 +23,7 @@ class NotificationResponse(NotificationBase):
     is_read: bool
     created_at: datetime
     expires_at: Optional[datetime] = None
+    action_url: Optional[str] = None
 
     class Config:
         from_attributes = True

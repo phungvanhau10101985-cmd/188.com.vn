@@ -15,7 +15,6 @@ from app.models.order import Order
 from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate
 from app.services import email_service
-from app.services import push_service
 
 logger = logging.getLogger(__name__)
 _QUEUE: queue.Queue[int] = queue.Queue()
@@ -101,7 +100,7 @@ def _notify_customer_shipper_confirmed(order_id: int) -> None:
         )
 
         try:
-            notif = crud_notification.create_notification(
+            crud_notification.create_notification(
                 db,
                 NotificationCreate(
                     user_id=order.user_id,
@@ -109,19 +108,9 @@ def _notify_customer_shipper_confirmed(order_id: int) -> None:
                     content=content,
                     type="order",
                     dedupe_key=f"order:{order.id}:shipper_confirmed",
+                    action_url=_order_detail_path(order_id),
                 ),
             )
-            try:
-                push_service.send_push_to_user(
-                    db,
-                    order.user_id,
-                    title,
-                    content[:500],
-                    url=_order_detail_path(order_id),
-                    notification_id=notif.id,
-                )
-            except Exception:
-                logger.debug("shipper_notify push failed order_id=%s", order_id, exc_info=True)
             db.commit()
         except Exception:
             logger.exception("shipper_notify in-app failed order_id=%s", order_id)
@@ -170,7 +159,7 @@ def notify_customer_delivered_with_review(order_id: int, *, source: str = "custo
         review_path = f"/account/orders/{order.id}/review"
 
         try:
-            notif = crud_notification.create_notification(
+            crud_notification.create_notification(
                 db,
                 NotificationCreate(
                     user_id=order.user_id,
@@ -178,19 +167,9 @@ def notify_customer_delivered_with_review(order_id: int, *, source: str = "custo
                     content=content,
                     type="order",
                     dedupe_key=f"order:{order.id}:delivered",
+                    action_url=review_path,
                 ),
             )
-            try:
-                push_service.send_push_to_user(
-                    db,
-                    order.user_id,
-                    title,
-                    content[:500],
-                    url=review_path,
-                    notification_id=notif.id,
-                )
-            except Exception:
-                logger.debug("delivered_review push failed order_id=%s", order.id, exc_info=True)
             db.commit()
         except Exception:
             logger.exception("delivered_review in-app failed order_id=%s", order.id)

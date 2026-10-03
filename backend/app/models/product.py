@@ -87,6 +87,8 @@ class Product(Base):
     slug = Column(String(500), unique=True, index=True)
     # Gom sẵn text tìm kiếm (lower) — index pg_trgm trên Postgres; tránh concat runtime mỗi query.
     search_document = Column(Text, nullable=True)
+    # Chữ OCR đã lọc theo ảnh gốc. API catalog gửi thành image_consult_context, không nằm trong product_info.
+    consult_image_text = Column(JSON, nullable=True)
     
     # ForeignKey đến Category (quan hệ database)
     category_id = Column(

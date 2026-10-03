@@ -99,12 +99,16 @@ def send_for_notification(db: Session, notif: Notification) -> None:
     if not is_push_configured():
         return
     try:
+        from app.services.notification_links import attach_action_urls, clean_action_url
+
+        attach_action_urls(db, [notif])
+        url = clean_action_url(getattr(notif, "action_url", None)) or "/account/notifications"
         send_push_to_user(
             db,
             notif.user_id,
             notif.title,
             (notif.content or "")[:500],
-            url="/account/notifications",
+            url=url,
             notification_id=notif.id,
         )
     except Exception as e:

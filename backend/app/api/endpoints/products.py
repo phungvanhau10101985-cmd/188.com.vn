@@ -275,6 +275,7 @@ def _serialize_products_for_api(
     *,
     include_warehouse_clearance: bool = False,
     admin_list: bool = False,
+    include_image_consult_context: bool = False,
 ) -> List:
     paired: List = []
     if admin_list:
@@ -291,6 +292,7 @@ def _serialize_products_for_api(
         return [entry[1] for entry in paired]
 
     from app.services import sale_calendar as sale_calendar_svc
+    from app.services.consult_image_text import build_image_consult_context
 
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
     for product in raw_products:
@@ -299,6 +301,11 @@ def _serialize_products_for_api(
             # Dòng kho thanh lý: giá sale kho riêng — không chồng lịch Sale site (6/6, …).
             if not getattr(product, "is_warehouse_clearance", False):
                 sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
+            consult = None
+            if include_image_consult_context:
+                consult = build_image_consult_context(getattr(product, "consult_image_text", None))
+            if consult:
+                d["image_consult_context"] = consult
             paired.append((product, d))
         except Exception:
             paired.append((None, product))
@@ -851,6 +858,7 @@ def _read_products_list_impl(
             user=user,
             include_warehouse_clearance=include_warehouse_clearance,
             admin_list=admin_list,
+            include_image_consult_context=not admin_list,
         )
 
     if (
@@ -936,6 +944,11 @@ def _read_products_incremental_sync(
         payload["db_id"] = payload["id"]
         payload["id"] = payload["product_id"]
         payload["is_deleted"] = False
+        from app.services.consult_image_text import build_image_consult_context
+
+        consult = build_image_consult_context(getattr(item, "consult_image_text", None))
+        if consult:
+            payload["image_consult_context"] = consult
         data.append(payload)
 
     total_pages = (total_records + limit - 1) // limit if total_records else 0

@@ -16,12 +16,23 @@ function ictShiftDays(days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
+function ictMonthBounds(offset: number): { from: string; to: string } {
+  const [y, m] = ictYmd().split('-').map((part) => Number.parseInt(part, 10));
+  const from = new Date(Date.UTC(y, m - 1 + offset, 1)).toISOString().slice(0, 10);
+  const to = new Date(Date.UTC(y, m + offset, 0)).toISOString().slice(0, 10);
+  return { from, to };
+}
+
 function formatNum(n: number): string {
   return n.toLocaleString('vi-VN');
 }
 
 function formatVnd(n: number): string {
-  return `${Math.round(n).toLocaleString('vi-VN')}₫`;
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Math.round(n));
 }
 
 function formatVndOrDash(n: number | null | undefined): string {
@@ -40,16 +51,16 @@ function formatRange(from: string, to: string): string {
     const [y, m, d] = ymd.split('-');
     return y && m && d ? `${d}/${m}/${y}` : ymd;
   };
-  return from === to ? vi(from) : `${vi(from)} – ${vi(to)}`;
+  return from === to ? vi(from) : `${vi(from)} → ${vi(to)}`;
 }
 
 function perCall(cost: number, calls: number): string {
-  return `~${formatVnd(calls ? Math.round(cost / calls) : 0)}/lượt`;
+  return `~${formatVnd(calls ? Math.round(cost / calls) : 0)} / lượt`;
 }
 
 export default function AdminApiStatsPage() {
   return (
-    <Suspense fallback={<p className="p-6 text-sm text-slate-500">Đang tải thống kê API…</p>}>
+    <Suspense fallback={<PageSkeleton />}>
       <AdminApiStatsBody />
     </Suspense>
   );
@@ -58,7 +69,7 @@ export default function AdminApiStatsPage() {
 function AdminApiStatsBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromDate = searchParams.get('from')?.trim() || ictShiftDays(-30);
+  const fromDate = searchParams.get('from')?.trim() || ictShiftDays(-29);
   const toDate = searchParams.get('to')?.trim() || ictYmd();
   const [draftFrom, setDraftFrom] = useState(fromDate);
   const [draftTo, setDraftTo] = useState(toDate);
@@ -113,426 +124,502 @@ function AdminApiStatsBody() {
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedId]);
 
+  const prevMonth = ictMonthBounds(-1);
   const presets = [
     { label: 'Hôm nay', from: ictYmd(), to: ictYmd() },
+    { label: 'Hôm qua', from: ictShiftDays(-1), to: ictShiftDays(-1) },
     { label: '7 ngày', from: ictShiftDays(-6), to: ictYmd() },
     { label: '30 ngày', from: ictShiftDays(-29), to: ictYmd() },
     { label: '90 ngày', from: ictShiftDays(-89), to: ictYmd() },
     { label: 'Tháng này', from: `${ictYmd().slice(0, 8)}01`, to: ictYmd() },
+    { label: 'Tháng trước', from: prevMonth.from, to: prevMonth.to },
     { label: 'Năm nay', from: `${ictYmd().slice(0, 4)}-01-01`, to: ictYmd() },
   ];
 
   const totals = report?.totals;
   const selected = report?.recentLogs.find((row) => row.id === selectedId) ?? null;
   const whole = totals?.totalCostVnd ?? 0;
+  const activePreset = presets.find((preset) => preset.from === fromDate && preset.to === toDate)?.label ?? null;
+  const viewingLabel = activePreset ? `${activePreset} · ${formatRange(fromDate, toDate)}` : formatRange(fromDate, toDate);
+  const profitNegative = report?.profitVnd != null && report.profitVnd < 0;
+
+  const presetClass = (active: boolean) =>
+    active
+      ? 'border-[#ea580c] bg-[#ea580c] font-semibold text-white shadow-sm'
+      : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200 hover:bg-orange-50 hover:text-[#ea580c]';
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight text-slate-900">Thống kê chi phí API các model AI</h2>
-        <p className="mt-1 text-slate-500">
-          Toàn bộ bản ghi api_usage_log trong khoảng ngày (giờ Việt Nam)
-          {report ? ` • Tỷ giá 1 USD = ${report.usdToVnd.toLocaleString('vi-VN')}₫` : ''}
-        </p>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Giá theo cùng bảng nanoai / Google 2025: pro-image $2/$120 input/output ảnh, flash $0.5/$3, 2.5-flash $0.3/$2.5,
-          2.0-flash $0.1/$0.4, DeepSeek V4 $0.28/$0.42. GPT Image $5/$40 mỗi triệu token. Model lạ tính tạm theo Gemini 3 Flash.
-        </p>
-      </div>
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <h1 className="text-xl font-bold text-slate-900">Thống kê chi phí API</h1>
+      <p className="mt-1 max-w-3xl text-sm text-slate-600">
+        Chọn hôm nay, tuần hoặc tháng. Chi phí model AI và lợi nhuận của kỳ đó hiện ngay bên dưới. Bảng chi tiết và biểu đồ nằm phía dưới.
+      </p>
 
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="px-4 py-3 text-sm font-medium text-slate-800">Lọc theo ngày (giờ Việt Nam)</div>
-        <form
-          className="flex flex-wrap items-end gap-3 px-4 pb-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (draftFrom) applyRange(draftFrom, draftTo || draftFrom);
-          }}
-        >
-          <label className="space-y-1.5 text-xs text-slate-600">
-            Từ ngày
-            <input
-              type="date"
-              value={draftFrom}
-              onChange={(event) => setDraftFrom(event.target.value)}
-              className="block h-8 w-[150px] rounded-md border border-slate-300 px-2 text-sm"
-            />
-          </label>
-          <label className="space-y-1.5 text-xs text-slate-600">
-            Đến ngày
-            <input
-              type="date"
-              value={draftTo}
-              onChange={(event) => setDraftTo(event.target.value)}
-              className="block h-8 w-[150px] rounded-md border border-slate-300 px-2 text-sm"
-            />
-          </label>
-          <button type="submit" className="h-8 rounded-md bg-slate-900 px-3 text-sm font-medium text-white">
-            Xem
+      {error ? (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}{' '}
+          <button type="button" className="font-medium underline" onClick={() => load()}>
+            Thử lại
           </button>
-        </form>
-        <div className="flex flex-wrap gap-2 px-4 pb-4">
+        </div>
+      ) : null}
+
+      <form
+        className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (draftFrom) applyRange(draftFrom, draftTo || draftFrom);
+        }}
+      >
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Chọn nhanh khoảng ngày">
           {presets.map((preset) => {
             const active = preset.from === fromDate && preset.to === toDate;
             return (
               <button
                 key={preset.label}
                 type="button"
+                aria-pressed={active}
                 onClick={() => applyRange(preset.from, preset.to)}
-                className={`h-7 rounded-md border px-2 text-xs ${active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-700'}`}
+                className={`rounded-full border px-3 py-1.5 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ea580c] ${presetClass(active)}`}
               >
                 {preset.label}
               </button>
             );
           })}
         </div>
-      </section>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}{' '}
-          <button type="button" onClick={() => load()} className="font-medium underline">
-            Thử lại
+        <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-3">
+          <label className="text-sm text-slate-700">
+            Từ
+            <input
+              type="date"
+              value={draftFrom}
+              onChange={(event) => setDraftFrom(event.target.value)}
+              className="mt-1 block rounded-lg border border-slate-300 px-3 py-2 focus:border-[#ea580c] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30"
+            />
+          </label>
+          <label className="text-sm text-slate-700">
+            Đến
+            <input
+              type="date"
+              value={draftTo}
+              onChange={(event) => setDraftTo(event.target.value)}
+              className="mt-1 block rounded-lg border border-slate-300 px-3 py-2 focus:border-[#ea580c] focus:outline-none focus:ring-2 focus:ring-[#ea580c]/30"
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-lg bg-[#ea580c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#c2410c] disabled:opacity-60"
+          >
+            {loading ? 'Đang đọc…' : 'Xem kỳ này'}
           </button>
         </div>
-      )}
+      </form>
 
-      {loading && !report ? <p className="text-sm text-slate-500">Đang tổng hợp chi phí…</p> : null}
+      {loading && !report ? <PageSkeleton compact /> : null}
 
-      {report && totals && (
-        <>
-          <section className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-900">Thu chi & lợi nhuận</h3>
-            <p className="text-sm text-slate-500">{formatRange(report.from, report.to)}</p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {report && totals ? (
+        <div className={loading ? 'opacity-70' : undefined}>
+          <section className="mt-4 overflow-hidden rounded-2xl border border-orange-200 bg-white shadow-sm" aria-label="Tổng quan kỳ đang chọn">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-orange-100 bg-orange-50 px-4 py-3">
               <div>
-                <p className="text-sm font-medium text-slate-500">Thu (doanh thu đã cọc)</p>
-                <p className="text-2xl font-bold text-emerald-700">{formatVnd(report.revenueVnd)}</p>
-                <p className="text-xs text-slate-500">{formatNum(report.orderCount)} đơn đã cọc, cùng kỳ bảng chi phí quảng cáo</p>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[#ea580c]">Đang xem</p>
+                <p className="text-base font-bold text-slate-900">{viewingLabel}</p>
               </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500">Chi phí vốn</p>
-                <p className="text-2xl font-bold text-slate-800">{formatVndOrDash(report.goodsCostVnd)}</p>
-                <p className="text-xs text-slate-500">{report.costNote || 'Giá nhập hàng'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500">Chi phí ship</p>
-                <p className="text-2xl font-bold text-slate-800">{formatVndOrDash(report.shipCostVnd)}</p>
-                <p className="text-xs text-slate-500">Ship Trung Quốc, cửa khẩu và Hà Nội</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500">Chi phí quảng cáo</p>
-                <p className="text-2xl font-bold text-orange-700">{formatVndOrDash(report.adSpendVnd)}</p>
-                <p className="text-xs text-slate-500">{report.adSpendNote || 'Google + Facebook'}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500">Chi (API)</p>
-                <p className="text-2xl font-bold text-amber-700">{formatVnd(report.apiCostVnd)}</p>
-                <p className="text-xs text-slate-500">
-                  ~{report.apiCostUsd.toFixed(4)} USD • {formatNum(report.callCount)} lượt gọi
-                </p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500">Lợi nhuận</p>
-                <p className={`text-2xl font-bold ${report.profitVnd == null ? 'text-slate-400' : report.profitVnd >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>
-                  {formatVndOrDash(report.profitVnd)}
-                </p>
-                <p className="text-xs text-slate-500">Doanh thu đã cọc − vốn − ship − quảng cáo − chi API</p>
-              </div>
+              <p className="text-xs text-slate-500">Giờ Việt Nam · 1 USD = {report.usdToVnd.toLocaleString('vi-VN')}₫</p>
+            </div>
+            <div className="grid gap-px bg-orange-100 sm:grid-cols-2">
+              <HeroStat
+                label="Chi phí API"
+                value={formatVnd(report.apiCostVnd)}
+                hint={`~${report.apiCostUsd.toFixed(4)} USD · ${formatNum(report.callCount)} lượt gọi`}
+              />
+              <HeroStat
+                label="Lợi nhuận"
+                value={formatVndOrDash(report.profitVnd)}
+                hint="Doanh thu đã cọc − vốn − ship − quảng cáo − chi API"
+                negative={profitNegative}
+                muted={report.profitVnd == null}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-px border-t border-orange-100 bg-orange-100 lg:grid-cols-4">
+              <MiniStat
+                label="Doanh thu đã cọc"
+                value={formatVnd(report.revenueVnd)}
+                hint={`${formatNum(report.orderCount)} đơn đã cọc`}
+              />
+              <MiniStat label="Giá vốn" value={formatVndOrDash(report.goodsCostVnd)} hint={report.costNote || 'Giá nhập hàng'} />
+              <MiniStat label="Chi phí ship" value={formatVndOrDash(report.shipCostVnd)} hint="Trung Quốc, cửa khẩu và Hà Nội" />
+              <MiniStat label="Quảng cáo" value={formatVndOrDash(report.adSpendVnd)} hint={report.adSpendNote || 'Google + Facebook'} />
+            </div>
+            <div className="grid grid-cols-2 gap-px border-t border-orange-100 bg-orange-100 lg:grid-cols-4">
+              <MiniStat label="Tổng lượt gọi" value={formatNum(totals.calls)} hint={perCall(totals.totalCostVnd, totals.calls)} />
+              <MiniStat label="Token input" value={formatNum(totals.promptTokens)} hint={formatVnd(totals.inputCostVnd)} />
+              <MiniStat label="Token output" value={formatNum(totals.outputTokens)} hint={formatVnd(totals.outputCostVnd)} />
+              <MiniStat label="Tổng tokens" value={formatNum(totals.totalTokens)} hint={formatVnd(totals.totalCostVnd)} />
             </div>
           </section>
 
-          <div className="grid gap-4 md:grid-cols-4">
-            <Kpi title="Tổng lượt gọi" value={formatNum(totals.calls)} hint={perCall(totals.totalCostVnd, totals.calls)} />
-            <Kpi title="Token input" value={formatNum(totals.promptTokens)} hint={formatVnd(totals.inputCostVnd)} hintClass="text-amber-700" />
-            <Kpi title="Token output" value={formatNum(totals.outputTokens)} hint={formatVnd(totals.outputCostVnd)} hintClass="text-amber-700" />
-            <Kpi title="Tổng tokens" value={formatNum(totals.totalTokens)} hint={formatVnd(totals.totalCostVnd)} hintClass="text-amber-700" />
+          <div className="mt-4">
+            <ApiUsageCharts charts={report.charts} hasAnyLog={report.callCount > 0} />
           </div>
 
-          <ApiUsageCharts charts={report.charts} hasAnyLog={report.callCount > 0} />
+          <div className="mt-4 space-y-4">
+            <StatsTable
+              title="Theo model"
+              subtitle="Số lượt gọi và token theo từng model. Tỷ lệ tính trên tổng chi phí API của kỳ."
+              nameHeader="Model"
+              rows={report.byModel}
+              whole={whole}
+              nameCell={(row) => (
+                <span className="inline-flex flex-wrap items-center gap-2">
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-800">{row.key}</span>
+                  {row.listedPrice === false ? (
+                    <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">Giá tạm</span>
+                  ) : null}
+                </span>
+              )}
+            />
 
-          <StatsTable
-            title="Theo model"
-            subtitle="Số lượt gọi và token theo từng model"
-            rows={report.byModel}
-            whole={whole}
-            nameCell={(row) => (
-              <span>
-                <span className="rounded-md border border-slate-300 px-2 py-0.5 font-mono text-xs">{row.key}</span>
-                {row.listedPrice === false ? <span className="ml-2 text-[10px] text-amber-700">giá tạm</span> : null}
-              </span>
-            )}
-          />
+            <StatsTable
+              title="Theo chức năng"
+              subtitle="Số lượt gọi và token theo từng tính năng đang dùng AI."
+              nameHeader="Chức năng"
+              rows={report.byFeature}
+              whole={whole}
+              nameCell={(row) => (
+                <span>
+                  <span className="font-medium text-slate-900">{row.label}</span>
+                  <br />
+                  <span className="text-xs text-slate-500">{row.key}</span>
+                </span>
+              )}
+            />
 
-          <StatsTable
-            title="Theo chức năng"
-            subtitle="Số lượt gọi và token theo từng tính năng"
-            rows={report.byFeature}
-            whole={whole}
-            nameCell={(row) => (
-              <span>
-                <span className="font-medium text-slate-900">{row.label}</span>
-                <br />
-                <span className="text-xs text-slate-500">{row.key}</span>
-              </span>
-            )}
-          />
-
-          <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <header className="px-6 pt-6">
-              <h3 className="text-lg font-semibold text-slate-900">Theo độ phân giải ảnh</h3>
-              <p className="text-sm text-slate-500">Số lượt gọi trả ảnh 1K, 2K, 4K hoặc không trả ảnh (chỉ text)</p>
-            </header>
-            <div className="overflow-x-auto px-2 pb-4">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-slate-500">
-                    <th className="px-4 py-3 font-medium">Ảnh trả về</th>
-                    <th className="px-4 py-3 text-right font-medium">Lượt gọi</th>
-                    <th className="px-4 py-3 text-right font-medium">Input</th>
-                    <th className="px-4 py-3 text-right font-medium">Output</th>
-                    <th className="px-4 py-3 text-right font-medium">Tổng</th>
-                    <th className="px-4 py-3 text-right font-medium">Chi phí (₫)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.byImageSize.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                        Chưa có dữ liệu thống kê.
-                      </td>
-                    </tr>
-                  ) : (
-                    report.byImageSize.map((row) => (
-                      <tr key={row.key} className="border-t border-slate-100">
-                        <td className="px-4 py-3">
-                          <span
-                            className={`rounded-md border px-2 py-0.5 text-xs ${
-                              row.key === '4K'
-                                ? 'border-amber-300 text-amber-600'
-                                : row.key === 'no-image'
-                                  ? 'border-slate-200 bg-slate-100 text-slate-600'
-                                  : 'border-sky-300 text-sky-600'
-                            }`}
-                          >
-                            {row.label}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">{formatNum(row.calls)}</td>
-                        <TokenCell tokens={row.promptTokens} cost={row.inputCostVnd} />
-                        <TokenCell tokens={row.outputTokens} cost={row.outputCostVnd} />
-                        <td className="px-4 py-3 text-right font-medium">{formatNum(row.totalTokens)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="font-medium text-amber-700">{formatVnd(row.costVnd)}</span>
-                          <br />
-                          <span className="text-xs text-slate-500">{perCall(row.costVnd, row.calls)}</span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <header className="px-6 pt-6">
-              <h3 className="text-lg font-semibold text-slate-900">Chi tiết gần đây</h3>
-              <p className="text-sm text-slate-500">100 bản ghi mới nhất • Bấm vào dòng để xem chi tiết lượt gọi</p>
-            </header>
-            <div className="overflow-x-auto px-2 pb-4">
-              {report.recentLogs.length === 0 ? (
-                <p className="py-8 text-center text-slate-500">Chưa có dữ liệu thống kê. Các lượt gọi AI sau khi bật ghi log sẽ hiện ở đây.</p>
-              ) : (
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <header className="border-b border-slate-100 px-4 py-3">
+                <h2 className="text-sm font-semibold text-slate-800">Theo độ phân giải ảnh</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Lượt gọi trả ảnh 1K, 2K, 4K hoặc chỉ text.</p>
+              </header>
+              <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-slate-500">
-                      <th className="px-4 py-3 font-medium">Thời gian</th>
-                      <th className="px-4 py-3 font-medium">Model</th>
-                      <th className="px-4 py-3 font-medium">Chức năng</th>
-                      <th className="px-4 py-3 font-medium">Ảnh</th>
-                      <th className="px-4 py-3 text-right font-medium">Input</th>
-                      <th className="px-4 py-3 text-right font-medium">Output</th>
-                      <th className="px-4 py-3 text-right font-medium">Tổng</th>
-                      <th className="px-4 py-3 text-right font-medium">Chi phí (₫)</th>
+                  <thead className="bg-slate-50 text-left text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">Ảnh trả về</th>
+                      <th className="px-4 py-2 text-right font-medium">Lượt gọi</th>
+                      <th className="px-4 py-2 text-right font-medium">Input</th>
+                      <th className="px-4 py-2 text-right font-medium">Output</th>
+                      <th className="px-4 py-2 text-right font-medium">Tổng</th>
+                      <th className="px-4 py-2 text-right font-medium">Chi phí</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {report.recentLogs.map((log) => (
-                      <tr
-                        key={log.id}
-                        className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                        onClick={() => setSelectedId(log.id)}
-                      >
-                        <td className="px-4 py-3 text-slate-500">
-                          {log.createdAt ? new Date(log.createdAt).toLocaleString('vi-VN') : '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="rounded-md border border-slate-300 px-2 py-0.5 font-mono text-xs">{log.model}</span>
-                        </td>
-                        <td className="px-4 py-3">{log.featureLabel}</td>
-                        <td className="px-4 py-3">
-                          {log.imageSize ? (
-                            <span className={`rounded-md border px-2 py-0.5 text-xs ${log.imageSize === '4K' ? 'border-amber-300 text-amber-600' : 'border-sky-300 text-sky-600'}`}>
-                              {log.imageSize}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-slate-400">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-right">{formatNum(log.promptTokens)}</td>
-                        <td className="px-4 py-3 text-right">{formatNum(log.outputTokens)}</td>
-                        <td className="px-4 py-3 text-right font-medium">{formatNum(log.totalTokens)}</td>
-                        <td className="px-4 py-3 text-right font-medium text-amber-700">{formatVnd(log.costVnd)}</td>
-                      </tr>
-                    ))}
+                    {report.byImageSize.length === 0 ? (
+                      <EmptyRow cols={6} />
+                    ) : (
+                      report.byImageSize.map((row) => (
+                        <tr key={row.key} className="border-t border-slate-100 hover:bg-orange-50/40">
+                          <td className="px-4 py-2.5">
+                            <SizeBadge label={row.label} sizeKey={row.key} />
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(row.calls)}</td>
+                          <TokenCell tokens={row.promptTokens} cost={row.inputCostVnd} />
+                          <TokenCell tokens={row.outputTokens} cost={row.outputCostVnd} />
+                          <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatNum(row.totalTokens)}</td>
+                          <CostCell cost={row.costVnd} calls={row.calls} />
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
-              )}
-            </div>
-          </section>
-        </>
-      )}
+              </div>
+            </section>
 
-      {selected && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setSelectedId(null)}>
+            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <header className="border-b border-slate-100 px-4 py-3">
+                <h2 className="text-sm font-semibold text-slate-800">Chi tiết gần đây</h2>
+                <p className="mt-0.5 text-xs text-slate-500">100 bản ghi mới nhất. Bấm một dòng để xem chi tiết lượt gọi.</p>
+              </header>
+              {report.recentLogs.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-500">
+                  Chưa có dữ liệu thống kê. Các lượt gọi AI sau khi bật ghi log sẽ hiện ở đây.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2 font-medium">Thời gian</th>
+                        <th className="px-4 py-2 font-medium">Model</th>
+                        <th className="px-4 py-2 font-medium">Chức năng</th>
+                        <th className="px-4 py-2 font-medium">Ảnh</th>
+                        <th className="px-4 py-2 text-right font-medium">Input</th>
+                        <th className="px-4 py-2 text-right font-medium">Output</th>
+                        <th className="px-4 py-2 text-right font-medium">Tổng</th>
+                        <th className="px-4 py-2 text-right font-medium">Chi phí</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.recentLogs.map((log) => {
+                        const active = selectedId === log.id;
+                        return (
+                          <tr
+                            key={log.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={active}
+                            className={`cursor-pointer border-t border-slate-100 ${active ? 'bg-orange-50' : 'hover:bg-orange-50/60'}`}
+                            onClick={() => setSelectedId(log.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                setSelectedId(log.id);
+                              }
+                            }}
+                          >
+                            <td className={`whitespace-nowrap px-4 py-2.5 ${active ? 'font-semibold text-[#ea580c]' : 'text-slate-600'}`}>
+                              {log.createdAt ? new Date(log.createdAt).toLocaleString('vi-VN') : '—'}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-800">
+                                {log.model}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2.5 text-slate-800">{log.featureLabel}</td>
+                            <td className="px-4 py-2.5">
+                              {log.imageSize ? <SizeBadge label={log.imageSize} sizeKey={log.imageSize} /> : <span className="text-xs text-slate-400">—</span>}
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(log.promptTokens)}</td>
+                            <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(log.outputTokens)}</td>
+                            <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatNum(log.totalTokens)}</td>
+                            <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${active ? 'text-[#ea580c]' : 'text-slate-900'}`}>
+                              {formatVnd(log.costVnd)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+
+            <details className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+              <summary className="cursor-pointer font-medium text-slate-800">Cách tính giá model</summary>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                Giá theo cùng bảng nanoai / Google 2025: pro-image $2/$120 input/output ảnh, flash $0.5/$3, 2.5-flash $0.3/$2.5,
+                2.0-flash $0.1/$0.4, DeepSeek V4 $0.28/$0.42. GPT Image $5/$40 mỗi triệu token. Model lạ tính tạm theo Gemini 3 Flash.
+              </p>
+            </details>
+          </div>
+        </div>
+      ) : null}
+
+      {selected ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setSelectedId(null)}>
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="api-log-detail-title"
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-orange-200 bg-white shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <h3 id="api-log-detail-title" className="text-lg font-semibold text-slate-900">
-              Chi tiết lượt gọi API
-            </h3>
-            <dl className="mt-4 space-y-3 text-sm">
+            <div className="border-b border-orange-100 bg-orange-50 px-5 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[#ea580c]">Lượt gọi</p>
+              <h3 id="api-log-detail-title" className="text-base font-bold text-slate-900">
+                Chi tiết API
+              </h3>
+            </div>
+            <dl className="space-y-3 px-5 py-4 text-sm">
               <div>
                 <dt className="text-xs text-slate-500">Thời gian</dt>
-                <dd className="font-medium">{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd>
+                <dd className="font-medium text-slate-900">{selected.createdAt ? new Date(selected.createdAt).toLocaleString('vi-VN') : '—'}</dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500">Model</dt>
-                <dd className="font-mono text-xs">{selected.model}</dd>
+                <dd className="mt-1 font-mono text-xs text-slate-800">{selected.model}</dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500">Chức năng</dt>
-                <dd>
+                <dd className="text-slate-900">
                   {selected.featureLabel}
                   <span className="ml-2 text-xs text-slate-500">{selected.feature}</span>
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500">Ảnh trả về</dt>
-                <dd>{selected.imageSize || 'Không trả ảnh'}</dd>
+                <dd className="mt-1">{selected.imageSize ? <SizeBadge label={selected.imageSize} sizeKey={selected.imageSize} /> : 'Không trả ảnh'}</dd>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <dt className="text-xs text-slate-500">Input</dt>
-                  <dd>{formatNum(selected.promptTokens)}</dd>
-                  <dd className="text-xs text-amber-700">{formatVnd(selected.inputCostVnd)}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-slate-500">Output</dt>
-                  <dd>{formatNum(selected.outputTokens)}</dd>
-                  <dd className="text-xs text-amber-700">{formatVnd(selected.outputCostVnd)}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-slate-500">Tổng</dt>
-                  <dd className="font-medium">{formatNum(selected.totalTokens)}</dd>
-                  <dd className="text-xs text-amber-700">{formatVnd(selected.costVnd)}</dd>
-                </div>
+              <div className="grid grid-cols-3 gap-px overflow-hidden rounded-xl border border-orange-100 bg-orange-100">
+                <ModalStat label="Input" tokens={selected.promptTokens} cost={selected.inputCostVnd} />
+                <ModalStat label="Output" tokens={selected.outputTokens} cost={selected.outputCostVnd} />
+                <ModalStat label="Tổng" tokens={selected.totalTokens} cost={selected.costVnd} strong />
               </div>
             </dl>
-            <button type="button" className="mt-5 h-9 rounded-md bg-slate-900 px-3 text-sm text-white" onClick={() => setSelectedId(null)}>
-              Đóng
-            </button>
+            <div className="px-5 pb-4">
+              <button
+                type="button"
+                className="h-9 rounded-lg bg-[#ea580c] px-4 text-sm font-semibold text-white hover:bg-[#c2410c]"
+                onClick={() => setSelectedId(null)}
+              >
+                Đóng
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function Kpi({ title, value, hint, hintClass = 'text-slate-500' }: { title: string; value: string; hint: string; hintClass?: string }) {
+function HeroStat({
+  label,
+  value,
+  hint,
+  negative,
+  muted,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  negative?: boolean;
+  muted?: boolean;
+}) {
+  const tone = muted ? 'text-slate-400' : negative ? 'text-red-600' : 'text-[#ea580c]';
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-sm font-medium text-slate-500">{title}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
-      <p className={`mt-1 text-xs font-medium ${hintClass}`}>{hint}</p>
-    </section>
+    <div className="bg-white px-4 py-4">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className={`mt-1 text-2xl font-bold tabular-nums sm:text-3xl ${tone}`}>{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
+    </div>
   );
+}
+
+function MiniStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="bg-white px-4 py-3">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="mt-1 text-base font-bold tabular-nums text-[#ea580c]">{value}</p>
+      {hint ? <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p> : null}
+    </div>
+  );
+}
+
+function SizeBadge({ label, sizeKey }: { label: string; sizeKey: string }) {
+  const tone =
+    sizeKey === '4K'
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : sizeKey === 'no-image'
+        ? 'border-slate-200 bg-slate-100 text-slate-600'
+        : 'border-sky-200 bg-sky-50 text-sky-700';
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${tone}`}>{label}</span>;
 }
 
 function TokenCell({ tokens, cost }: { tokens: number; cost: number }) {
   return (
-    <td className="px-4 py-3 text-right">
-      <span>{formatNum(tokens)}</span>
+    <td className="px-4 py-2.5 text-right">
+      <span className="tabular-nums text-slate-800">{formatNum(tokens)}</span>
       <br />
-      <span className="text-xs text-amber-700">{formatVnd(cost)}</span>
+      <span className="text-xs tabular-nums text-[#ea580c]">{formatVnd(cost)}</span>
     </td>
+  );
+}
+
+function CostCell({ cost, calls }: { cost: number; calls: number }) {
+  return (
+    <td className="px-4 py-2.5 text-right">
+      <span className="font-semibold tabular-nums text-[#ea580c]">{formatVnd(cost)}</span>
+      <br />
+      <span className="text-xs text-slate-500">{perCall(cost, calls)}</span>
+    </td>
+  );
+}
+
+function ShareCell({ part, whole }: { part: number; whole: number }) {
+  const pct = whole > 0 ? Math.min(100, (part / whole) * 100) : 0;
+  return (
+    <td className="min-w-[5.5rem] px-4 py-2.5 text-right">
+      <span className="text-xs tabular-nums text-slate-600">{formatShare(part, whole)}</span>
+      <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-orange-100">
+        <span className="block h-full rounded-full bg-[#ea580c]" style={{ width: `${pct}%` }} />
+      </span>
+    </td>
+  );
+}
+
+function EmptyRow({ cols }: { cols: number }) {
+  return (
+    <tr>
+      <td colSpan={cols} className="px-4 py-8 text-center text-sm text-slate-500">
+        Chưa có dữ liệu thống kê.
+      </td>
+    </tr>
+  );
+}
+
+function ModalStat({ label, tokens, cost, strong }: { label: string; tokens: number; cost: number; strong?: boolean }) {
+  return (
+    <div className="bg-white px-3 py-2.5">
+      <dt className="text-[11px] text-slate-500">{label}</dt>
+      <dd className={`mt-0.5 tabular-nums ${strong ? 'font-bold text-slate-900' : 'text-slate-800'}`}>{formatNum(tokens)}</dd>
+      <dd className="text-xs font-medium tabular-nums text-[#ea580c]">{formatVnd(cost)}</dd>
+    </div>
   );
 }
 
 function StatsTable({
   title,
   subtitle,
+  nameHeader,
   rows,
   whole,
   nameCell,
 }: {
   title: string;
   subtitle: string;
+  nameHeader: string;
   rows: ApiStatsBucket[];
   whole: number;
   nameCell: (row: ApiStatsBucket) => ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-      <header className="px-6 pt-6">
-        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-        <p className="text-sm text-slate-500">{subtitle}</p>
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <header className="border-b border-slate-100 px-4 py-3">
+        <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
+        <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>
       </header>
-      <div className="overflow-x-auto px-2 pb-4">
+      <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
-          <thead>
-            <tr className="text-left text-slate-500">
-              <th className="px-4 py-3 font-medium">{title === 'Theo model' ? 'Model' : 'Chức năng'}</th>
-              <th className="px-4 py-3 text-right font-medium">Lượt gọi</th>
-              <th className="px-4 py-3 text-right font-medium">1K</th>
-              <th className="px-4 py-3 text-right font-medium">2K</th>
-              <th className="px-4 py-3 text-right font-medium">4K</th>
-              <th className="px-4 py-3 text-right font-medium">Input</th>
-              <th className="px-4 py-3 text-right font-medium">Output</th>
-              <th className="px-4 py-3 text-right font-medium">Tổng</th>
-              <th className="px-4 py-3 text-right font-medium">Tỷ lệ</th>
-              <th className="px-4 py-3 text-right font-medium">Chi phí (₫)</th>
+          <thead className="bg-slate-50 text-left text-slate-500">
+            <tr>
+              <th className="px-4 py-2 font-medium">{nameHeader}</th>
+              <th className="px-4 py-2 text-right font-medium">Lượt gọi</th>
+              <th className="px-4 py-2 text-right font-medium">1K</th>
+              <th className="px-4 py-2 text-right font-medium">2K</th>
+              <th className="px-4 py-2 text-right font-medium">4K</th>
+              <th className="px-4 py-2 text-right font-medium">Input</th>
+              <th className="px-4 py-2 text-right font-medium">Output</th>
+              <th className="px-4 py-2 text-right font-medium">Tổng</th>
+              <th className="px-4 py-2 text-right font-medium">Tỷ lệ</th>
+              <th className="px-4 py-2 text-right font-medium">Chi phí</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                  Chưa có dữ liệu thống kê.
-                </td>
-              </tr>
+              <EmptyRow cols={10} />
             ) : (
               rows.map((row) => (
-                <tr key={row.key} className="border-t border-slate-100">
-                  <td className="px-4 py-3">{nameCell(row)}</td>
-                  <td className="px-4 py-3 text-right">{formatNum(row.calls)}</td>
-                  <td className="px-4 py-3 text-right">{formatNum(row.calls1K || 0)}</td>
-                  <td className="px-4 py-3 text-right text-sky-600">{formatNum(row.calls2K || 0)}</td>
-                  <td className="px-4 py-3 text-right text-amber-600">{formatNum(row.calls4K || 0)}</td>
+                <tr key={row.key} className="border-t border-slate-100 hover:bg-orange-50/40">
+                  <td className="px-4 py-2.5">{nameCell(row)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(row.calls)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">{formatNum(row.calls1K || 0)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-sky-700">{formatNum(row.calls2K || 0)}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-amber-700">{formatNum(row.calls4K || 0)}</td>
                   <TokenCell tokens={row.promptTokens} cost={row.inputCostVnd} />
                   <TokenCell tokens={row.outputTokens} cost={row.outputCostVnd} />
-                  <td className="px-4 py-3 text-right font-medium">{formatNum(row.totalTokens)}</td>
-                  <td className="px-4 py-3 text-right text-xs">{formatShare(row.costVnd, whole)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="font-medium text-amber-700">{formatVnd(row.costVnd)}</span>
-                    <br />
-                    <span className="text-xs text-slate-500">{perCall(row.costVnd, row.calls)}</span>
-                  </td>
+                  <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatNum(row.totalTokens)}</td>
+                  <ShareCell part={row.costVnd} whole={whole} />
+                  <CostCell cost={row.costVnd} calls={row.calls} />
                 </tr>
               ))
             )}
@@ -540,5 +627,21 @@ function StatsTable({
         </table>
       </div>
     </section>
+  );
+}
+
+function PageSkeleton({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={compact ? 'mt-4' : 'mx-auto max-w-6xl p-4 sm:p-6'} aria-busy="true" aria-live="polite">
+      {!compact ? <p className="text-sm text-slate-500">Đang tải thống kê API…</p> : null}
+      <div className="overflow-hidden rounded-2xl border border-orange-100 bg-white">
+        <div className="h-14 animate-pulse bg-orange-50" />
+        <div className="grid gap-px bg-orange-50 sm:grid-cols-2">
+          <div className="h-24 animate-pulse bg-white" />
+          <div className="h-24 animate-pulse bg-white" />
+        </div>
+      </div>
+      {compact ? <p className="mt-3 text-sm text-slate-500">Đang tổng hợp chi phí…</p> : null}
+    </div>
   );
 }

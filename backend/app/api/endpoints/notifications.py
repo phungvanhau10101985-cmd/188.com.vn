@@ -15,11 +15,18 @@ from app.schemas.notification import (
 )
 from app.crud import notification as crud_notification
 from app.crud import user as crud_user
+from app.services.notification_links import attach_action_urls
 import pandas as pd
 from datetime import datetime, timedelta
 import io
 
 router = APIRouter()
+
+
+def _notifications_for_client(db: Session, items: list) -> List[NotificationResponse]:
+    """Copy link đích ra model trả về, trước khi session đóng."""
+    attach_action_urls(db, items)
+    return [NotificationResponse.model_validate(item) for item in items]
 
 @router.get("", response_model=List[NotificationResponse], include_in_schema=False)
 @router.get("/", response_model=List[NotificationResponse])
@@ -31,7 +38,8 @@ def get_my_notifications(
 ):
     # Tự động xóa thông báo hết hạn mỗi khi user lấy danh sách
     crud_notification.delete_expired_notifications(db)
-    return crud_notification.get_user_notifications(db, user_id=current_user.id, skip=skip, limit=limit)
+    items = crud_notification.get_user_notifications(db, user_id=current_user.id, skip=skip, limit=limit)
+    return _notifications_for_client(db, items)
 
 
 @router.get("/page", response_model=NotificationPage)
@@ -50,7 +58,7 @@ def get_my_notifications_page(
         db, current_user.id, safe_skip, safe_limit
     )
     return NotificationPage(
-        items=items,
+        items=_notifications_for_client(db, items),
         total=total,
         skip=safe_skip,
         limit=safe_limit,

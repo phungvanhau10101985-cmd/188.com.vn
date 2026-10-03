@@ -83,10 +83,19 @@ self.addEventListener("notificationclick", (event) => {
   const url = (event.notification.data && event.notification.data.url) || "/account/notifications";
   const abs = new URL(url, self.location.origin).href;
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (list) => {
       for (const c of list) {
+        if (typeof c.navigate === "function") {
+          try {
+            await c.navigate(abs);
+            if ("focus" in c) await c.focus();
+            return;
+          } catch (e) {
+            /* tab không do SW điều khiển — gửi message để app tự chuyển trang */
+          }
+        }
         if ("focus" in c) {
-          c.focus();
+          await c.focus();
           c.postMessage({ type: "NOTIF_OPEN", url: abs });
           return;
         }

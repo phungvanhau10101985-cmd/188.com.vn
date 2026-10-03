@@ -7,6 +7,8 @@ import { format } from 'date-fns';
 import { vi } from 'date-fns/locale';
 import Link from 'next/link';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { notificationActionLabel, safeNotificationPath } from '@/lib/notification-target';
+import { dispatchNotificationsRefresh } from '@/lib/web-push-subscribe';
 import PushNotificationsCard from './PushNotificationsCard';
 
 export default function MyNotificationsPage() {
@@ -42,6 +44,7 @@ export default function MyNotificationsPage() {
     try {
       await apiClient.markNotificationAsRead(id);
       setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      dispatchNotificationsRefresh();
     } catch (error) {
       console.error('Failed to mark as read', error);
     }
@@ -92,34 +95,63 @@ export default function MyNotificationsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {notifications.map((notif) => (
-            <div 
-              key={notif.id} 
-              className={`p-4 rounded-xl border transition-all cursor-pointer hover:shadow-sm ${
-                notif.is_read 
-                  ? 'bg-white border-gray-100' 
-                  : 'bg-blue-50/50 border-blue-100 shadow-sm'
-              }`}
-              onClick={() => !notif.is_read && handleMarkAsRead(notif.id)}
-            >
-              <div className="flex justify-between items-start gap-3 mb-1.5">
-                <div className="flex items-center gap-2">
-                  {!notif.is_read && (
-                    <span className="w-2 h-2 rounded-full bg-blue-600 flex-shrink-0"></span>
-                  )}
-                  <h3 className={`font-semibold text-base ${notif.is_read ? 'text-gray-800' : 'text-blue-800'}`}>
-                    {notif.title}
-                  </h3>
+          {notifications.map((notif) => {
+            const href = safeNotificationPath(notif.action_url);
+            const cardClass = `block p-4 rounded-xl border text-left transition-all hover:shadow-sm ${
+              notif.is_read
+                ? 'bg-white border-gray-100'
+                : 'bg-blue-50/50 border-blue-100 shadow-sm'
+            } ${href ? 'cursor-pointer hover:border-orange-200' : ''}`;
+            const body = (
+              <>
+                <div className="flex justify-between items-start gap-3 mb-1.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {!notif.is_read && (
+                      <span className="w-2 h-2 rounded-full bg-blue-600 flex-shrink-0"></span>
+                    )}
+                    <h3 className={`font-semibold text-base ${notif.is_read ? 'text-gray-800' : 'text-blue-800'}`}>
+                      {notif.title}
+                    </h3>
+                  </div>
+                  <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
+                    {format(new Date(notif.created_at), 'dd/MM HH:mm', { locale: vi })}
+                  </span>
                 </div>
-                <span className="text-xs text-gray-400 whitespace-nowrap flex-shrink-0">
-                  {format(new Date(notif.created_at), 'dd/MM HH:mm', { locale: vi })}
-                </span>
-              </div>
-              <p className={`text-sm whitespace-pre-line pl-4 ${notif.is_read ? 'text-gray-600' : 'text-gray-800'}`}>
-                {notif.content}
-              </p>
-            </div>
-          ))}
+                <p className={`text-sm whitespace-pre-line pl-4 ${notif.is_read ? 'text-gray-600' : 'text-gray-800'}`}>
+                  {notif.content}
+                </p>
+                {href && (
+                  <span className="mt-2 inline-flex pl-4 text-sm font-medium text-orange-600">
+                    {notificationActionLabel(href)}
+                    <span aria-hidden className="ml-1">›</span>
+                  </span>
+                )}
+              </>
+            );
+            if (!href) {
+              return (
+                <div
+                  key={notif.id}
+                  className={cardClass}
+                  onClick={() => !notif.is_read && handleMarkAsRead(notif.id)}
+                >
+                  {body}
+                </div>
+              );
+            }
+            return (
+              <Link
+                key={notif.id}
+                href={href}
+                className={cardClass}
+                onClick={() => {
+                  if (!notif.is_read) void handleMarkAsRead(notif.id);
+                }}
+              >
+                {body}
+              </Link>
+            );
+          })}
           {hasMore && (
             <button
               type="button"

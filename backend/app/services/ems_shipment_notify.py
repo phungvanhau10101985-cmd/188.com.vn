@@ -17,7 +17,6 @@ from app.models.notification import Notification
 from app.models.order_shipment import EmsShippingRecord
 from app.schemas.notification import NotificationCreate
 from app.services import email_service
-from app.services import push_service
 
 logger = logging.getLogger(__name__)
 
@@ -208,8 +207,13 @@ def maybe_notify_customer_after_ems_refresh(
     ).first():
         return False
 
+    notify_url = (
+        f"/account/orders/{order_id}/review"
+        if event.event_key == "order_delivered"
+        else f"/account/orders/{order_id}/tracking"
+    )
     try:
-        notif = crud_notification.create_notification(
+        crud_notification.create_notification(
             db,
             NotificationCreate(
                 user_id=order.user_id,
@@ -217,24 +221,9 @@ def maybe_notify_customer_after_ems_refresh(
                 content=event.content,
                 type="order",
                 dedupe_key=dedupe_key,
+                action_url=notify_url,
             ),
         )
-        notify_url = (
-            f"/account/orders/{order_id}/review"
-            if event.event_key == "order_delivered"
-            else f"/account/orders/{order_id}/tracking"
-        )
-        try:
-            push_service.send_push_to_user(
-                db,
-                order.user_id,
-                event.title,
-                event.content[:500],
-                url=notify_url,
-                notification_id=notif.id,
-            )
-        except Exception:
-            logger.debug("ems_shipment push failed order_id=%s", order_id, exc_info=True)
         db.flush()
     except Exception:
         logger.exception("ems_shipment in-app notify failed order_id=%s event=%s", order_id, event.event_key)

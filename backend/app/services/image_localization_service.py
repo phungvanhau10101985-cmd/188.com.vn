@@ -320,6 +320,9 @@ class ImageProcessResult:
     message: str = ""
     # Lưu product_info.image_localization.results[].detail (vd. split_parts).
     detail: Optional[Dict[str, Any]] = None
+    # None = lần chạy này không OCR ảnh (CDN / lỗi tải) — không đụng chữ tư vấn cũ.
+    # List (kể cả rỗng) = đã OCR; rỗng sau lọc thì xóa chữ của đúng URL.
+    consult_ocr_texts: Optional[List[str]] = None
 
 
 def image_process_result_to_stash(res: ImageProcessResult) -> Dict[str, Any]:
@@ -927,6 +930,18 @@ class LegacyImageLocalizationPipeline:
         progress_cb: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, ImageProcessResult]:
         results: Dict[str, ImageProcessResult] = {}
+        consult_raw: Dict[str, List[str]] = {}
+        consult_ran: set = set()
+
+        def _note_consult_ocr(url: str, ocr_results: Any) -> None:
+            from app.services.consult_image_text import ocr_items_to_lines
+
+            key = normalize_image_url(url)
+            if not key:
+                return
+            consult_ran.add(key)
+            consult_raw.setdefault(key, []).extend(ocr_items_to_lines(ocr_results))
+
         merger = self.ImageMerger()
         splitter = self.ImageSplitter()
         ocr = self.OCRProcessor()
@@ -980,6 +995,7 @@ class LegacyImageLocalizationPipeline:
                 orig_url = normalize_image_url(data.get("original_url") or part_url)
                 if orig_url in results and results[orig_url].status == "deleted":
                     continue
+                _note_consult_ocr(orig_url, data.get("ocr_results"))
                 is_split = bool(data.get("is_split_part"))
                 if is_split and orig_url not in split_buffer:
                     split_buffer[orig_url] = {
@@ -1085,6 +1101,10 @@ class LegacyImageLocalizationPipeline:
             for url in urls:
                 normalized = normalize_image_url(url)
                 results.setdefault(normalized, ImageProcessResult(normalized, normalized, "kept", "Không cần xử lý"))
+            for url in consult_ran:
+                res = results.get(url)
+                if res is not None and res.consult_ocr_texts is None:
+                    res.consult_ocr_texts = list(consult_raw.get(url) or [])
             return results
         finally:
             cleanup_merge_batch_files(batches)
@@ -1100,19 +1120,28 @@ class LegacyImageLocalizationPipeline:
         Một URL, không merge/split batch: OCR → classifier → Gemini/GPT chỉ khi type == gemini
         và allows_ai_image_models; nếu classifier yêu cầu AI nhưng không có chỉ định → DeepSeek+vẽ.
         """
+        from app.services.consult_image_text import ocr_items_to_lines
+
         normalized = normalize_image_url(url)
         translator = self.TextTranslator()
         img_proc = self.ImageProcessor()
         ocr = self.OCRProcessor()
+        consult_lines: Optional[List[str]] = None
         try:
             norm_ocr = self._normalize_ocr(ocr.process_image(image_bytes))
+            consult_lines = ocr_items_to_lines(norm_ocr)
         except Exception as exc:
             logger.warning("Fallback từng ảnh: OCR lỗi %s (%s)", normalized, exc)
             return ImageProcessResult(normalized, normalized, "error", f"OCR lỗi: {exc}")
+
+        def _with_consult(res: ImageProcessResult) -> ImageProcessResult:
+            res.consult_ocr_texts = consult_lines
+            return res
+
         try:
             image = self._decode_image_bytes(image_bytes)
         except Exception as exc:
-            return ImageProcessResult(normalized, normalized, "error", f"Decode ảnh lỗi: {exc}")
+            return _with_consult(ImageProcessResult(normalized, normalized, "error", f"Decode ảnh lỗi: {exc}"))
         data = {
             "image_data": image,
             "ocr_results": norm_ocr,
@@ -1124,14 +1153,14 @@ class LegacyImageLocalizationPipeline:
             action, final_image, message = self._process_image_part(data, translator, img_proc)
         except Exception as exc:
             logger.exception("Fallback từng ảnh: xử lý nội bộ lỗi %s", normalized)
-            return ImageProcessResult(normalized, normalized, "error", str(exc))
+            return _with_consult(ImageProcessResult(normalized, normalized, "error", str(exc)))
         if action == "deleted":
-            return ImageProcessResult(normalized, None, "deleted", message)
+            return _with_consult(ImageProcessResult(normalized, None, "deleted", message))
         if action == "processed":
             final_bytes = _encode_image_bytes(apply_brand_logo_top_right_bgr(final_image), filename)
             final_url = self._upload_bytes(product, final_bytes, filename)
-            return ImageProcessResult(normalized, final_url, "processed", message)
-        return ImageProcessResult(normalized, normalized, "kept", message)
+            return _with_consult(ImageProcessResult(normalized, final_url, "processed", message))
+        return _with_consult(ImageProcessResult(normalized, normalized, "kept", message))
 
     def _process_image_part(self, data: Dict[str, Any], translator: Any, img_proc: Any) -> Tuple[str, Any, str]:
         norm_ocr = self._normalize_ocr(data.get("ocr_results") or [])
@@ -1579,6 +1608,16 @@ class ProductImageLocalizationService:
 
         failed = [r for r in results.values() if r.status == "error"]
         changed = [r for r in results.values() if r.final_url and r.final_url != r.original_url]
+        consult_updates: Dict[str, List[Dict[str, str]]] = {}
+        if not self.dry_run:
+            try:
+                from app.services.consult_image_text import consult_updates_from_results
+
+                consult_updates = consult_updates_from_results(results)
+            except Exception:
+                logger.exception("Không gom được chữ OCR tư vấn cho %s", product.product_id)
+                consult_updates = {}
+
         if failed and not changed:
             self._abort_if_requested(should_cancel)
             fail_msg = failed[0].message[:2000]
@@ -1587,6 +1626,13 @@ class ProductImageLocalizationService:
                 fresh.image_localization_status = "failed"
                 fresh.image_localization_language = self.language
                 fresh.image_localization_error = fail_msg
+                if consult_updates:
+                    from app.services.consult_image_text import merge_consult_image_text
+
+                    fresh.consult_image_text = merge_consult_image_text(
+                        fresh.consult_image_text,
+                        consult_updates,
+                    )
 
             self._persist_product_fields(product_pk, _apply_failed)
             return {"status": "failed", "processed_images": 0, "message": fail_msg}
@@ -1601,6 +1647,13 @@ class ProductImageLocalizationService:
             def _apply_localized(fresh: Product) -> None:
                 self._apply_results(fresh, results)
                 self._stash_originals(fresh, refs, results)
+                if consult_updates:
+                    from app.services.consult_image_text import merge_consult_image_text
+
+                    fresh.consult_image_text = merge_consult_image_text(
+                        fresh.consult_image_text,
+                        consult_updates,
+                    )
                 fresh.image_localization_status = "localized"
                 fresh.image_localization_language = self.language
                 fresh.image_localized_at = localized_at

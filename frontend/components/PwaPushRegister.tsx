@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   syncPushSubscription,
   requestPermissionAndSyncPush,
   dispatchNotificationsRefresh,
 } from "@/lib/web-push-subscribe";
+import { safeNotificationPath } from "@/lib/notification-target";
 
 const SESSION_AUTO_PROMPT_KEY = "188_auto_push_prompt_v1";
 
@@ -14,6 +16,8 @@ const SESSION_AUTO_PROMPT_KEY = "188_auto_push_prompt_v1";
  * Một lần mỗi phiên: gợi ý hệ thống xin quyền (nếu đang default).
  */
 export default function PwaPushRegister() {
+  const router = useRouter();
+
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
@@ -32,6 +36,10 @@ export default function PwaPushRegister() {
     const onSwMessage = (event: MessageEvent) => {
       if (event.data?.type === "NOTIFICATIONS_REFRESH") {
         dispatchNotificationsRefresh();
+      }
+      if (event.data?.type === "NOTIF_OPEN" && typeof event.data.url === "string") {
+        const next = safeNotificationPath(event.data.url);
+        if (next) router.push(next);
       }
     };
     navigator.serviceWorker.addEventListener("message", onSwMessage);
@@ -91,7 +99,7 @@ export default function PwaPushRegister() {
       window.removeEventListener("188-auth-session-changed", onAuthSession);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, []);
+  }, [router]);
 
   return null;
 }

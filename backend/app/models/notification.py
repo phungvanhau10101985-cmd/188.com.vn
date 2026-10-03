@@ -12,6 +12,8 @@ class Notification(Base):
     title = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
     type = Column(String(50), default="general") # general, order, system, promotion
+    # Đường dẫn trong site khi khách bấm thông báo (vd. /cart, /account/orders/12).
+    action_url = Column(String(500), nullable=True)
     is_read = Column(Boolean, default=False)
     # Stable event identity for retry-safe order/fulfillment notifications.
     dedupe_key = Column(String(160), nullable=True, unique=True, index=True)

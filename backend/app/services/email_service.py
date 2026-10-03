@@ -1233,6 +1233,7 @@ def send_deposit_confirmed_email_task(order_id: int) -> DepositEmailDeliveryResu
                         title="Đã nhận đặt cọc",
                         content=f"Đơn {code}: xác nhận thanh toán cọc {vnd} VND. {status_short}.",
                         type="order",
+                        action_url=f"/account/orders/{order.id}",
                     ),
                 )
                 logger.info(

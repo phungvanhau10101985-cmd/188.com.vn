@@ -190,6 +190,7 @@ def _has_active_grant(db: Session, user_id: int, promotion_id: int) -> bool:
 
 def _notify_grant(db: Session, *, user_id: int, promotion: Promotion, days: int, message: str) -> None:
     try:
+        is_cart = (promotion.code or "").strip().upper() == PROMO_CART_ABANDON
         crud_notification.create_notification(
             db,
             NotificationCreate(
@@ -198,9 +199,11 @@ def _notify_grant(db: Session, *, user_id: int, promotion: Promotion, days: int,
                 content=(
                     f"{message} Mã {promotion.code} — giảm {promotion.discount_percent}% "
                     f"(tối đa {int(promotion.max_discount_amount or 0):,}đ). "
-                    f"Hết hạn sau {days} ngày. Xem tại mục Khuyến mãi."
+                    f"Hết hạn sau {days} ngày. "
+                    + ("Mở giỏ hàng để dùng mã." if is_cart else "Xem tại mục Khuyến mãi.")
                 ).replace(",", "."),
                 type="promotion",
+                action_url="/cart" if is_cart else "/account/khuyen-mai",
             ),
         )
     except Exception as exc:

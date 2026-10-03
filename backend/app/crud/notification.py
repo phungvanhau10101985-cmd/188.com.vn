@@ -4,6 +4,7 @@ from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate, NotificationUpdate
+from app.services.notification_links import clean_action_url
 from datetime import datetime, timezone
 
 
@@ -50,6 +51,7 @@ def create_notification(db: Session, notification: NotificationCreate) -> Notifi
         scheduled_at=notification.scheduled_at,
         expires_at=notification.expires_at,
         dedupe_key=notification.dedupe_key,
+        action_url=clean_action_url(notification.action_url),
     )
     db.add(db_obj)
     try:

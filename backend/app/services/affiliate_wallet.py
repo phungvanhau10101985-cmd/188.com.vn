@@ -381,7 +381,13 @@ def _send_affiliate_notification(db: Session, user_id: int, title: str, content:
 
         crud_notification.create_notification(
             db,
-            NotificationCreate(user_id=user_id, title=title, content=content, type="affiliate"),
+            NotificationCreate(
+                user_id=user_id,
+                title=title,
+                content=content,
+                type="affiliate",
+                action_url="/vi-dien-tu",
+            ),
         )
     except Exception:
         logger.exception("affiliate notification failed user_id=%s title=%s", user_id, title)

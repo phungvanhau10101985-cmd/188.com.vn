@@ -17,6 +17,7 @@ import {
 import type { ApiStatsReport } from '@/lib/admin-api';
 
 const MODEL_LINE_COLORS = ['#2563eb', '#06b6d4', '#db2777', '#7c3aed', '#ea580c', '#16a34a', '#ca8a04', '#64748b'];
+const TOOLTIP_STYLE = { fontSize: 12, borderRadius: 12, borderColor: '#fed7aa', boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)' };
 
 type Charts = ApiStatsReport['charts'];
 
@@ -52,27 +53,26 @@ export function ApiUsageCharts({ charts, hasAnyLog }: { charts: Charts; hasAnyLo
 
   if (!hasAnyLog || daily.length === 0) {
     return (
-      <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-slate-900">Biểu đồ theo thời gian</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Theo ngày giờ Việt Nam trong khoảng đã chọn. Tối đa 8 model đắt nhất; còn lại gộp “Khác”.
-        </p>
-        <p className="py-8 text-center text-sm text-slate-500">
-          Chưa có bản ghi api_usage_log trong khoảng này — không vẽ biểu đồ. Số liệu chỉ có từ lúc bật ghi log.
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <header className="border-b border-slate-100 px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-800">Biểu đồ theo thời gian</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Theo ngày giờ Việt Nam. Tối đa 8 model đắt nhất; còn lại gộp “Khác”.
+          </p>
+        </header>
+        <p className="px-4 py-8 text-center text-sm text-slate-500">
+          Chưa có bản ghi trong khoảng này — không vẽ biểu đồ. Số liệu chỉ có từ lúc bật ghi log.
         </p>
       </section>
     );
   }
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       <div>
-        <h3 className="text-lg font-semibold tracking-tight text-slate-900">Biểu đồ theo thời gian</h3>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Theo ngày giờ Việt Nam trong khoảng đã chọn. Tối đa 8 model đắt nhất; còn lại gộp “Khác”.
-        </p>
-        <p className="mt-2 max-w-3xl text-xs text-slate-500">
-          Dữ liệu lấy từ bảng api_usage_log (lượt gọi đã ghi nhận). Không có mã lỗi HTTP (404/500) trong bảng này.
+        <h2 className="text-sm font-semibold text-slate-800">Biểu đồ theo thời gian</h2>
+        <p className="mt-0.5 text-xs text-slate-500">
+          Theo ngày giờ Việt Nam trong khoảng đã chọn. Tối đa 8 model đắt nhất; còn lại gộp “Khác”. Dữ liệu từ các lượt gọi đã ghi nhận.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -83,7 +83,7 @@ export function ApiUsageCharts({ charts, hasAnyLog }: { charts: Charts; hasAnyLo
               <XAxis dataKey="dateLabel" tick={{ fontSize: 11 }} />
               <YAxis yAxisId="left" tickFormatter={formatTick} tick={{ fontSize: 11 }} />
               <YAxis yAxisId="right" orientation="right" tickFormatter={formatTick} tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ fontSize: 12 }} formatter={tooltipFormatPair} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatPair} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar yAxisId="left" dataKey="requests" name="Lượt gọi" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               <Line yAxisId="right" type="monotone" dataKey="inputTokens" name="Token input (ngày)" stroke="#22c55e" strokeWidth={2} dot={false} />
@@ -96,7 +96,7 @@ export function ApiUsageCharts({ charts, hasAnyLog }: { charts: Charts; hasAnyLo
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="dateLabel" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={formatTick} tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ fontSize: 12 }} formatter={tooltipFormatPair} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatPair} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="inputTokens" stackId="tok" name="Token input" fill="#3b82f6" />
               <Bar dataKey="outputTokens" stackId="tok" name="Token output" fill="#22c55e" radius={[4, 4, 0, 0]} />
@@ -115,7 +115,7 @@ export function ApiUsageCharts({ charts, hasAnyLog }: { charts: Charts; hasAnyLo
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="dateLabel" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={formatVndTick} tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ fontSize: 12 }} formatter={tooltipFormatVnd} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} formatter={tooltipFormatVnd} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="inputCostVnd" stackId="cost" name="Chi phí input (₫)" fill="#f59e0b" />
               <Bar dataKey="outputCostVnd" stackId="cost" name="Chi phí output (₫)" fill="#dc2626" radius={[4, 4, 0, 0]} />
@@ -147,7 +147,7 @@ function ModelLines({
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="dateLabel" tick={{ fontSize: 11 }} />
         <YAxis tickFormatter={money ? formatVndTick : formatTick} tick={{ fontSize: 11 }} />
-        <Tooltip contentStyle={{ fontSize: 12 }} formatter={money ? tooltipFormatVnd : tooltipFormatPair} />
+        <Tooltip contentStyle={TOOLTIP_STYLE} formatter={money ? tooltipFormatVnd : tooltipFormatPair} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         {seriesKeys.map((key, index) => (
           <Line
@@ -167,9 +167,9 @@ function ModelLines({
 
 function ChartCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 pt-5 shadow-sm">
-      <h4 className="mb-3 px-1 text-sm font-medium text-slate-800">{title}</h4>
-      {children}
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <h3 className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-800">{title}</h3>
+      <div className="px-2 py-3">{children}</div>
     </div>
   );
 }

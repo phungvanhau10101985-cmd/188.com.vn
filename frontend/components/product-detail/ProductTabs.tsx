@@ -414,14 +414,14 @@ export default function ProductTabs({ product, layout = 'mobile' }: ProductTabsP
                     <div className="hidden lg:block h-fit self-start mt-[26px] lg:sticky lg:top-[26px] lg:max-h-screen lg:overflow-y-auto scrollbar-on-hover lg:pl-5">
                       <ShopSidebarProducts currentProduct={product} />
                     </div>
-                    <div data-188-pdp-detail-images className="pdp-desktop-cartbar-width space-y-4">
+                    <div data-188-pdp-detail-images className="pdp-desktop-cartbar-width flex flex-col gap-0 leading-none">
                       {visibleDetailImages.map((image, index) => (
                         <HideOnImageError
                           key={image}
                           src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
                           alt={`${product.name} chi tiết ${index + 1}`}
-                          className="w-full h-auto block"
-                          wrapperClassName="bg-white rounded-xl overflow-hidden border border-gray-200 shadow-sm"
+                          className="m-0 block h-auto w-full align-top"
+                          wrapperClassName="m-0 overflow-hidden bg-white"
                           onBroken={() => markDetailImageBroken(image)}
                         />
                       ))}
@@ -431,15 +431,15 @@ export default function ProductTabs({ product, layout = 'mobile' }: ProductTabsP
                 ) : (
                   <div
                     data-188-pdp-detail-images
-                    className="w-[calc(100%+4rem)] max-w-none -mx-8 space-y-0"
+                    className="-mx-8 flex w-[calc(100%+4rem)] max-w-none flex-col gap-0 leading-none"
                   >
                     {visibleDetailImages.map((image, index) => (
                       <HideOnImageError
                         key={image}
                         src={getOptimizedImage(image, { width: 800, height: 600, hideProductPng: true })}
                         alt={`${product.name} chi tiết ${index + 1}`}
-                        className="w-full h-auto block"
-                        wrapperClassName="overflow-hidden bg-white"
+                        className="m-0 block h-auto w-full align-top"
+                        wrapperClassName="m-0 overflow-hidden bg-white"
                         onBroken={() => markDetailImageBroken(image)}
                       />
                     ))}
