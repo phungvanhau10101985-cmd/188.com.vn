@@ -86,3 +86,38 @@ def test_maybe_send_comeback_email_sends(
     ) is True
     mock_send.assert_called_once()
     assert mock_send.call_args.args[0] == "lan@example.com"
+
+
+def test_grant_voucher_skips_when_user_already_used_code():
+    promo = SimpleNamespace(id=9, is_active=True, code="CARTSAVE188", per_user_limit=1)
+    db = MagicMock()
+    with (
+        patch("app.crud.promotion.get_promotion_by_code", return_value=promo),
+        patch("app.crud.promotion.promotion_per_user_exhausted", return_value=True),
+    ):
+        result = grant_svc.grant_voucher(
+            db,
+            user_id=1,
+            promo_code="CARTSAVE188",
+            source="cart_abandon",
+            notify=False,
+        )
+    assert result is None
+    db.add.assert_not_called()
+
+
+def test_retire_exhausted_grants_hides_used_cart_code():
+    promo = SimpleNamespace(id=9, code="CARTSAVE188", per_user_limit=1)
+    grant = SimpleNamespace(promotion=promo, status="active", used_at=None)
+    query = MagicMock()
+    query.options.return_value = query
+    query.filter.return_value = query
+    query.all.return_value = [grant]
+    db = MagicMock()
+    db.query.return_value = query
+    with patch("app.crud.promotion.promotion_per_user_exhausted", return_value=True):
+        count = grant_svc.retire_exhausted_grants(db, user_id=1)
+    assert count == 1
+    assert grant.status == "used"
+    assert grant.used_at is not None
+    db.commit.assert_called_once()

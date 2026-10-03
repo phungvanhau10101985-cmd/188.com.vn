@@ -218,6 +218,14 @@ def user_promo_usage_count(db: Session, *, user_id: int, promotion_id: int) -> i
     )
 
 
+def promotion_per_user_exhausted(db: Session, *, user_id: int, promotion: Promotion) -> bool:
+    """Khách đã dùng hết lượt của mã — không hiện lại và không cấp thêm."""
+    limit = int(promotion.per_user_limit or 1)
+    if limit <= 0:
+        return False
+    return user_promo_usage_count(db, user_id=user_id, promotion_id=promotion.id) >= limit
+
+
 def is_promotion_eligible(
     db: Session,
     user_id: int,

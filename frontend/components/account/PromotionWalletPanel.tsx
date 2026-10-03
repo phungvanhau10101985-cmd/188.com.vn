@@ -81,7 +81,10 @@ export default function PromotionWalletPanel({ embedded = false }: PromotionWall
     );
   }
 
-  const activeCount = vouchers.filter((v) => v.eligible).length;
+  const visibleVouchers = vouchers.filter(
+    (voucher) => voucher.eligible || (voucher.reason || '').trim() !== 'Bạn đã sử dụng mã khuyến mãi này.',
+  );
+  const activeCount = visibleVouchers.filter((v) => v.eligible).length;
 
   return (
     <div className={embedded ? '' : 'min-h-screen bg-gray-50 pb-12'}>
@@ -119,7 +122,7 @@ export default function PromotionWalletPanel({ embedded = false }: PromotionWall
           </div>
         ) : null}
 
-        {vouchers.length === 0 ? (
+        {visibleVouchers.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 text-center">
             <p className="text-4xl mb-3" aria-hidden>
               🎁
@@ -137,7 +140,7 @@ export default function PromotionWalletPanel({ embedded = false }: PromotionWall
             </Link>
           </div>
         ) : (
-          vouchers.map((voucher) => (
+          visibleVouchers.map((voucher) => (
             <div
               key={`${voucher.grant_id ?? voucher.code}`}
               className={`bg-white rounded-2xl shadow-lg border overflow-hidden ${

@@ -7,6 +7,10 @@ function formatCurrency(amount: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 }
 
+function isAlreadyUsedVoucher(voucher: PromotionVoucherItem): boolean {
+  return !voucher.eligible && (voucher.reason || '').trim() === 'Bạn đã sử dụng mã khuyến mãi này.';
+}
+
 function expiryLabel(voucher: PromotionVoucherItem): string | null {
   if (!voucher.show_days_remaining) return null;
   if (voucher.days_remaining == null) {
@@ -36,6 +40,8 @@ export default function CartVoucherPicker({
   onSelect,
   onClear,
 }: CartVoucherPickerProps) {
+  const visibleVouchers = vouchers.filter((voucher) => !isAlreadyUsedVoucher(voucher));
+
   if (loading) {
     return (
       <div className="mb-3 rounded-xl border border-gray-200 bg-white px-4 py-6 text-center text-sm text-gray-500">
@@ -44,7 +50,7 @@ export default function CartVoucherPicker({
     );
   }
 
-  if (vouchers.length === 0) {
+  if (visibleVouchers.length === 0) {
     return (
       <div className="mb-3 rounded-xl border border-dashed border-gray-200 bg-white px-4 py-5 text-sm text-gray-500">
         Bạn chưa có mã trong ví. Shop sẽ tặng qua thông báo khi có ưu đãi riêng.{' '}
@@ -55,7 +61,7 @@ export default function CartVoucherPicker({
     );
   }
 
-  const eligibleCount = vouchers.filter((v) => v.eligible).length;
+  const eligibleCount = visibleVouchers.filter((v) => v.eligible).length;
 
   return (
     <div className="mb-3">
@@ -74,7 +80,7 @@ export default function CartVoucherPicker({
       </div>
 
       <div className="space-y-2" role="radiogroup" aria-label="Chọn mã giảm giá">
-        {vouchers.map((voucher) => {
+        {visibleVouchers.map((voucher) => {
           const selected = appliedCode === voucher.code;
           const canSelect = voucher.eligible && !disabled && !applying;
           const expiry = expiryLabel(voucher);

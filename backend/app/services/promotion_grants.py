@@ -227,6 +227,9 @@ def grant_voucher(
     if not promotion or not promotion.is_active:
         return None
 
+    if crud_promotion.promotion_per_user_exhausted(db, user_id=user_id, promotion=promotion):
+        return None
+
     if skip_if_active and _has_active_grant(db, user_id, promotion.id):
         return None
 
@@ -366,6 +369,11 @@ def _user_eligible_for_cart_abandon(
 
     cart_promo = db.query(Promotion).filter(Promotion.code == PROMO_CART_ABANDON).first()
     if not cart_promo:
+        return False
+
+    from app.crud import promotion as crud_promotion
+
+    if crud_promotion.promotion_per_user_exhausted(db, user_id=user_id, promotion=cart_promo):
         return False
 
     cooldown_cutoff = now - timedelta(days=cooldown_days)
@@ -815,6 +823,36 @@ def build_wallet_voucher_item(
     }
 
 
+def retire_exhausted_grants(db: Session, *, user_id: int) -> int:
+    """Mã đã dùng hết lượt nhưng grant còn active — đóng lại để không hiện trên giỏ."""
+    from app.crud import promotion as crud_promotion
+
+    grants = (
+        db.query(UserPromotionGrant)
+        .options(joinedload(UserPromotionGrant.promotion))
+        .filter(
+            UserPromotionGrant.user_id == user_id,
+            UserPromotionGrant.status == GrantStatus.ACTIVE.value,
+        )
+        .all()
+    )
+    now = _utc_now()
+    count = 0
+    for grant in grants:
+        promotion = grant.promotion
+        if not promotion:
+            continue
+        if not crud_promotion.promotion_per_user_exhausted(db, user_id=user_id, promotion=promotion):
+            continue
+        grant.status = GrantStatus.USED.value
+        if grant.used_at is None:
+            grant.used_at = now
+        count += 1
+    if count:
+        db.commit()
+    return count
+
+
 def list_wallet_vouchers(
     db: Session,
     user: User,
@@ -822,6 +860,7 @@ def list_wallet_vouchers(
     subtotal: Optional[Decimal] = None,
 ) -> List[Dict[str, Any]]:
     expire_stale_grants(db, user_id=user.id)
+    retire_exhausted_grants(db, user_id=user.id)
     grants = (
         db.query(UserPromotionGrant)
         .filter(
@@ -832,6 +871,6 @@ def list_wallet_vouchers(
         .all()
     )
     items = [build_wallet_voucher_item(db, user, g, subtotal=subtotal) for g in grants]
-    items = [i for i in items if i]
+    items = [i for i in items if i and i.get("reason") != "Bạn đã sử dụng mã khuyến mãi này."]
     items.sort(key=lambda row: (not row["eligible"], not row.get("is_new"), row["code"]))
     return items
