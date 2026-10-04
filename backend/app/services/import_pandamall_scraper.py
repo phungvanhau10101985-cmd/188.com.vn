@@ -188,6 +188,39 @@ def _parse_vnd_price(raw: Any) -> float:
     return float(val) if val > 0 else 0.0
 
 
+def _parse_cny_amount(raw: Any) -> float:
+    s = str(raw or "").strip().replace("¥", "").replace("￥", "").replace(",", "")
+    s = re.sub(r"[^\d.]", "", s)
+    if not s:
+        return 0.0
+    try:
+        val = float(s)
+    except ValueError:
+        return 0.0
+    if not math.isfinite(val) or val <= 0 or val >= 9_999_999:
+        return 0.0
+    return val
+
+
+def _sku_image_url(raw: str) -> str:
+    u = _norm_img_url(raw)
+    if not u or not re.search(r"\.(?:jpg|jpeg|png|webp)(?:$|\?)", u, re.I):
+        return ""
+    return u
+
+
+def _listing_sell_vnd(price_cny: float) -> float:
+    from app.services.import_vipomall_scraper import _listing_vnd_for_cny
+
+    return float(_listing_vnd_for_cny(price_cny) or 0)
+
+
+def _format_cny_cell(price_cny: float) -> str:
+    from app.services.import_vipomall_scraper import _format_cny_cell as _vipomall_format
+
+    return _vipomall_format(price_cny)
+
+
 def _listing_vnd_per_cny() -> float:
     val = getattr(settings, "LISTING_IMPORT_VND_PER_CNY", None)
     try:
@@ -228,8 +261,19 @@ def _clean_pandamall_info_texts(values: List[Any]) -> List[str]:
 
 _SCRAPE_JS = r"""() => {
   const normText = (v) => String(v || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
-  const imgUrl = (img) =>
-    normText(img?.currentSrc || img?.src || img?.getAttribute?.("data-src") || img?.getAttribute?.("data-original") || "");
+  const imgUrl = (img) => {
+    const candidates = [
+      img?.getAttribute?.("data-src"),
+      img?.getAttribute?.("data-original"),
+      img?.currentSrc,
+      img?.src,
+    ];
+    for (const raw of candidates) {
+      const u = normText(raw);
+      if (/^https?:\/\//i.test(u) && /\.(jpg|jpeg|png|webp)/i.test(u)) return u;
+    }
+    return "";
+  };
   const upgradeImg = (raw) => {
     const u = normText(raw);
     if (!/^https?:\/\//i.test(u)) return u;
@@ -347,6 +391,7 @@ _SCRAPE_JS = r"""() => {
       image_url: colorObj?.image_url || null,
       stock: colorObj?.stock,
       price_vnd: colorObj?.price_vnd,
+      price_cny: colorObj?.price_cny,
       price_text: colorObj?.price_vnd ? `${colorObj.price_vnd} đ` : "",
       stock_text: colorObj?.stock_text || "",
       in_stock: colorObj?.in_stock !== false,
@@ -680,6 +725,18 @@ def _scrape_pandamall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], 
                 page.evaluate("() => window.scrollTo(0, 0)")
                 page.wait_for_timeout(600)
                 _scroll_pandamall_variation_panels(page)
+                try:
+                    page.evaluate(
+                        """async () => {
+                          const rows = [...document.querySelectorAll(".item-property")];
+                          for (const row of rows) {
+                            row.scrollIntoView({block: "center"});
+                            await new Promise((resolve) => setTimeout(resolve, 40));
+                          }
+                        }"""
+                    )
+                except Exception:
+                    pass
 
                 if _click_expand_button(page):
                     time.sleep(3.0)
@@ -797,8 +854,16 @@ def pandamall_row_to_product_data(
     swatches: List[Dict[str, Optional[str]]] = []
     for idx, c in enumerate(colors_raw):
         label = _clean_text(c.get("label"), limit=160) or f"Màu {idx + 1}"
-        img = _norm_img_url(str(c.get("image_url") or ""))
-        colors_out.append({"name": label, "img": img})
+        img = _sku_image_url(str(c.get("image_url") or ""))
+        entry: Dict[str, Any] = {"name": label, "img": img}
+        cny = _parse_cny_amount(c.get("price_cny"))
+        sell = _listing_sell_vnd(cny) if cny > 0 else 0.0
+        if sell > 0:
+            entry["price_cny"] = cny
+            entry["price"] = sell
+            entry["sku"] = label
+            entry["sku_code"] = label[:100]
+        colors_out.append(entry)
         swatches.append({"label": label, "image_url": img or None})
 
     exclude_detail_keys = {u.split("?")[0] for u in gallery if u}
@@ -813,13 +878,6 @@ def pandamall_row_to_product_data(
 
     variant_rows = [r for r in row.get("variant_rows") or [] if isinstance(r, dict) and _is_variant_in_stock(r)]
 
-    try:
-        from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
-
-        apply_deepseek_translations_to_color_entries(colors_out)
-    except Exception:
-        pass
-
     color_map: Dict[str, str] = {}
     for raw_c, out_c in zip(colors_raw, colors_out):
         raw_label = _clean_text(raw_c.get("label"), limit=160)
@@ -832,10 +890,9 @@ def pandamall_row_to_product_data(
 
     color_only_layout = _pandamall_layout_is_color_only(row, variant_rows)
 
-    pair_objs: List[Dict[str, str]] = []
+    pair_objs: List[Dict[str, Any]] = []
     sizes: List[str] = []
     seen_size: set[str] = set()
-    prices: List[float] = []
     stocks: List[int] = []
     in_stock_raw_colors: set[str] = set()
     for r in variant_rows:
@@ -844,23 +901,18 @@ def pandamall_row_to_product_data(
         color = color_map.get(raw_color, raw_color)
         if raw_color:
             in_stock_raw_colors.add(raw_color)
-        if color_only_layout:
-            if color:
-                pair_objs.append({"color": color, "size": ""})
-        elif color and size:
-            pair_objs.append({"color": color, "size": size})
-        if not color_only_layout and size and size.lower() not in seen_size:
-            seen_size.add(size.lower())
-            sizes.append(size)
-        price_vnd = _parse_vnd_price(r.get("price_vnd") or r.get("price_text"))
-        if price_vnd > 0:
-            prices.append(price_vnd)
         try:
             stock = int(r.get("stock") or 0)
         except (TypeError, ValueError):
             stock = 0
         if stock > 0:
             stocks.append(stock)
+        if color_only_layout or not (color and size):
+            continue
+        pair_objs.append({"color": color, "size": size})
+        if size.lower() not in seen_size:
+            seen_size.add(size.lower())
+            sizes.append(size)
 
     if in_stock_raw_colors:
         colors_out = [
@@ -891,17 +943,58 @@ def pandamall_row_to_product_data(
                     pair_objs.append({"color": cname, "size": sz})
     else:
         sizes = []
-        if not pair_objs:
-            pair_objs = [{"color": c.get("name", ""), "size": ""} for c in colors_out if c.get("name")]
+        pair_objs = []
 
-    price_vnd = min(prices) if prices else 0.0
-    if price_vnd <= 0:
-        for t in row.get("price_texts") or []:
-            price_vnd = _parse_vnd_price(t)
-            if price_vnd > 0:
+    by_color = {str(c.get("name") or ""): c for c in colors_out if c.get("name")}
+    for pair in pair_objs:
+        src = by_color.get(str(pair.get("color") or ""))
+        if not src or not src.get("price"):
+            continue
+        pair["price"] = src["price"]
+        pair["price_cny"] = src["price_cny"]
+        pair["sku_code"] = src.get("sku_code") or pair.get("color")
+
+    from app.services.import_vipomall_scraper import _finalize_vipomall_color_labels
+
+    _finalize_vipomall_color_labels(colors_out, pair_objs)
+    for i, sw in enumerate(swatches):
+        if i < len(colors_out):
+            sw["label"] = _clean_text(colors_out[i].get("name"), limit=160) or sw.get("label")
+
+    if len(swatches) == len(colors_out) and colors_out:
+        order = sorted(
+            range(len(colors_out)),
+            key=lambda i: float(colors_out[i].get("price") or 10**18),
+        )
+        colors_out = [colors_out[i] for i in order]
+        swatches = [swatches[i] for i in order]
+
+    sell_prices = [float(c["price"]) for c in colors_out if float(c.get("price") or 0) > 0]
+    cnys = [float(c["price_cny"]) for c in colors_out if float(c.get("price_cny") or 0) > 0]
+    for pair in pair_objs:
+        if float(pair.get("price") or 0) > 0:
+            sell_prices.append(float(pair["price"]))
+        if float(pair.get("price_cny") or 0) > 0:
+            cnys.append(float(pair["price_cny"]))
+    if not sell_prices:
+        for text in row.get("cny_price_texts") or []:
+            cny = _parse_cny_amount(text)
+            sell = _listing_sell_vnd(cny) if cny > 0 else 0.0
+            if sell > 0:
+                sell_prices.append(sell)
+                cnys.append(cny)
                 break
+    price_vnd = min(sell_prices) if sell_prices else 0.0
+    cny_low = min(cnys) if cnys else 0.0
+    cny_high = max(cnys) if cnys else 0.0
+    cny_for_excel = _format_cny_cell(cny_low)
+    cny_high_cell = _format_cny_cell(cny_high) or cny_for_excel
 
-    main_image = (gallery[0] if gallery else "") or (colors_out[0]["img"] if colors_out else "") or meta_image
+    cheapest = None
+    priced_colors = [c for c in colors_out if c.get("img") and float(c.get("price") or 0) > 0]
+    if priced_colors:
+        cheapest = min(priced_colors, key=lambda c: float(c["price"]))
+    main_image = (cheapest or {}).get("img") or (gallery[0] if gallery else "") or (colors_out[0]["img"] if colors_out else "") or meta_image
     if not gallery and main_image:
         gallery = [main_image]
 
@@ -919,7 +1012,6 @@ def pandamall_row_to_product_data(
     product_id = build_canonical_taobao_product_id(item_id) if is_taobao else f"A{item_id}"
     origin = "taobao" if is_taobao else "1688"
     supply_platform = "taobao" if is_taobao else "1688"
-    cny_for_excel = _pick_cny_price(row, price_vnd)
 
     info_texts = _clean_pandamall_info_texts(row.get("info_texts") or [])
     variant_context_parts: List[str] = []
@@ -950,6 +1042,18 @@ def pandamall_row_to_product_data(
         variants["color_swatches"] = swatches
     if sizes:
         variants["sizes"] = sizes
+    if any(p.get("price") for p in pair_objs):
+        variants["price_pairs"] = [
+            {
+                "color": p.get("color") or "",
+                "size": p.get("size") or "",
+                "price": p.get("price"),
+                "price_cny": p.get("price_cny"),
+                "sku_code": p.get("sku_code") or "",
+            }
+            for p in pair_objs
+            if p.get("price")
+        ]
     if variant_rows:
         variants["pandamall_rows"] = variant_rows[:300]
 
@@ -961,7 +1065,7 @@ def pandamall_row_to_product_data(
         "market_info": {
             "currency": "VND",
             "pandamall_price_vnd": price_vnd or None,
-            "price_cny_approx": float(_estimate_cny_from_vnd(price_vnd) or 0) or None,
+            "price_cny_approx": float(cny_low) if cny_low > 0 else None,
             "listing_import_vnd_per_cny_used": _listing_vnd_per_cny(),
         },
         "specifications": {
@@ -981,11 +1085,12 @@ def pandamall_row_to_product_data(
         "chinese_name": title[:500] or None,
         "description": desc[:20000],
         "price": float(price_vnd),
+        "cost_cny": float(cny_low) if cny_low > 0 else None,
         "shop_name": "PandaMall",
         "shop_name_chinese": None,
         "shop_id": item_id,
         "pro_lower_price": cny_for_excel,
-        "pro_high_price": cny_for_excel,
+        "pro_high_price": cny_high_cell,
         "group_rating": 888,
         "group_question": 0,
         "sizes": sizes,

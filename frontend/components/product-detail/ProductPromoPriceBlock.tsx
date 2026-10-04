@@ -38,6 +38,8 @@ export interface ProductPromoPriceBlockProps {
   /** Ẩn banner sale site khi giá Google Shopping đang áp dụng. */
   suppressSiteSaleBanners?: boolean;
   className?: string;
+  /** Ví dụ «từ» khi sản phẩm có nhiều mức giá theo mã. */
+  pricePrefix?: string | null;
 }
 
 export default function ProductPromoPriceBlock({
@@ -61,6 +63,7 @@ export default function ProductPromoPriceBlock({
   clearanceHighlight = false,
   suppressSiteSaleBanners = false,
   className = '',
+  pricePrefix = null,
 }: ProductPromoPriceBlockProps) {
   const clientMounted = useClientMounted();
   const hasCountdown = Boolean(countdownTo && sitePhase);
@@ -268,6 +271,7 @@ export default function ProductPromoPriceBlock({
             </span>
           ) : null}
           <span className={`${priceClass} font-extrabold text-[#ea580c]`}>
+            {pricePrefix ? <span className="mr-1 text-[0.72em] font-semibold text-gray-600">{pricePrefix}</span> : null}
             {formatPrice(displayPrice)}
           </span>
 

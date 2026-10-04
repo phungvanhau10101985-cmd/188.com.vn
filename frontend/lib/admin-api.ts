@@ -134,9 +134,12 @@ async function assertBlobLooksLikeXlsx(blob: Blob): Promise<void> {
     (head[3] === 0x04 || head[3] === 0x06 || head[3] === 0x08);
   if (pk) return;
   const snippet = (await blob.slice(0, 500).text()).replace(/\s+/g, ' ').trim().slice(0, 240);
+  if (snippet.startsWith('<') || /hệ thống đang nâng cấp/i.test(snippet)) {
+    throw new Error('API đang bận hoặc đang khởi động lại. Đợi khoảng 1 phút rồi bấm tải lại.');
+  }
   throw new Error(
-    snippet.startsWith('<') || snippet.startsWith('{')
-      ? `Không nhận được Excel — có vẻ là HTML/JSON (${snippet.slice(0, 120)}…). Kiểm tra URL API, nginx và phiên đăng nhập admin.`
+    snippet.startsWith('{')
+      ? `Không nhận được Excel — phản hồi là JSON (${snippet.slice(0, 120)}…).`
       : 'Không nhận được file Excel (.xlsx là ZIP). Kiểm tra phản hồi server.',
   );
 }
@@ -158,6 +161,43 @@ async function downloadAdminGetXlsx(endpoint: string, fallbackFilename: string):
   const m = cd && /filename="?([^";]+)"?/i.exec(cd);
   const filename = m?.[1]?.trim() || fallbackFilename;
   await triggerBlobDownloadPreferred(blob, filename);
+}
+
+const TRANSIENT_DOWNLOAD_HTTP = new Set([502, 503, 504]);
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+/** 502/503/504 hoặc trang HTML nâng cấp của nginx — không dán nguyên markup vào UI. */
+function messageForAdminFileDownloadFailure(status: number, statusText: string, body: string): string {
+  const raw = body.trim();
+  let detail = '';
+  if (raw.startsWith('{') || raw.startsWith('[')) {
+    try {
+      const err = JSON.parse(raw) as { detail?: unknown };
+      detail = formatFastApiDetail(err?.detail);
+    } catch {
+      /* body không phải JSON */
+    }
+  }
+  if (detail) {
+    return `${detail} (HTTP ${status}${statusText ? ` ${statusText}` : ''})`;
+  }
+  const html =
+    raw.startsWith('<') ||
+    /<!doctype\s+html/i.test(raw) ||
+    /<html[\s>]/i.test(raw) ||
+    /hệ thống đang nâng cấp/i.test(raw);
+  if (TRANSIENT_DOWNLOAD_HTTP.has(status) || html) {
+    return 'API đang bận hoặc đang khởi động lại. Đợi khoảng 1 phút rồi bấm tải lại.';
+  }
+  const clip = raw.replace(/\s+/g, ' ').slice(0, 180);
+  return clip
+    ? `${clip} (HTTP ${status}${statusText ? ` ${statusText}` : ''})`
+    : `Tải file thất bại (HTTP ${status}${statusText ? ` ${statusText}` : ''})`;
 }
 
 /** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
@@ -1952,29 +1992,29 @@ export const adminProductAPI = {
       typeof window !== 'undefined'
         ? window.setTimeout(() => ctrl.abort(), 600_000)
         : undefined;
+    const backoffMs = [2_000, 5_000];
     try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
-        signal: ctrl.signal,
-      });
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (ctrl.signal.aborted) break;
+        try {
+          res = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+            signal: ctrl.signal,
+          });
+        } catch (err) {
+          if (attempt === 2 || ctrl.signal.aborted) throw err;
+          await sleepMs(backoffMs[attempt] ?? 5_000);
+          continue;
+        }
+        if (res.ok || !TRANSIENT_DOWNLOAD_HTTP.has(res.status) || attempt === 2) break;
+        await res.arrayBuffer().catch(() => undefined);
+        await sleepMs(backoffMs[attempt] ?? 5_000);
+      }
+      if (!res) throw new Error('Tải Excel thất bại');
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        let detail = '';
-        if (text) {
-          try {
-            const err = JSON.parse(text) as { detail?: unknown };
-            detail = formatFastApiDetail(err?.detail);
-          } catch {
-            /* body không phải JSON */
-          }
-        }
-        if (!detail) {
-          const clip = text.replace(/\s+/g, ' ').trim().slice(0, 280);
-          detail = clip || res.statusText || `HTTP ${res.status}`;
-        }
-        throw new Error(
-          `${detail} (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''})`,
-        );
+        throw new Error(messageForAdminFileDownloadFailure(res.status, res.statusText, text));
       }
       const blob = await res.blob();
       await assertBlobLooksLikeXlsx(blob);

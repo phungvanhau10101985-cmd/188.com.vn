@@ -38,6 +38,7 @@ import type { GoogleAutomatedDiscountSsrPayload } from '@/lib/google-automated-d
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import { useFlashSale } from '@/lib/use-flash-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
+import { productHasTieredVariantPrices } from '@/lib/variant-list-price';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import { ProductShareActionButtons, ProductShareIconButton } from '@/components/affiliate/AffiliateShareBar';
 import { useAffiliatePageShare } from '@/lib/use-affiliate-page-share';
@@ -515,6 +516,7 @@ export default function ProductDetailMobile({
         <div className="mb-3 rounded-2xl border border-orange-100 bg-orange-50/50 p-3">
           <ProductPromoPriceBlock
             displayPrice={displayPrice}
+            pricePrefix={productHasTieredVariantPrices(product) ? 'từ' : null}
             compareUnitPrice={pricing.compareUnitPrice}
             savingsAmount={pricing.savingsAmount}
             expectedSalePrice={pricing.expectedSalePrice}

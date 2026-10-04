@@ -41,11 +41,15 @@ _worker_thread_ref: Optional[threading.Thread] = None
 _worker_lock = threading.Lock()
 
 SOURCE_STOCK_WORKER_STATE_ROW_ID = 1
+# checking/queued lâu hơn khoảng này = worker chết giữa chừng, đưa lại hàng chờ.
+SOURCE_STOCK_IN_PROGRESS_STALE_MINUTES = 30
 _worker_pause_cached_at_mono: float = -1000.0
 _worker_pause_cached: bool = False
 _worker_pause_updated_at: Optional[datetime] = None
 _worker_pause_lock = threading.Lock()
 _WORKER_PAUSE_CACHE_SECONDS = 2.5
+_last_stale_reclaim_mono: float = -1000.0
+_STALE_RECLAIM_INTERVAL_SECONDS = 60.0
 
 
 def invalidate_source_stock_worker_pause_cache() -> None:
@@ -458,6 +462,87 @@ def _result_should_fallback_next_platform(r: SourceStockCheckResult) -> bool:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def source_stock_in_progress_is_stale(
+    status: Optional[str],
+    next_check_at: Optional[datetime],
+    *,
+    now: Optional[datetime] = None,
+    stale_minutes: int = SOURCE_STOCK_IN_PROGRESS_STALE_MINUTES,
+) -> bool:
+    """queued/checking mà không còn lần chạy sống (next_check trống hoặc quá hạn)."""
+    st = (status or "").strip().lower()
+    if st not in {"checking", "queued"}:
+        return False
+    stamp = _as_utc(next_check_at)
+    if stamp is None:
+        return True
+    current = _as_utc(now) or _utcnow()
+    return stamp <= current - timedelta(minutes=max(1, int(stale_minutes)))
+
+
+def reclaim_stale_source_stock_in_progress(db: Session, *, now: Optional[datetime] = None) -> int:
+    """
+    Gỡ cờ checking/queued bị bỏ dở. Xóa lịch next_check để SP vào lại nhóm chưa có lịch
+    (worker đang ưu tiên nhóm này), không nằm mãi sau toàn bộ backlog.
+    Không đụng dòng vừa được claim (next_check còn mới).
+    """
+    from app.models.source_stock_worker_state import SourceStockWorkerState
+
+    current = _as_utc(now) or _utcnow()
+    rows = (
+        db.query(Product)
+        .filter(Product.source_stock_status.in_(["checking", "queued"]))
+        .all()
+    )
+    released = 0
+    for product in rows:
+        if not source_stock_in_progress_is_stale(
+            product.source_stock_status,
+            product.source_stock_next_check_at,
+            now=current,
+        ):
+            continue
+        product.source_stock_status = None
+        product.source_stock_next_check_at = None
+        released += 1
+
+    row = (
+        db.query(SourceStockWorkerState)
+        .filter(SourceStockWorkerState.id == SOURCE_STOCK_WORKER_STATE_ROW_ID)
+        .first()
+    )
+    ghost_cleared = False
+    pointer_stale = False
+    if row is not None and row.checking_product_db_id:
+        pointer_stale = row.checking_started_at is None or source_stock_in_progress_is_stale(
+            "checking",
+            row.checking_started_at,
+            now=current,
+        )
+    if pointer_stale and row is not None:
+        row.checking_product_db_id = None
+        row.checking_started_at = None
+        row.updated_at = current
+        ghost_cleared = True
+
+    if released or ghost_cleared:
+        db.commit()
+        logger.info(
+            "source stock reclaimed stale in-progress: products=%s ghost_worker_pointer=%s",
+            released,
+            ghost_cleared,
+        )
+    return released
 
 
 def _link_eligible_for_source_stock_check(url: str) -> bool:
@@ -951,6 +1036,23 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         db2.close()
 
 
+def _maybe_reclaim_stale_in_progress() -> None:
+    """Định kỳ gỡ checking/queued bỏ dở — không chặn vòng scrape nếu DB lỗi."""
+    global _last_stale_reclaim_mono
+    now_m = time.monotonic()
+    if (now_m - _last_stale_reclaim_mono) < _STALE_RECLAIM_INTERVAL_SECONDS:
+        return
+    _last_stale_reclaim_mono = now_m
+    db = SessionLocal()
+    try:
+        reclaim_stale_source_stock_in_progress(db)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("source stock reclaim stale in-progress failed: %s", exc)
+    finally:
+        db.close()
+
+
 def _worker_loop() -> None:
     logger.info(
         "source stock checker started: interval=%ss stale=%sm "
@@ -967,6 +1069,7 @@ def _worker_loop() -> None:
         if paused:
             time.sleep(idle_sleep)
             continue
+        _maybe_reclaim_stale_in_progress()
         product_id = _pop_queued_id() or _claim_due_product_id()
         if product_id is None:
             time.sleep(idle_sleep)

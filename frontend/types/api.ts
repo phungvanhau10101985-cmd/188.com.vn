@@ -60,6 +60,13 @@ export interface ProductColor {
   name: string;
   img?: string;
   value?: string;
+  /** Giá bán VNĐ của đúng mã/màu. */
+  price?: number;
+  /** Giá gốc tệ của đúng mã — dùng tính chi phí. */
+  price_cny?: number;
+  /** Mã bán, trùng `name` sau khi dịch tên màu. */
+  sku?: string;
+  sku_code?: string;
 }
 
 export interface Product {

@@ -44,18 +44,32 @@ export function mergeProductFlashSale(
   if (productHasActiveFlash(product)) return product;
   const sale = flashById[product.id];
   if (!sale || !isFlashSalePricing(sale) || (sale.percent ?? 0) <= 0) return product;
-  const listPrice = Math.max(
+  const catalogList = Math.max(
     0,
     sale.list_price ?? product.original_price ?? product.price ?? 0,
   );
-  const displayPrice = Math.max(0, sale.display_price ?? product.price ?? 0);
+  const incoming = Math.max(0, product.price ?? 0);
+  const variantList = incoming > 0 && catalogList > 0 && Math.abs(incoming - catalogList) >= 1;
+  const listPrice = variantList ? incoming : catalogList;
+  const pct = sale.percent ?? 0;
+  const displayPrice = variantList && pct > 0
+    ? Math.max(0, Math.round(listPrice * (1 - pct / 100)))
+    : Math.max(0, sale.display_price ?? incoming);
   if (listPrice <= 0 || displayPrice <= 0) return product;
+  const applied = variantList
+    ? {
+        ...sale,
+        list_price: listPrice,
+        display_price: displayPrice,
+        savings_amount: Math.max(0, listPrice - displayPrice),
+      }
+    : sale;
   return {
     ...product,
     price: displayPrice,
     original_price: listPrice,
-    site_sale: sale,
-    flash_sale: sale,
+    site_sale: applied,
+    flash_sale: applied,
   };
 }
 

@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useProductReviews } from '@/lib/product-reviews-context';
 import { formatPrice } from '@/lib/utils';
+import { listingPricePrefix } from '@/lib/variant-list-price';
 import { getOptimizedImage } from '@/lib/image-utils';
 import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
@@ -153,7 +154,12 @@ export default function ProductReviewSection({
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-medium text-gray-900 truncate">{product.name}</p>
-        <p className="text-[#ea580c] font-semibold">{formatPrice(product.price)}</p>
+        <p className="text-[#ea580c] font-semibold">
+          {listingPricePrefix(product) ? (
+            <span className="mr-1 text-[0.72em] font-semibold text-gray-500">từ</span>
+          ) : null}
+          {formatPrice(product.price)}
+        </p>
       </div>
     </div>
   );

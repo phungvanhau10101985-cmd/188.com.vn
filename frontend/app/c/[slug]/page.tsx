@@ -11,6 +11,7 @@ import {
   type SeoClusterListingFilters,
 } from "@/lib/seo-cluster";
 import { formatPrice } from "@/lib/utils";
+import { listingPricePrefix } from "@/lib/variant-list-price";
 import { getOptimizedImage } from "@/lib/image-utils";
 import { productPathSlugFromApi } from "@/lib/product-path-slug";
 import SeoClusterFiltersClient from "./SeoClusterFiltersClient";
@@ -310,7 +311,12 @@ function ClusterProductCard({ product }: { product: SeoClusterProductCard }) {
         <div className="line-clamp-2 text-xs text-gray-800 group-hover:text-orange-600 sm:text-sm">
           {product.name}
         </div>
-        <div className="mt-1 text-sm font-semibold text-orange-600">{formatPrice(product.price)}</div>
+        <div className="mt-1 text-sm font-semibold text-orange-600">
+          {listingPricePrefix(product) ? (
+            <span className="mr-1 text-[0.72em] font-semibold text-gray-500">từ</span>
+          ) : null}
+          {formatPrice(product.price)}
+        </div>
         {product.shop_name ? (
           <div className="mt-0.5 truncate text-[11px] text-gray-500">{product.shop_name}</div>
         ) : null}

@@ -37,6 +37,36 @@ def _dec(value: Any) -> Decimal:
     return Decimal(str(value or 0))
 
 
+def _checkout_color_name(product: Any, requested: Any, cart_line: Any) -> Optional[str]:
+    from app.services.variant_sale_price import selected_color_name_for_line
+
+    name = selected_color_name_for_line(
+        product,
+        getattr(requested, "selected_color", None),
+        getattr(requested, "selected_size", None),
+        getattr(requested, "selected_color_name", None),
+    )
+    if name:
+        return name
+    if cart_line is not None:
+        stored = (getattr(cart_line, "selected_color_name", None) or "").strip()
+        if stored:
+            return stored
+    return None
+
+
+def _checkout_sku_snapshot(product: Any, selected_color: Optional[str], selected_size: Optional[str]) -> Optional[str]:
+    from app.services.variant_sale_price import resolve_variant_quote
+
+    quote = resolve_variant_quote(product, selected_color, selected_size)
+    code = ""
+    if quote and quote.get("sku_code"):
+        code = str(quote["sku_code"]).strip()
+    if not code:
+        code = str(getattr(product, "code", "") or "").strip()
+    return code[:100] or None
+
+
 def group_checkout_items(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Nhóm ổn định VN trước, TQ sau để quy tắc làm tròn luôn xác định."""
     return {
@@ -173,7 +203,13 @@ def _create_checkout_fulfillment(
         if fulfillment_source == FULFILLMENT_VIETNAM:
             vietnam_stock_lines.append((product, int(requested.quantity or 0)))
 
-        unit_f, list_f = resolve_checkout_line_prices(db, product, user=current_user)
+        unit_f, list_f = resolve_checkout_line_prices(
+            db,
+            product,
+            user=current_user,
+            selected_color=requested.selected_color,
+            selected_size=requested.selected_size,
+        )
         cart_key = (
             int(product.id),
             (requested.selected_size or "").strip() or None,
@@ -190,17 +226,15 @@ def _create_checkout_fulfillment(
             if not is_warehouse_cart_product(product)
             else None
         )
-        if google_lock:
-            unit_f = float(google_lock["price"])
-            list_f = float(google_lock.get("prior_price") or list_f or unit_f)
-        elif (requested.google_pv2_token or "").strip() and not is_warehouse_cart_product(product):
+        google_token = (requested.google_pv2_token or "").strip()
+        if not is_warehouse_cart_product(product) and (google_lock or google_token):
             try:
                 unit_f, list_f, _ = apply_google_discount_to_cart_line(
                     product=product,
                     unit_sale=float(unit_f),
                     list_original=float(list_f),
-                    product_data={},
-                    google_pv2_token=requested.google_pv2_token,
+                    product_data=cart_pd,
+                    google_pv2_token=google_token or None,
                 )
             except GoogleAutomatedDiscountError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -240,13 +274,17 @@ def _create_checkout_fulfillment(
                 "total_price": item_total,
                 "selected_size": requested.selected_size,
                 "selected_color": requested.selected_color,
-                "selected_color_name": requested.selected_color_name,
+                "selected_color_name": _checkout_color_name(product, requested, cart_line),
                 "requires_deposit": product.deposit_require,
                 "deposit_amount": unit_price * Decimal("0.3") if product.deposit_require else Decimal("0"),
                 "fulfillment_source": fulfillment_source,
                 "source_platform": source_platform_from_url(source_url),
                 "source_url": source_url,
-                "product_sku_snapshot": product.code,
+                "product_sku_snapshot": _checkout_sku_snapshot(
+                    product,
+                    requested.selected_color,
+                    requested.selected_size,
+                ),
                 "is_warehouse_item": is_warehouse,
             }
         )

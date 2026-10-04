@@ -14,7 +14,7 @@ cột G AK, khối L–O hay layout Excel đặt hàng cũ.
 
 - **category / subcategory / sub_subcategory**: tuỳ chọn — cột Main Category / Danh mục cấp 1–3 (file export đủ cột); bỏ qua ô nhãn mẫu «Danh mục cấp …».
 
-- **Giá Tệ** (hoặc `pro_lower_price` trên file export draft; nếu ô đó trống thì dùng **Giá gốc tệ** / `cost_cny`) → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`).
+- **Giá Tệ** (hoặc `pro_lower_price` trên file export draft; nếu ô đó trống thì dùng **Giá gốc tệ** / `cost_cny`) → `pro_lower_price` và **`price`** (VNĐ) = làm_tròn(CN¥ × hệ_số_IF × tỷ_giá), sau đó làm tròn **lên** bội 10.000 ₫ (`listing_cny_grid`). Nếu bản cào đã có `colors[].price` hoặc `price_pairs[].price` thì ô này không ghi đè giá bán và khung tệ.
 - **Giá gốc tệ** (`cost_cny`) và **Giá Việt Nam** (`cost_vnd`): ghi vào nháp nếu ô có số. Chỉ một trong hai cột được có số.
 
   Tỷ giá nền `LISTING_IMPORT_VND_PER_CNY`; cột `vnd_per_cny_used` / Tỷ giá ghi đè theo dòng nếu có.
@@ -609,6 +609,32 @@ def _cell_float(val: Any) -> Optional[float]:
 
 
 
+def _has_positive_amount(raw: Any) -> bool:
+    num = _cell_float(raw)
+    return num is not None and num > 0 and math.isfinite(num)
+
+
+def _product_data_has_per_sku_sell_price(product_data: Dict[str, Any]) -> bool:
+    """Đã có giá bán từng mã — ô Giá Tệ một mức không được ghi đè."""
+    colors = product_data.get("colors")
+    if isinstance(colors, list):
+        for row in colors:
+            if isinstance(row, dict) and _has_positive_amount(row.get("price")):
+                return True
+    info = product_data.get("product_info")
+    variants = info.get("variants") if isinstance(info, dict) else None
+    if not isinstance(variants, dict):
+        return False
+    raw_pairs = variants.get("price_pairs")
+    if not isinstance(raw_pairs, list) or not raw_pairs:
+        raw_pairs = variants.get("pairs")
+    if isinstance(raw_pairs, list):
+        for row in raw_pairs:
+            if isinstance(row, dict) and _has_positive_amount(row.get("price")):
+                return True
+    return False
+
+
 def merge_import_excel_overlay_into_product_data(
 
     product_data: Dict[str, Any],
@@ -640,9 +666,11 @@ def merge_import_excel_overlay_into_product_data(
     if "cost_vnd" in overlay:
         product_data["cost_vnd"] = overlay.get("cost_vnd")
 
+    keep_sku_prices = _product_data_has_per_sku_sell_price(product_data)
+
     pl = overlay.get("pro_lower_price")
 
-    if pl is not None and str(pl).strip() != "":
+    if not keep_sku_prices and pl is not None and str(pl).strip() != "":
 
         product_data["pro_lower_price"] = _cell_str(pl)
         from app.services.product_import_cost import stamp_scraped_cost_cny
@@ -651,13 +679,13 @@ def merge_import_excel_overlay_into_product_data(
 
     ph = overlay.get("pro_high_price")
 
-    if ph is not None and str(ph).strip() != "":
+    if not keep_sku_prices and ph is not None and str(ph).strip() != "":
 
         product_data["pro_high_price"] = _cell_str(ph)
 
     num = _cell_float(overlay.get("price"))
 
-    if num is not None:
+    if not keep_sku_prices and num is not None:
 
         product_data["price"] = num
 

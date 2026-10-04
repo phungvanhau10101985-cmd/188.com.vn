@@ -8,6 +8,7 @@ import type { Product } from '@/types/api';
 import { apiClient } from '@/lib/api-client';
 import { parseVideoLink, buildYoutubeEmbedSrc } from '@/lib/video-utils';
 import { formatPrice } from '@/lib/utils';
+import { listingPricePrefix } from '@/lib/variant-list-price';
 import { useCart } from '@/features/cart/hooks/useCart';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -173,7 +174,12 @@ function VideoFeedProductBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[#ea580c] font-bold shrink-0">{formatPrice(product.price)}</span>
+        <span className="text-[#ea580c] font-bold shrink-0">
+          {listingPricePrefix(product) ? (
+            <span className="mr-1 text-[0.72em] font-semibold text-white/80">từ</span>
+          ) : null}
+          {formatPrice(product.price)}
+        </span>
 
         <div className="ml-auto flex items-center gap-1.5 shrink-0">
           <button

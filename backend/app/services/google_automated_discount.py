@@ -248,6 +248,21 @@ def read_google_discount_lock(product_data: Optional[dict[str, Any]]) -> Optiona
     }
 
 
+def google_sale_for_list_price(
+    locked_price: float,
+    prior_price: Optional[float],
+    list_original: float,
+) -> tuple[float, float]:
+    """Giá khóa tuyệt đối khi khớp niêm yết; lệch thì nhân cùng tỷ lệ lên giá mã đang chọn."""
+    prior = float(prior_price or 0)
+    listed = float(list_original or 0)
+    locked = float(locked_price)
+    if prior > 0 and listed > 0 and abs(listed - prior) >= 1 and locked > 0:
+        return round(listed * locked / prior), listed
+    stored_list = prior if prior > 0 else (listed if listed > 0 else locked)
+    return locked, stored_list
+
+
 def apply_google_discount_to_cart_line(
     *,
     product,
@@ -260,8 +275,12 @@ def apply_google_discount_to_cart_line(
     pd = dict(product_data or {})
     existing = read_google_discount_lock(pd)
     if existing:
-        list_price = float(existing.get("prior_price") or list_original or unit_sale)
-        return float(existing["price"]), list_price, pd
+        sale, list_price = google_sale_for_list_price(
+            float(existing["price"]),
+            existing.get("prior_price"),
+            float(list_original or unit_sale or 0),
+        )
+        return sale, list_price, pd
 
     token = (google_pv2_token or pd.get("google_pv2_token") or "").strip()
     if not token:
@@ -274,5 +293,9 @@ def apply_google_discount_to_cart_line(
     block = build_google_discount_product_data(payload)
     pd["google_automated_discount"] = block
     pd.pop("google_pv2_token", None)
-    list_price = float(payload.prior_price or list_original or unit_sale)
-    return float(payload.price), list_price, pd
+    sale, list_price = google_sale_for_list_price(
+        float(payload.price),
+        payload.prior_price,
+        float(list_original or unit_sale or 0),
+    )
+    return sale, list_price, pd

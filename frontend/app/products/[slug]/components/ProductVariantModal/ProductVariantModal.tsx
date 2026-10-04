@@ -33,6 +33,7 @@ import {
 import { useGoogleAutomatedDiscount } from '@/lib/use-google-automated-discount';
 import WarehouseClearanceBlock from '@/components/product-detail/WarehouseClearanceBlock';
 import { warehouseVariantsInStock } from '@/lib/warehouse-clearance';
+import { productPricedForVariant } from '@/lib/variant-list-price';
 
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
@@ -238,10 +239,15 @@ export default function ProductVariantModal({
   const productForPricing = useMemo(
     () =>
       mergeProductSiteSaleFromCalendar(
-        mergeProductFlashSale(product, flashById),
+        mergeProductFlashSale(
+          orderingWarehouse
+            ? product
+            : productPricedForVariant(product, selectedColorIndex, selectedSize),
+          flashById,
+        ),
         siteSaleState,
       ),
-    [product, siteSaleState, flashById],
+    [product, siteSaleState, flashById, orderingWarehouse, selectedColorIndex, selectedSize],
   );
   const { record: googleDiscount } = useGoogleAutomatedDiscount(product.product_id, product);
   const pricingBase = useMemo(

@@ -206,6 +206,30 @@ def _import_cost_is_set(value: Any) -> bool:
     return amount is not None and amount >= 0
 
 
+def _variant_cost_cny(
+    colors: Any,
+    product_info: Any,
+    selected_color: Any,
+    selected_size: Any,
+    fallback: Any,
+) -> Any:
+    """Giá tệ của đúng mã đã bán. Không khớp biến thể thì dùng cost_cny của sản phẩm."""
+    if not str(selected_color or "").strip() and not str(selected_size or "").strip():
+        return fallback
+    from types import SimpleNamespace
+
+    from app.services.variant_sale_price import resolve_variant_quote
+
+    stub = SimpleNamespace(
+        colors=colors if isinstance(colors, list) else [],
+        product_info=product_info if isinstance(product_info, dict) else {},
+    )
+    quote = resolve_variant_quote(stub, str(selected_color or ""), str(selected_size or ""))
+    if quote and quote.get("price_cny"):
+        return quote["price_cny"]
+    return fallback
+
+
 def line_stored_import(
     quantity: Any,
     cost_cny: Any,
@@ -419,9 +443,13 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                 OrderItem.price,
                 OrderItem.total_price,
                 OrderItem.is_warehouse_item,
+                OrderItem.selected_color,
+                OrderItem.selected_size,
                 Product.pro_lower_price,
                 Product.cost_cny,
                 Product.cost_vnd,
+                Product.colors,
+                Product.product_info,
             )
             .outerjoin(Product, Product.id == OrderItem.product_id)
             .filter(OrderItem.order_id.in_(order_ids))
@@ -434,11 +462,26 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
             legacy_price,
             line_total,
             is_warehouse,
+            selected_color,
+            selected_size,
             raw_price,
             cost_cny,
             cost_vnd,
+            colors,
+            product_info,
         ) in item_rows:
             unit = unit_price if unit_price not in (None, 0) else legacy_price
+            line_cost_cny = (
+                cost_cny
+                if is_warehouse
+                else _variant_cost_cny(
+                    colors,
+                    product_info,
+                    selected_color,
+                    selected_size,
+                    cost_cny,
+                )
+            )
             lines_by_order.setdefault(int(order_id), []).append(
                 {
                     "quantity": quantity,
@@ -446,7 +489,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
                     "raw": raw_price,
                     "line_total": line_total,
                     "is_warehouse": bool(is_warehouse),
-                    "cost_cny": cost_cny,
+                    "cost_cny": line_cost_cny,
                     "cost_vnd": cost_vnd,
                 }
             )

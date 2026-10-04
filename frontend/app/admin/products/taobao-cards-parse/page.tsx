@@ -574,6 +574,7 @@ export default function TaobaoCardsParsePage() {
   const [listingQueueExcelErrByToken, setListingQueueExcelErrByToken] = useState<
     Record<string, string>
   >({});
+  const [listingQueueExcelBusyToken, setListingQueueExcelBusyToken] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
 
   /** Modal: chọn nháp đã crawl xong để đăng lên web (publish giống Import 1688). */
@@ -1219,6 +1220,7 @@ export default function TaobaoCardsParsePage() {
         delete next[token];
         return next;
       });
+      setListingQueueExcelBusyToken(token);
       try {
         await adminProductAPI.downloadListingImportQueueProductsExcel(token);
         showToast('ok', 'Đã tải Excel nhập web (tiêu đề, giá, ảnh, biến thể… — giống export bulk draft).');
@@ -1227,6 +1229,8 @@ export default function TaobaoCardsParsePage() {
         setListingQueueExcelErrByToken((prev) => ({ ...prev, [token]: msg }));
         console.error('[taobao-cards-parse] downloadListingImportQueueProductsExcel', token.slice(0, 12), e);
         showToast('err', msg);
+      } finally {
+        setListingQueueExcelBusyToken((cur) => (cur === token ? null : cur));
       }
     },
     [queueStatusByToken, showToast],
@@ -2880,11 +2884,11 @@ export default function TaobaoCardsParsePage() {
                     <button
                       type="button"
                       onClick={() => void downloadListingQueueProductsExcel(token)}
-                      disabled={donePlusErr === 0}
+                      disabled={donePlusErr === 0 || listingQueueExcelBusyToken === token}
                       className="px-3 py-1.5 rounded-md border border-indigo-600 bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-40"
                       title="File .xlsx cùng mẫu «export bulk draft»: chỉ các draft có product_data (thường là dòng crawl ok)."
                     >
-                      Tải Excel nhập web
+                      {listingQueueExcelBusyToken === token ? 'Đang tải Excel…' : 'Tải Excel nhập web'}
                     </button>
                     <button
                       type="button"

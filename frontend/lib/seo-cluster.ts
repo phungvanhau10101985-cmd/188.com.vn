@@ -46,6 +46,13 @@ export interface SeoClusterProductCard {
   shop_name: string | null;
   available: number;
   brand_name: string | null;
+  is_warehouse_clearance?: boolean;
+  colors?: { price?: number }[];
+  product_info?: {
+    variants?: {
+      price_pairs?: { price?: number }[];
+    };
+  };
 }
 
 export interface SeoClusterParentRef {

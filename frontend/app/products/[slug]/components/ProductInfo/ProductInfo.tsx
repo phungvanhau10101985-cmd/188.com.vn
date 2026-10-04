@@ -9,7 +9,8 @@ import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice, displayableBrandOrOrigin } from '@/lib/utils';
 import VariantSelector from '@/components/product-detail/VariantSelector';
-import { colorLabelForCart } from '@/lib/product-color-variant';
+import { colorLabelForCart, resolveColorSwatchImageUrl } from '@/lib/product-color-variant';
+import { productPricedForVariant } from '@/lib/variant-list-price';
 import ProductActions from './ProductActions';
 import ProductQAReviewCards from '../ProductQAReviewCards/ProductQAReviewCards';
 import ProductVariantModal from '../ProductVariantModal/ProductVariantModal';
@@ -115,10 +116,15 @@ export default function ProductInfo({
   const productForPricing = useMemo(
     () =>
       mergeProductSiteSaleFromCalendar(
-        mergeProductFlashSale(product, flashById),
+        mergeProductFlashSale(
+          selectedWarehouseId != null
+            ? product
+            : productPricedForVariant(product, selectedColorIndex, selectedSize),
+          flashById,
+        ),
         siteSaleState,
       ),
-    [product, siteSaleState, flashById],
+    [product, siteSaleState, flashById, selectedColorIndex, selectedSize, selectedWarehouseId],
   );
   const { record: googleDiscount, error: googleDiscountError } = useGoogleAutomatedDiscount(
     product.product_id,
@@ -191,6 +197,22 @@ export default function ProductInfo({
     const n = colorList.length;
     setSelectedColorIndex(n > 0 ? 0 : -1);
   }, [product.id, colorList.length]);
+
+  useEffect(() => {
+    if (selectedWarehouseId != null || selectedColorIndex < 0) return;
+    const img = resolveColorSwatchImageUrl(
+      {
+        colors: colorList,
+        color_image_urls: product.color_image_urls,
+        color_variants: product.color_variants,
+        images: product.images,
+        gallery: product.gallery,
+        main_image: product.main_image,
+      },
+      selectedColorIndex,
+    );
+    onColorImageChange?.(img || null);
+  }, [selectedColorIndex, selectedWarehouseId, product.id]);
 
   useEffect(() => {
     setStickyPortalReady(true);

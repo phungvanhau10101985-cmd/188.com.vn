@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api-client';
 import type { Product, ProductReviewItem } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { formatPrice } from '@/lib/utils';
+import { listingPricePrefix } from '@/lib/variant-list-price';
 import { getOptimizedImage as getOptImg } from '@/lib/image-utils';
 import ProductReviewFormModal from '../components/ProductReviewFormModal/ProductReviewFormModal';
 import { useToast } from '@/components/ToastProvider';
@@ -230,7 +231,12 @@ export default function ProductReviewsPage() {
           <Link href={`/products/${pdpSeg}`} className="font-semibold text-gray-900 hover:text-[#ea580c] line-clamp-2">
             {product.name}
           </Link>
-          <p className="text-[#ea580c] font-semibold mt-0.5">{formatPrice(product.price)}</p>
+          <p className="text-[#ea580c] font-semibold mt-0.5">
+            {listingPricePrefix(product) ? (
+              <span className="mr-1 text-[0.72em] font-semibold text-gray-500">từ</span>
+            ) : null}
+            {formatPrice(product.price)}
+          </p>
         </div>
         <div className="shrink-0 flex flex-col gap-2">
           <Link

@@ -1555,6 +1555,18 @@ def list_import_1688_drafts(
     )
 
 
+def _release_db_session(db: Session) -> None:
+    """Trả connection về pool trước khi dựng file Excel (openpyxl không cần DB)."""
+    try:
+        db.rollback()
+    except Exception:
+        logger.debug("rollback before excel export failed", exc_info=True)
+    try:
+        db.close()
+    except Exception:
+        logger.debug("close before excel export failed", exc_info=True)
+
+
 def _file_response_import_excel_rows(rows_data: List[Dict[str, Any]], download_filename: str) -> Response:
     """Tạo Excel mẫu nhập web (cùng layout export bulk draft) — trả bytes, không phụ thuộc CWD hay ghi đĩa."""
     if not rows_data:
@@ -1623,6 +1635,7 @@ def export_import_1688_drafts_bulk(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     rows_data = _excel_rows_from_draft_ids(db, payload.draft_ids, preserve_order=False)
+    _release_db_session(db)
     filename = f"import_1688_drafts_bulk_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return _file_response_import_excel_rows(rows_data, filename)
 
@@ -1639,6 +1652,7 @@ def export_excel_import_batch(
     if not draft_ids:
         raise HTTPException(status_code=400, detail="Đợt này chưa có bản nháp nào để export.")
     rows_data = _excel_rows_from_draft_ids(db, draft_ids, preserve_order=True)
+    _release_db_session(db)
     if not rows_data:
         raise HTTPException(
             status_code=400,
@@ -1688,6 +1702,7 @@ def listing_import_queue_export_products_excel(
         pdata = dict(draft.product_data or {})
         rows_data.append(_excel_row_from_product(pdata))
 
+    _release_db_session(db)
     elapsed = time.perf_counter() - t0
     logger.info(
         "listing_queue export-products (fast) token=%s… draft_ids=%s missing_in_db=%s excel_rows=%s duration_s=%.2f",

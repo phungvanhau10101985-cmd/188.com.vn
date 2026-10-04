@@ -20,6 +20,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     title: 'Bán hàng & sản phẩm',
     items: [
       { href: '/admin/orders', label: 'Đơn hàng', moduleKey: 'orders' },
+      {
+        href: '/admin/ad-spend',
+        label: 'Chi phí quảng cáo',
+        moduleKey: 'ad_spend',
+        privilegedOnly: true,
+      },
       { href: '/admin/orders/shipping', label: 'Vận chuyển EMS', moduleKey: 'ems_shipping' },
       { href: '/admin/products', label: 'Sản phẩm', moduleKey: 'products' },
       { href: '/admin/products/create', label: 'Đăng SP thủ công / AI', moduleKey: 'products' },
@@ -65,12 +71,6 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       },
       { href: '/admin/shop-video-fab', label: 'Nút video', moduleKey: 'shop_video_fab' },
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics', moduleKey: 'embed_codes' },
-      {
-        href: '/admin/ad-spend',
-        label: 'Chi phí quảng cáo',
-        moduleKey: 'ad_spend',
-        privilegedOnly: true,
-      },
       {
         href: '/admin/api-stats',
         label: 'Chi phí API AI',

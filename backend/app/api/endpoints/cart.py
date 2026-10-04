@@ -57,7 +57,10 @@ def _cart_items_with_site_sale_pricing(
 ) -> tuple[List[CartItemResponse], float, dict]:
     from app.services.sale_calendar import apply_site_sale_to_price, resolve_sale_calendar_state
     from app.services import warehouse_clearance as wh_clearance_svc
-    from app.services.google_automated_discount import read_google_discount_lock
+    from app.services.google_automated_discount import (
+        google_sale_for_list_price,
+        read_google_discount_lock,
+    )
 
     sale_state = resolve_sale_calendar_state(db, user=user)
     wh_enabled, wh_pct = wh_clearance_svc.get_warehouse_clearance_settings(db)
@@ -86,8 +89,11 @@ def _cart_items_with_site_sale_pricing(
             if item.product is not None:
                 sellable = warehouse_sellable_qty(item.product)
         elif google_lock:
-            line_unit = float(google_lock["price"])
-            list_for_compare = float(google_lock.get("prior_price") or base or line_unit)
+            line_unit, list_for_compare = google_sale_for_list_price(
+                float(google_lock["price"]),
+                google_lock.get("prior_price"),
+                base,
+            )
             resp.product_price = line_unit
             resp.list_price = list_for_compare if list_for_compare > 0 else None
             resp.original_price = list_for_compare if list_for_compare > line_unit else None

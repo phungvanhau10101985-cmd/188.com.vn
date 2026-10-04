@@ -107,6 +107,10 @@ def apply_database_session_guardrails() -> None:
         _logger.warning("Không áp được ALTER DATABASE guardrails (bỏ qua): %s", exc)
 
 
+# Gồm cả «aborted»: transaction lỗi chưa ROLLBACK, vẫn chiếm RAM.
+_OPEN_IDLE_STATES_SQL = "'idle in transaction', 'idle in transaction (aborted)'"
+
+
 def count_idle_in_transaction() -> int:
     from app.db.session import engine
 
@@ -115,11 +119,11 @@ def count_idle_in_transaction() -> int:
             return int(
                 conn.execute(
                     text(
-                        """
+                        f"""
                         SELECT count(*)::int
                         FROM pg_stat_activity
                         WHERE datname = current_database()
-                          AND state = 'idle in transaction'
+                          AND state IN ({_OPEN_IDLE_STATES_SQL})
                           AND pid <> pg_backend_pid()
                         """
                     )
@@ -129,6 +133,19 @@ def count_idle_in_transaction() -> int:
     except Exception as exc:
         _logger.debug("count_idle_in_transaction failed: %s", exc)
         return 0
+
+
+def _terminate_matching_backends(conn, sql: str, params: dict) -> int:
+    rows = conn.execute(text(sql), params).fetchall()
+    terminated = 0
+    for (pid,) in rows:
+        ok = conn.execute(
+            text("SELECT pg_terminate_backend(:pid)"),
+            {"pid": int(pid)},
+        ).scalar()
+        if ok:
+            terminated += 1
+    return terminated
 
 
 def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int:
@@ -151,6 +168,8 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
         getattr(settings, "DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT", 0) or 0
     )
     idle_count = count_idle_in_transaction()
+    if not force and idle_count <= 0:
+        return 0
 
     pool_max = int(settings.DATABASE_POOL_SIZE) + int(settings.DATABASE_MAX_OVERFLOW)
     if trigger_count <= 0:
@@ -158,18 +177,36 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
     if aggressive_when <= 0:
         aggressive_when = max(trigger_count + 2, pool_max - 5)
 
-    if not force and idle_count < trigger_count:
-        return 0
-
     if idle_count >= aggressive_when:
         min_idle = min(min_idle, aggressive_min)
+
+    aborted_min = max(
+        5,
+        int(getattr(settings, "DATABASE_POOL_RELIEF_ABORTED_MIN_IDLE_SECONDS", 8) or 8),
+    )
+    kill_open = force or idle_count >= trigger_count
 
     from app.db.session import engine
 
     try:
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            rows = conn.execute(
-                text(
+            # Aborted thì request không còn dùng được connection — cắt sớm, kể cả khi pool chưa đầy.
+            aborted = _terminate_matching_backends(
+                conn,
+                """
+                SELECT pid
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND state = 'idle in transaction (aborted)'
+                  AND pid <> pg_backend_pid()
+                  AND now() - state_change > make_interval(secs => :min_idle)
+                """,
+                {"min_idle": aborted_min},
+            )
+            opened = 0
+            if kill_open:
+                opened = _terminate_matching_backends(
+                    conn,
                     """
                     SELECT pid
                     FROM pg_stat_activity
@@ -177,22 +214,16 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
                       AND state = 'idle in transaction'
                       AND pid <> pg_backend_pid()
                       AND now() - state_change > make_interval(secs => :min_idle)
-                    """
-                ),
-                {"min_idle": min_idle},
-            ).fetchall()
-            terminated = 0
-            for (pid,) in rows:
-                ok = conn.execute(
-                    text("SELECT pg_terminate_backend(:pid)"),
-                    {"pid": int(pid)},
-                ).scalar()
-                if ok:
-                    terminated += 1
+                    """,
+                    {"min_idle": min_idle},
+                )
+            terminated = aborted + opened
             if terminated:
                 _logger.warning(
-                    "Pool relief: terminated %s idle-in-transaction (idle_count=%s trigger=%s)",
+                    "Pool relief: terminated %s idle-in-transaction (aborted=%s open=%s idle_count=%s trigger=%s)",
                     terminated,
+                    aborted,
+                    opened,
                     idle_count,
                     trigger_count,
                 )

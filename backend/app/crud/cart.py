@@ -19,7 +19,12 @@ def _warehouse_stock_cap(product: Product) -> Optional[int]:
 
 
 def _cart_line_unit_prices(
-    db: Session, product: Product, *, user_id: Optional[int] = None
+    db: Session,
+    product: Product,
+    *,
+    user_id: Optional[int] = None,
+    selected_color: Optional[str] = None,
+    selected_size: Optional[str] = None,
 ) -> Tuple[float, float, bool, Optional[int], float]:
     """
     Trả (giá bán đơn vị, giá gốc/list, is_warehouse, cap tồn, % giảm kho).
@@ -34,7 +39,13 @@ def _cart_line_unit_prices(
 
     is_wh = is_warehouse_cart_product(product)
     cap = _warehouse_stock_cap(product) if is_wh else None
-    display, original = resolve_checkout_line_prices(db, product, user_id=user_id)
+    display, original = resolve_checkout_line_prices(
+        db,
+        product,
+        user_id=user_id,
+        selected_color=selected_color,
+        selected_size=selected_size,
+    )
     if not is_wh:
         return display, original, False, None, 0.0
     _enabled, pct = get_warehouse_clearance_settings(db)
@@ -124,6 +135,9 @@ def _resolve_cart_line_image(
     client_product_data: Optional[Dict[str, Any]],
     line_image_url: Optional[str] = None,
 ) -> str:
+    from_colors = _line_image_from_colors(product, selected_color)
+    if from_colors:
+        return from_colors
     explicit = (line_image_url or "").strip()
     if explicit:
         return explicit
@@ -131,9 +145,6 @@ def _resolve_cart_line_image(
     cimg = (client.get("main_image") or "").strip()
     if cimg:
         return cimg
-    from_colors = _line_image_from_colors(product, selected_color)
-    if from_colors:
-        return from_colors
     return (product.main_image or "").strip()
 
 
@@ -201,7 +212,19 @@ class CartItemCRUD:
         ).first()
         
         unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(
-            db, product, user_id=user_id
+            db,
+            product,
+            user_id=user_id,
+            selected_color=cart_item.selected_color,
+            selected_size=cart_item.selected_size,
+        )
+        from app.services.variant_sale_price import selected_color_name_for_line
+
+        color_name = selected_color_name_for_line(
+            product,
+            cart_item.selected_color,
+            cart_item.selected_size,
+            cart_item.selected_color_name,
         )
 
         client_pd = dict(cart_item.product_data or {})
@@ -241,7 +264,8 @@ class CartItemCRUD:
             existing.unit_price = unit_sale
             existing.product_price = unit_sale
             existing.quantity = new_qty
-            existing.selected_color_name = cart_item.selected_color_name
+            if color_name:
+                existing.selected_color_name = color_name
             existing.total_price = unit_sale * new_qty
             if isinstance(existing.product_data, dict):
                 pd = {**existing.product_data, **client_pd}
@@ -316,6 +340,15 @@ class CartItemCRUD:
         product_data["list_price"] = list_original
         if list_original > unit_sale:
             product_data["original_price"] = list_original
+        if not is_wh:
+            from app.services.variant_sale_price import resolve_variant_quote
+
+            quote = resolve_variant_quote(product, cart_item.selected_color, cart_item.selected_size)
+            if quote:
+                if quote.get("sku_code"):
+                    product_data["sku_code"] = quote["sku_code"]
+                if quote.get("price_cny"):
+                    product_data["price_cny"] = quote["price_cny"]
 
         now = datetime.now()
         db_cart_item = CartItem(
@@ -326,7 +359,7 @@ class CartItemCRUD:
             quantity=qty,
             selected_size=cart_item.selected_size,
             selected_color=cart_item.selected_color,
-            selected_color_name=cart_item.selected_color_name,
+            selected_color_name=color_name,
             unit_price=unit_sale,  # QUAN TRỌNG: phải có unit_price (notnull)
             total_price=total_price,  # QUAN TRỌNG: phải có total_price (notnull)
             product_name=product.name,
@@ -351,15 +384,33 @@ class CartItemCRUD:
             product = db.query(Product).filter(Product.id == db_cart_item.product_id).first()
             if product is not None:
                 unit_sale, list_original, is_wh, stock_cap, wh_pct = _cart_line_unit_prices(
-                    db, product, user_id=db_cart_item.user_id
+                    db,
+                    product,
+                    user_id=db_cart_item.user_id,
+                    selected_color=db_cart_item.selected_color,
+                    selected_size=db_cart_item.selected_size,
                 )
                 pd_existing = dict(db_cart_item.product_data or {}) if isinstance(db_cart_item.product_data, dict) else {}
-                from app.services.google_automated_discount import read_google_discount_lock
+                if not is_wh:
+                    from app.services.google_automated_discount import apply_google_discount_to_cart_line
 
-                lock = read_google_discount_lock(pd_existing)
-                if lock and not is_wh:
-                    unit_sale = float(lock["price"])
-                    list_original = float(lock.get("prior_price") or list_original or unit_sale)
+                    unit_sale, list_original, _ = apply_google_discount_to_cart_line(
+                        product=product,
+                        unit_sale=unit_sale,
+                        list_original=list_original,
+                        product_data=pd_existing,
+                    )
+                from app.services.variant_sale_price import selected_color_name_for_line
+
+                if not (db_cart_item.selected_color_name or "").strip():
+                    filled_name = selected_color_name_for_line(
+                        product,
+                        db_cart_item.selected_color,
+                        db_cart_item.selected_size,
+                        db_cart_item.selected_color_name,
+                    )
+                    if filled_name:
+                        db_cart_item.selected_color_name = filled_name
                 qty = int(db_cart_item.quantity or 1)
                 if is_wh and stock_cap is not None:
                     if stock_cap <= 0:
@@ -375,6 +426,19 @@ class CartItemCRUD:
                     pd["price"] = unit_sale
                     pd["list_price"] = list_original
                     pd["original_price"] = list_original
+                    if not is_wh:
+                        from app.services.variant_sale_price import resolve_variant_quote
+
+                        quote = resolve_variant_quote(
+                            product,
+                            db_cart_item.selected_color,
+                            db_cart_item.selected_size,
+                        )
+                        if quote:
+                            if quote.get("sku_code"):
+                                pd["sku_code"] = quote["sku_code"]
+                            if quote.get("price_cny"):
+                                pd["price_cny"] = quote["price_cny"]
                     if is_wh:
                         pd["is_warehouse_clearance"] = True
                         pd["warehouse_clearance_percent"] = wh_pct

@@ -15,6 +15,7 @@ import ProductCardPromoBadges from '@/components/ProductCardPromoBadges';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
 import ProductCardClearanceImageBadges from '@/components/ProductCardClearanceImageBadges';
 import { useCatalogProductPricing } from '@/lib/use-catalog-product-pricing';
+import { productHasTieredVariantPrices } from '@/lib/variant-list-price';
 import {
   resolveProductDisplayPricing,
   stackedSaleProgramLabel,
@@ -76,6 +77,7 @@ function ProductCardPricePromo({
   birthdayActive,
   birthdayPercent,
   productListPrice,
+  fromPrice = false,
   priceClassName,
   strikeClassName = 'text-[10px] text-gray-500 line-through decoration-1 decoration-gray-400',
   savingsClassName = 'text-[10px] font-medium text-emerald-600',
@@ -86,6 +88,7 @@ function ProductCardPricePromo({
   birthdayActive: boolean;
   birthdayPercent: number;
   productListPrice?: number;
+  fromPrice?: boolean;
   priceClassName: string;
   strikeClassName?: string;
   savingsClassName?: string;
@@ -102,7 +105,10 @@ function ProductCardPricePromo({
   return (
     <div className="space-y-0.5">
       <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
-        <span className={priceClassName}>{formatPrice(displayPrice)}</span>
+        <span className={priceClassName}>
+          {fromPrice ? <span className="mr-1 text-[0.72em] font-semibold text-gray-500">từ</span> : null}
+          {formatPrice(displayPrice)}
+        </span>
         <BirthdayPromoPriceCakeIcon active={birthdayActive} percent={birthdayPercent} />
         {promo.showOriginal ? (
           <span className={strikeClassName}>{formatPrice(promo.originalPrice!)}</span>
@@ -408,6 +414,7 @@ export default function ProductCard({
             birthdayActive={birthdayBadgeActive}
             birthdayPercent={birthdayDiscount.percent}
             productListPrice={showsClearance ? catalogListPrice : pricing.listPrice || product.price}
+            fromPrice={!showsClearance && productHasTieredVariantPrices(product)}
             priceClassName={`font-bold text-red-600 ${sizeClasses.price}`}
             strikeClassName="text-xs text-gray-500 line-through decoration-1 decoration-gray-400"
             savingsClassName="text-xs font-medium text-emerald-600"
@@ -583,6 +590,7 @@ const SimpleProductCardComponent = ({
             birthdayActive={birthdayBadgeActive}
             birthdayPercent={birthdayDiscount.percent}
             productListPrice={showsClearance ? catalogListPrice : pricing.listPrice || product.price}
+            fromPrice={!showsClearance && productHasTieredVariantPrices(product)}
             priceClassName="text-sm font-bold text-gray-900"
           />
         </div>

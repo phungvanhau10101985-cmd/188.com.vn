@@ -4,6 +4,7 @@ from app.services.import_batch_url_coercion import (
     FETCH_TARGET_PANDAMALL,
     coerce_url_for_excel_batch_import,
 )
+from app.services.import_vipomall_scraper import _listing_vnd_for_cny
 from app.services.import_pandamall_scraper import (
     PANDAMALL_PLATFORM_1688,
     PANDAMALL_PLATFORM_TAOBAO,
@@ -110,11 +111,19 @@ def test_pandamall_row_maps_colors_sizes_and_product_id():
     assert product["colors"][0]["name"] == "Màu đỏ"
     assert "O1CN01TcAxsb1j8QUCo5w3p" in product["colors"][0]["img"]
     assert product["sizes"] == ["35", "36", "37", "38", "39"]
-    assert product["price"] == 678300.0
+    sell = _listing_vnd_for_cny(170)
+    assert product["price"] == sell
+    assert product["cost_cny"] == 170
     assert product["pro_lower_price"] == "170"
+    assert product["pro_high_price"] == "170"
+    assert product["colors"][0]["price"] == sell
+    assert product["colors"][0]["price_cny"] == 170
+    assert product["colors"][0]["sku"] == product["colors"][0]["name"]
     assert product["product_info"]["variants"]["source"] == "pandamall"
     pairs = product["product_info"]["variants"]["pairs"]
-    assert {"color": "Màu đỏ", "size": "35"} in pairs
+    red = next(p for p in pairs if p["color"] == "Màu đỏ" and p["size"] == "35")
+    assert red["price"] == sell
+    assert red["price_cny"] == 170
     assert is_pandamall_import_url("https://pandamall.vn/taobao/detail/1049735896483")
 
 
@@ -199,8 +208,7 @@ def test_pandamall_ver_swipe_color_buttons_map_variants_and_first_jpg():
     assert product.get("sizes") == []
     variants = product.get("product_info", {}).get("variants", {})
     assert variants.get("variant_only") is True
-    pairs = variants.get("pairs") or []
-    assert {"color": "Màu cam 14cm", "size": ""} in pairs
+    assert not variants.get("pairs")
 
 
 _PANDAMALL_BAG_RAW = {
@@ -268,15 +276,76 @@ def test_pandamall_bag_color_only_maps_variants_without_sizes():
     assert colors[0]["name"] == "Xám cổ điển"
     assert "22679636703_2115707610" in colors[0]["img"]
     assert product.get("sizes") == []
-    assert product.get("price") == 837900.0
+    sell = _listing_vnd_for_cny(210)
+    assert product.get("price") == sell
     assert product.get("pro_lower_price") == "210"
+    assert product.get("pro_high_price") == "210"
+    assert colors[0]["price"] == sell
+    assert colors[0]["price_cny"] == 210
+    assert colors[0]["sku"] == "Xám cổ điển"
     variants = product.get("product_info", {}).get("variants", {})
     assert variants.get("variant_only") is True
     assert variants.get("sizes") is None
-    pairs = variants.get("pairs") or []
-    assert len(pairs) == 4
-    assert all(p.get("size") == "" for p in pairs)
-    assert {"color": "Vàng cổ điển", "size": ""} in pairs
+    assert not variants.get("pairs")
+
+
+def test_pandamall_model_codes_keep_each_cny_and_listing_price():
+    cheap = _listing_vnd_for_cny(77)
+    dear = _listing_vnd_for_cny(440)
+    raw = {
+        "title": "Van điện từ",
+        "layout_mode": "color_only",
+        "colors": [
+            {
+                "label": "2W41-15GBN-AC220V",
+                "image_url": "https://cbu01.alicdn.com/img/ibank/cheap.jpg",
+                "price_cny": "77",
+                "stock": 10,
+                "in_stock": True,
+            },
+            {
+                "label": "2W41-50GBN-AC220V",
+                "image_url": "https://cbu01.alicdn.com/img/ibank/oos.jpg",
+                "price_cny": "440",
+                "stock": 0,
+                "in_stock": False,
+            },
+            {
+                "label": "2W41-50GBN-DC24V",
+                "image_url": "https://cbu01.alicdn.com/img/ibank/dear.jpg",
+                "price_cny": "440",
+                "stock": 8,
+                "in_stock": True,
+            },
+        ],
+        "variant_rows": [
+            {"color": "2W41-15GBN-AC220V", "size": "", "price_cny": "77", "stock": 10, "in_stock": True},
+            {"color": "2W41-50GBN-DC24V", "size": "", "price_cny": "440", "stock": 8, "in_stock": True},
+        ],
+        "sizes": [],
+        "gallery_images": ["https://cbu01.alicdn.com/img/ibank/gallery.jpg"],
+        "detail_images": ["https://cbu01.alicdn.com/img/ibank/detail.jpg"],
+    }
+    product = pandamall_row_to_product_data(
+        raw,
+        "https://pandamall.vn/1688/detail/1217276629",
+        "1217276629",
+    )
+    colors = product["colors"]
+    assert [c["name"] for c in colors] == ["2W41-15GBN-AC220V", "2W41-50GBN-DC24V"]
+    assert colors[0]["sku"] == "2W41-15GBN-AC220V"
+    assert colors[0]["sku_code"] == "2W41-15GBN-AC220V"
+    assert colors[0]["price_cny"] == 77
+    assert colors[0]["price"] == cheap
+    assert "cheap.jpg" in colors[0]["img"]
+    assert colors[1]["price_cny"] == 440
+    assert colors[1]["price"] == dear
+    assert product["price"] == cheap
+    assert product["cost_cny"] == 77
+    assert product["pro_lower_price"] == "77"
+    assert product["pro_high_price"] == "440"
+    assert "cheap.jpg" in product["main_image"]
+    assert any("detail.jpg" in u for u in product["gallery"])
 
 
 def test_pandamall_color_only_ignores_stale_size_list_from_scraper():

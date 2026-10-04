@@ -6,10 +6,15 @@ gallery và ảnh mô tả sau khi bấm "Xem thêm" / "Xem thêm chi tiết".
 """
 from __future__ import annotations
 
+import html
+import json
+import logging
 import math
 import re
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 from app.core.config import settings
 from app.services.alicdn_urls import is_excluded_detail_content_image, normalize_product_image_url
@@ -32,9 +37,21 @@ from app.services.vipomall_source_stock import (
 )
 from app.utils.product_synthetic_engagement import synthetic_engagement_counts
 
+logger = logging.getLogger(__name__)
+
+_VIPOMALL_DETAIL_API = "https://api-vipo.viettelpost.vn/listing/product/detail"
+_COLOR_PROP_RE = re.compile(r"màu|颜色|colour|color", re.I)
+_SIZE_PROP_RE = re.compile(r"kích\s*cỡ|kích\s*thước|尺码|尺寸|size", re.I)
+_MODEL_CODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+\-]{2,}$")
+_HTML_IMG_SRC_RE = re.compile(r"""<img[^>]+src=["']([^"']+)["']""", re.I)
+
 
 class ImportVipomallError(RuntimeError):
     pass
+
+
+class _VipomallApiUnavailable(RuntimeError):
+    """API detail không dùng được. Import không suy giá từ HTML."""
 
 
 _VIPOMALL_HOST_RE = re.compile(r"^(?:www\.)?vipomall\.vn$", re.I)
@@ -84,6 +101,22 @@ def extract_vipomall_platform_type(raw: str) -> Optional[int]:
             if s.isdigit():
                 return int(s)
     return None
+
+
+def extract_vipomall_merchant_id(raw: str) -> str:
+    norm = normalize_product_import_url((raw or "").strip())
+    if not norm:
+        return "101"
+    try:
+        qs = parse_qs(urlparse(norm).query or "")
+    except ValueError:
+        return "101"
+    for key in ("merchant_id", "merchantId"):
+        for val in qs.get(key) or []:
+            s = (val or "").strip()
+            if s.isdigit():
+                return s
+    return "101"
 
 
 def infer_vipomall_platform_type(source_url: str, offer_id: str) -> int:
@@ -559,10 +592,506 @@ def _click_text(page: Any, text: str, *, timeout_ms: int = 2500) -> bool:
         return False
 
 
-def scrape_vipomall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
-    from app.services.import_playwright_dispatch import run_import_playwright_sync
+def _listing_vnd_for_cny(price_cny: float) -> float:
+    from app.services.listing_cny_grid import (
+        cny_exchange_multiplier_from_grid,
+        estimate_listing_vnd_rounded,
+    )
 
-    return run_import_playwright_sync(lambda: _scrape_vipomall_for_import_sync(source_url))
+    coef = cny_exchange_multiplier_from_grid(price_cny)
+    vnd = estimate_listing_vnd_rounded(price_cny, coef, _listing_vnd_per_cny())
+    return float(vnd or 0)
+
+
+def _format_cny_cell(price_cny: float) -> str:
+    if not math.isfinite(price_cny) or price_cny <= 0:
+        return ""
+    return f"{price_cny:.4f}".rstrip("0").rstrip(".")
+
+
+def _prop_kind(prop_name: str) -> str:
+    name = prop_name or ""
+    if _COLOR_PROP_RE.search(name):
+        return "color"
+    if _SIZE_PROP_RE.search(name):
+        return "size"
+    return "variant"
+
+
+def _sku_cny(sku: Dict[str, Any]) -> float:
+    try:
+        val = float(sku.get("price") or 0)
+    except (TypeError, ValueError):
+        val = 0.0
+    if val > 0:
+        return val
+    for band in sku.get("price_ranges") or []:
+        if not isinstance(band, dict):
+            continue
+        try:
+            band_price = float(band.get("price") or 0)
+        except (TypeError, ValueError):
+            continue
+        if band_price > 0:
+            return band_price
+    return 0.0
+
+
+def _sku_in_stock(sku: Dict[str, Any]) -> bool:
+    if sku.get("is_active") is False:
+        return False
+    stock = sku.get("stock")
+    if stock is None or stock == "":
+        return True
+    try:
+        return int(stock) > 0
+    except (TypeError, ValueError):
+        return True
+
+
+def _sku_prop_values(sku: Dict[str, Any]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for prop in sku.get("sku_prop_list") or []:
+        if not isinstance(prop, dict):
+            continue
+        value = _clean_text(prop.get("value_name") or prop.get("original_value_name"), limit=160)
+        if not value:
+            continue
+        prop_name = _clean_text(prop.get("prop_name") or prop.get("original_prop_name"), limit=80)
+        out.append({"kind": _prop_kind(prop_name), "value": value, "prop_name": prop_name})
+    return out
+
+
+def _html_to_text(raw_html: str) -> str:
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw_html or "")
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</p>", "\n", text)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = html.unescape(text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join([line for line in lines if line])[:20000]
+
+
+def _html_image_urls(raw_html: str) -> List[str]:
+    return _dedupe_urls([m for m in _HTML_IMG_SRC_RE.findall(raw_html or "")])
+
+
+def fetch_vipomall_product_detail(offer_id: str, platform_type: int, merchant_id: str = "101") -> Dict[str, Any]:
+    """POST listing/product/detail. Ném _VipomallApiUnavailable khi không lấy được JSON hợp lệ."""
+    payload = {
+        "product_id": str(offer_id),
+        "platform_type": str(int(platform_type)),
+        "product_link": None,
+        "merchant_id": str(merchant_id or "101"),
+    }
+    ua = getattr(settings, "IMPORT_1688_USER_AGENT", None) or (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    )
+    req = Request(
+        _VIPOMALL_DETAIL_API,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Origin": "https://vipomall.vn",
+            "Referer": "https://vipomall.vn/",
+            "User-Agent": ua,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=25) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
+        raise _VipomallApiUnavailable(str(exc)) from exc
+    if not isinstance(body, dict) or str(body.get("status") or "") != "01":
+        raise _VipomallApiUnavailable(f"status={body.get('status') if isinstance(body, dict) else type(body).__name__}")
+    data = body.get("data")
+    if not isinstance(data, dict):
+        raise _VipomallApiUnavailable("Thiếu data.")
+    return data
+
+
+def vipomall_label_is_model_code(name: str) -> bool:
+    """Mã kiểu 2W41-15GBN-AC220V giữ nguyên. Tên màu tiếng Trung không thuộc dạng này."""
+    s = (name or "").strip()
+    if not s or " " in s:
+        return False
+    if re.search(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]", s):
+        return False
+    return bool(_MODEL_CODE_RE.fullmatch(s) and re.search(r"\d", s))
+
+
+def _finalize_vipomall_color_labels(colors_out: List[Dict[str, Any]], pairs: List[Dict[str, Any]]) -> None:
+    """Dịch tên màu tiếng Trung. Mã model giữ nguyên. `sku` luôn trùng `name` sau khi dịch."""
+    translatable = [
+        c
+        for c in colors_out
+        if isinstance(c, dict) and not vipomall_label_is_model_code(str(c.get("name") or ""))
+    ]
+    previous = [(c, str(c.get("name") or "")) for c in translatable]
+    if translatable:
+        try:
+            from app.services.variant_color_translate import apply_deepseek_translations_to_color_entries
+
+            apply_deepseek_translations_to_color_entries(translatable)
+        except Exception:
+            logger.info("Vipomall: bỏ qua dịch tên màu.", exc_info=True)
+    renamed: Dict[str, str] = {}
+    for entry, old in previous:
+        new = str(entry.get("name") or old)
+        if old and new and old != new:
+            renamed[old] = new
+    for entry in colors_out:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        entry["sku"] = name
+    for pair in pairs:
+        old = str(pair.get("color") or "")
+        if old in renamed:
+            pair["color"] = renamed[old]
+
+
+def vipomall_api_detail_to_product_data(
+    detail: Dict[str, Any],
+    source_url: str,
+    offer_id: str,
+    *,
+    platform_type: int = VIPOMALL_PLATFORM_1688,
+) -> Dict[str, Any]:
+    """Map JSON product/detail → product_data. Mã model giữ nguyên; tên màu tiếng Trung được dịch."""
+    skus = [s for s in (detail.get("product_sku_info_list") or []) if isinstance(s, dict) and _sku_in_stock(s)]
+    parsed: List[Dict[str, Any]] = []
+    for sku in skus:
+        cny = _sku_cny(sku)
+        if cny <= 0:
+            continue
+        props = _sku_prop_values(sku)
+        color = ""
+        size = ""
+        extras: List[str] = []
+        for prop in props:
+            if prop["kind"] == "color" and not color:
+                color = prop["value"]
+            elif prop["kind"] == "size" and not size:
+                size = prop["value"]
+            else:
+                extras.append(prop["value"])
+        if not color:
+            color = " / ".join(extras) if extras else (props[0]["value"] if props else "")
+            extras = []
+        elif extras:
+            color = " / ".join([color, *extras])
+        values_for_code = [p["value"] for p in props] or ([color] if color else [])
+        sku_code = ""
+        if len(values_for_code) == 1:
+            sku_code = values_for_code[0]
+        else:
+            sku_code = str(sku.get("sku_id") or "").strip() or " / ".join(values_for_code)
+        img = _norm_img_url(str(sku.get("img_url") or ""))
+        sell = _listing_vnd_for_cny(cny)
+        if sell <= 0:
+            continue
+        parsed.append(
+            {
+                "color": color or sku_code,
+                "size": size,
+                "img": img,
+                "sku_code": (sku_code or str(sku.get("sku_id") or ""))[:100],
+                "price_cny": cny,
+                "price": sell,
+                "stock": sku.get("stock"),
+            }
+        )
+
+    has_size = any(row["size"] for row in parsed)
+    if not has_size:
+        for row in parsed:
+            row["size"] = ""
+
+    colors_out: List[Dict[str, Any]] = []
+    seen_color: set[str] = set()
+    sizes: List[str] = []
+    seen_size: set[str] = set()
+    pairs: List[Dict[str, Any]] = []
+    for row in sorted(parsed, key=lambda r: (r["price"], r["color"], r["size"])):
+        label = row["color"] or row["sku_code"] or "Mẫu"
+        if label.lower() not in seen_color:
+            seen_color.add(label.lower())
+            same = [r for r in parsed if (r["color"] or r["sku_code"]) == (row["color"] or row["sku_code"])]
+            cheapest = min(same, key=lambda r: r["price"])
+            colors_out.append(
+                {
+                    "name": label,
+                    "img": cheapest.get("img") or row["img"],
+                    "sku": label,
+                    "sku_code": cheapest.get("sku_code") or label,
+                    "price": cheapest["price"],
+                    "price_cny": cheapest["price_cny"],
+                }
+            )
+        if has_size and row["size"] and row["size"].lower() not in seen_size:
+            seen_size.add(row["size"].lower())
+            sizes.append(row["size"])
+        if has_size:
+            pairs.append(
+                {
+                    "color": label,
+                    "size": row["size"],
+                    "price": row["price"],
+                    "price_cny": row["price_cny"],
+                    "sku_code": row["sku_code"],
+                    "img": row["img"],
+                }
+            )
+
+    if not parsed:
+        band = detail.get("sku_price_ranges") if isinstance(detail.get("sku_price_ranges"), dict) else {}
+        try:
+            fallback_cny = float((band or {}).get("min_price") or 0)
+        except (TypeError, ValueError):
+            fallback_cny = 0.0
+        if fallback_cny > 0:
+            parsed.append(
+                {
+                    "color": "",
+                    "size": "",
+                    "img": "",
+                    "sku_code": "",
+                    "price_cny": fallback_cny,
+                    "price": _listing_vnd_for_cny(fallback_cny),
+                    "stock": None,
+                }
+            )
+
+    prices = [float(r["price"]) for r in parsed if float(r["price"]) > 0]
+    cnys = [float(r["price_cny"]) for r in parsed if float(r["price_cny"]) > 0]
+    price_vnd = min(prices) if prices else 0.0
+    cny_low = min(cnys) if cnys else 0.0
+    cny_high = max(cnys) if cnys else 0.0
+    cheapest = min(parsed, key=lambda r: r["price"]) if parsed else None
+
+    gallery = _dedupe_urls([str(u) for u in (detail.get("main_img_url_list") or [])])
+    desc_html = str(detail.get("description") or "")
+    detail_imgs = []
+    gallery_keys = {u.split("?")[0] for u in gallery}
+    for u in _html_image_urls(desc_html):
+        if u.split("?")[0] in gallery_keys:
+            continue
+        if is_excluded_detail_content_image(u):
+            continue
+        detail_imgs.append(u)
+
+    main_image = ""
+    if cheapest and cheapest.get("img"):
+        main_image = cheapest["img"]
+    elif gallery:
+        main_image = gallery[0]
+    if not gallery and main_image:
+        gallery = [main_image]
+
+    title = _clean_text(detail.get("product_name"), limit=500)
+    if not title:
+        title = f"{'Taobao' if platform_type == VIPOMALL_PLATFORM_TAOBAO else '1688'} {offer_id}"
+    chinese_name = _clean_text(detail.get("original_product_name"), limit=500) or None
+
+    info_lines: List[str] = []
+    for attr in detail.get("product_attribute_list") or []:
+        if not isinstance(attr, dict):
+            continue
+        name = _clean_text(attr.get("attribute_name"), limit=80)
+        vals = attr.get("attribute_value_list") or []
+        if not isinstance(vals, list):
+            continue
+        joined = ", ".join([_clean_text(v, limit=80) for v in vals if _clean_text(v, limit=80)])
+        if not name or not joined or len(joined) > 240:
+            continue
+        info_lines.append(f"{name}: {joined}")
+    desc = _html_to_text(desc_html)
+    if info_lines:
+        desc = (desc + "\n\n--- Thông số ---\n" if desc else "--- Thông số ---\n") + "\n".join(info_lines[:40])
+
+    is_taobao = platform_type == VIPOMALL_PLATFORM_TAOBAO
+    supply_slug = offer_id if is_taobao else f"abb-{offer_id}"
+    supply_url = supply_product_link_default_for_item_slug(supply_slug)
+    original_url = _clean_text(detail.get("original_product_url"), limit=500)
+    product_id = build_canonical_taobao_product_id(offer_id) if is_taobao else f"A{offer_id}"
+    origin = "taobao" if is_taobao else "1688"
+    supply_platform = "taobao" if is_taobao else "1688"
+
+    _finalize_vipomall_color_labels(colors_out, pairs)
+
+    variant_bits: List[str] = []
+    if colors_out:
+        variant_bits.append("Màu sắc: " + ", ".join([c["name"] for c in colors_out if c.get("name")]))
+    if sizes:
+        variant_bits.append("Kích cỡ: " + ", ".join(sizes))
+    supplier_specs = "\n".join([*variant_bits, *info_lines[:40]]).strip()
+
+    variants: Dict[str, Any] = {
+        "pairs": pairs,
+        "source": "vipomall",
+        "supply_platform": supply_platform,
+        "supply_product_url": supply_url,
+        "vipomall_product_url": source_url,
+        "vipomall_platform_type": platform_type,
+    }
+    if colors_out and not sizes:
+        variants["variant_only"] = True
+    if sizes:
+        variants["sizes"] = sizes
+    if pairs:
+        variants["price_pairs"] = [
+            {
+                "color": p.get("color") or "",
+                "size": p.get("size") or "",
+                "price": p.get("price"),
+                "price_cny": p.get("price_cny"),
+                "sku_code": p.get("sku_code") or "",
+            }
+            for p in pairs
+        ]
+    if colors_out:
+        variants["color_swatches"] = [{"label": c["name"], "image_url": c.get("img") or None} for c in colors_out]
+
+    video = ""
+    for key in ("main_video", "detail_video"):
+        cand = _clean_text(detail.get(key), limit=1000)
+        if cand.startswith("http"):
+            video = cand
+            break
+    if not video:
+        for item in detail.get("main_video_url_list") or []:
+            cand = _clean_text(item, limit=1000)
+            if cand.startswith("http"):
+                video = cand
+                break
+
+    stocks: List[int] = []
+    for row in parsed:
+        try:
+            stock_n = int(row.get("stock") or 0)
+        except (TypeError, ValueError):
+            stock_n = 0
+        if stock_n > 0:
+            stocks.append(stock_n)
+
+    shop_name = _clean_text(detail.get("shop_name"), limit=200) or "Vipomall"
+    shop_cn = _clean_text(detail.get("original_shop_name"), limit=200) or None
+    eng = synthetic_engagement_counts()
+    cny_low_cell = _format_cny_cell(cny_low)
+    cny_high_cell = _format_cny_cell(cny_high)
+
+    return {
+        "product_id": product_id,
+        "code": "",
+        "origin": origin,
+        "brand_name": None,
+        "name": title[:500],
+        "chinese_name": chinese_name,
+        "description": desc[:20000],
+        "price": float(price_vnd),
+        "cost_cny": float(cny_low) if cny_low > 0 else None,
+        "shop_name": shop_name,
+        "shop_name_chinese": shop_cn,
+        "shop_id": offer_id,
+        "pro_lower_price": cny_low_cell,
+        "pro_high_price": cny_high_cell or cny_low_cell,
+        "group_rating": 888,
+        "group_question": 0,
+        "sizes": sizes,
+        "colors": colors_out,
+        "images": gallery,
+        "gallery": detail_imgs,
+        "carousel_images_1688": gallery,
+        "color_swatch_images_1688": [c["img"] for c in colors_out if c.get("img")],
+        "detail_block_images_1688": detail_imgs,
+        "link_default": original_url or supply_url or source_url,
+        "video_link": video,
+        "main_image": main_image,
+        "likes": eng["likes"],
+        "purchases": eng["purchases"],
+        "rating_total": eng["rating_total"],
+        "question_total": eng["question_total"],
+        "rating_point": eng["rating_point"],
+        "available": max(stocks) if stocks else 500,
+        "deposit_require": 1,
+        "category": None,
+        "subcategory": None,
+        "sub_subcategory": None,
+        "material": None,
+        "style": None,
+        "color": ", ".join([c.get("name", "") for c in colors_out if c.get("name")])[:500] or None,
+        "occasion": None,
+        "features": [],
+        "weight": None,
+        "product_info": {
+            "product_info": {"name_original": title, "listing_sku_hint": product_id},
+            "market_info": {
+                "currency": "VND",
+                "price_cny_low": cny_low or None,
+                "price_cny_high": cny_high or None,
+                "listing_import_vnd_per_cny_used": _listing_vnd_per_cny(),
+            },
+            "specifications": {
+                "supplier_specs_excerpt": supplier_specs[:4000],
+                "vipomall_info_texts": info_lines[:40],
+            },
+            "variants": variants,
+        },
+        "is_active": True,
+        "slug": "",
+    }
+
+
+def _scrape_vipomall_via_api(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    try:
+        page_url, platform_type = resolve_vipomall_import_url(source_url)
+    except ImportVipomallError:
+        norm = normalize_product_import_url((source_url or "").strip())
+        offer_id = extract_vipomall_offer_id(norm)
+        if not offer_id:
+            raise ImportVipomallError(
+                "Link Vipomall không hợp lệ. Dạng: https://vipomall.vn/san-pham/{id}?platform_type=10|21"
+            )
+        platform_type = infer_vipomall_platform_type(norm, offer_id)
+        page_url = build_vipomall_pdp_url(offer_id, platform_type)
+    offer_id = extract_vipomall_offer_id(page_url) or ""
+    if not offer_id:
+        raise ImportVipomallError("Không đọc được id sản phẩm từ link Vipomall.")
+    merchant_id = extract_vipomall_merchant_id(source_url)
+    detail = fetch_vipomall_product_detail(offer_id, platform_type, merchant_id)
+    product_data = vipomall_api_detail_to_product_data(
+        detail, page_url, offer_id, platform_type=platform_type
+    )
+    warnings: List[str] = []
+    if not product_data.get("colors") and not product_data.get("price"):
+        raise _VipomallApiUnavailable("API không có SKU và không có giá.")
+    if not product_data.get("colors"):
+        warnings.append("Vipomall API: không có SKU còn hàng — chỉ lấy giá sản phẩm.")
+    raw = {
+        "source": "vipomall_api",
+        "page_url": page_url,
+        "offer_id": offer_id,
+        "platform_type": platform_type,
+        "sku_count": len(product_data.get("colors") or []),
+        "title": product_data.get("name") or "",
+    }
+    return raw, product_data, warnings
+
+
+def scrape_vipomall_for_import(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:
+    try:
+        return _scrape_vipomall_via_api(source_url)
+    except ImportVipomallError:
+        raise
+    except Exception as exc:
+        logger.info("Vipomall API detail không dùng được (%s). Không suy giá từ HTML.", exc)
+        raise ImportVipomallError(
+            "Không lấy được giá tệ từng mã từ Vipomall. Thử lại."
+        ) from exc
 
 
 def _scrape_vipomall_for_import_sync(source_url: str) -> Tuple[Dict[str, Any], Dict[str, Any], List[str]]:

@@ -124,6 +124,21 @@ def test_all_platforms_blocked_stops():
     assert "đều bị Cloudflare" in (merged.error or "")
 
 
+def test_in_progress_stale_only_for_abandoned_checking_or_queued():
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.source_stock_checker import source_stock_in_progress_is_stale
+
+    now = datetime(2026, 10, 4, tzinfo=timezone.utc)
+    old = now - timedelta(minutes=31)
+    fresh = now - timedelta(minutes=2)
+    assert source_stock_in_progress_is_stale("checking", old, now=now) is True
+    assert source_stock_in_progress_is_stale("queued", None, now=now) is True
+    assert source_stock_in_progress_is_stale("checking", fresh, now=now) is False
+    assert source_stock_in_progress_is_stale("in_stock", old, now=now) is False
+    assert source_stock_in_progress_is_stale("out_of_stock", None, now=now) is False
+
+
 def test_bulk_clear_oos_empty_ids_is_noop():
     from app.services.admin_source_stock_batch import admin_clear_false_source_oos_flags_bulk
 

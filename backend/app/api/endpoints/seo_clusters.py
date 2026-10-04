@@ -32,8 +32,50 @@ _LIST_KEY = "seo_clusters_v2:list"
 
 
 # ---------- helpers ----------
+def _positive_price(raw: Any) -> Optional[float]:
+    try:
+        num = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if num > 0 and num == num:
+        return num
+    return None
+
+
+def _slim_variant_prices(p: Product) -> Dict[str, Any]:
+    """Chỉ giá từng mã để thẻ hiện «từ», không gửi ảnh và tên."""
+    colors_out: List[Dict[str, float]] = []
+    for row in p.colors or []:
+        if not isinstance(row, dict):
+            continue
+        price = _positive_price(row.get("price"))
+        if price is not None:
+            colors_out.append({"price": price})
+    pairs_out: List[Dict[str, float]] = []
+    info = p.product_info if isinstance(p.product_info, dict) else {}
+    variants = info.get("variants") if isinstance(info, dict) else None
+    raw_pairs: Any = []
+    if isinstance(variants, dict):
+        raw_pairs = variants.get("price_pairs") or variants.get("pairs") or []
+    if isinstance(raw_pairs, list):
+        for row in raw_pairs:
+            if not isinstance(row, dict):
+                continue
+            price = _positive_price(row.get("price"))
+            if price is not None:
+                pairs_out.append({"price": price})
+    extra: Dict[str, Any] = {
+        "is_warehouse_clearance": bool(getattr(p, "is_warehouse_clearance", False)),
+    }
+    if colors_out:
+        extra["colors"] = colors_out
+    if pairs_out:
+        extra["product_info"] = {"variants": {"price_pairs": pairs_out}}
+    return extra
+
+
 def _serialize_product_card(p: Product) -> Dict[str, Any]:
-    return {
+    card = {
         "id": p.id,
         "product_id": p.product_id,
         "name": p.name,
@@ -50,6 +92,8 @@ def _serialize_product_card(p: Product) -> Dict[str, Any]:
         "available": p.available,
         "brand_name": p.brand_name,
     }
+    card.update(_slim_variant_prices(p))
+    return card
 
 
 def _cluster_cat_ids(db: Session, cluster_id: int) -> List[int]:
@@ -243,7 +287,7 @@ def get_seo_cluster(slug: str) -> Dict[str, Any]:
     """
     Chi tiết cluster + sample 24 sản phẩm đầu (để Next render đầu landing nhanh).
     """
-    key = f"seo_clusters_v2:detail:{slug}"
+    key = f"seo_clusters_v3:detail:{slug}"
     return ttl_cache.get_or_fetch(key, _DETAIL_TTL, lambda: _fetch_cluster_detail(slug))
 
 

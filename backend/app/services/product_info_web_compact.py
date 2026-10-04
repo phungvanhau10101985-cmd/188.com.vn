@@ -124,7 +124,7 @@ def compact_product_info_for_web(product_data: Dict[str, Any]) -> None:
     slim_var: Dict[str, Any] = {}
     var_src = pi.get("variants")
     if isinstance(var_src, dict):
-        for k in ("colors", "sizes"):
+        for k in ("colors", "sizes", "price_pairs"):
             if k not in var_src:
                 continue
             v = var_src[k]
