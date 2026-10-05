@@ -14,6 +14,7 @@ interface TaxonomyInfo {
   categories: { cat1: number; cat2: number; cat3: number };
   clusters: number;
   products: { total: number; linked_to_cat3: number };
+  auto_create_enabled?: boolean;
 }
 
 interface UpsertCounts {
@@ -114,6 +115,9 @@ export default function TaxonomyAdminPage() {
   const [info, setInfo] = useState<TaxonomyInfo | null>(null);
   const [loadingInfo, setLoadingInfo] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [autoCreateEnabled, setAutoCreateEnabled] = useState(true);
+  const [savingAutoCreate, setSavingAutoCreate] = useState(false);
+  const [autoCreateError, setAutoCreateError] = useState<string | null>(null);
 
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportSummary | null>(null);
@@ -233,6 +237,9 @@ export default function TaxonomyAdminPage() {
     try {
       const data = await callApi<TaxonomyInfo>('/taxonomy/info');
       setInfo(data);
+      if (typeof data.auto_create_enabled === 'boolean') {
+        setAutoCreateEnabled(data.auto_create_enabled);
+      }
     } catch (e) {
       setErrorInfo(e instanceof Error ? e.message : String(e));
     } finally {
@@ -243,6 +250,23 @@ export default function TaxonomyAdminPage() {
   useEffect(() => {
     void reloadInfo();
   }, [reloadInfo]);
+
+  const toggleAutoCreate = useCallback(async () => {
+    const next = !autoCreateEnabled;
+    setSavingAutoCreate(true);
+    setAutoCreateError(null);
+    try {
+      const data = await callApi<{ auto_create_enabled: boolean }>('/taxonomy/auto-create', {
+        method: 'PUT',
+        body: JSON.stringify({ auto_create_enabled: next }),
+      });
+      setAutoCreateEnabled(data.auto_create_enabled);
+    } catch (e) {
+      setAutoCreateError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingAutoCreate(false);
+    }
+  }, [autoCreateEnabled]);
 
   const loadFormRefs = useCallback(async () => {
     setFormLoading(true);
@@ -801,6 +825,34 @@ export default function TaxonomyAdminPage() {
           {errorInfo ? (
             <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {errorInfo}
+            </div>
+          ) : null}
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-gray-900">Tạo danh mục khi thiếu nhánh</p>
+              <p className="mt-0.5 text-xs text-gray-600">
+                Cào, import Excel và tái gán DeepSeek: bật thì thêm cấp 1, 2, 3 còn thiếu; tắt thì chỉ gán nhánh đã có.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={savingAutoCreate || loadingInfo}
+              onClick={() => void toggleAutoCreate()}
+              aria-pressed={autoCreateEnabled}
+              aria-label={autoCreateEnabled ? 'Tắt tạo danh mục mới' : 'Bật tạo danh mục mới'}
+              className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50 ${
+                autoCreateEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-300 text-gray-800'
+              }`}
+            >
+              {savingAutoCreate ? 'Đang lưu…' : autoCreateEnabled ? 'Đang bật' : 'Đang tắt'}
+            </button>
+          </div>
+          {autoCreateError ? (
+            <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {autoCreateError}{' '}
+              <button type="button" onClick={() => void toggleAutoCreate()} className="font-medium underline">
+                Thử lại
+              </button>
             </div>
           ) : null}
           {info ? (

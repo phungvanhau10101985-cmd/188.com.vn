@@ -3,11 +3,15 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings
 from app.db.base import Base
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
+from app.models.taxonomy_settings import TaxonomySettings
 from app.services.taxonomy_auto_create import (
     ensure_additive_category_triple,
+    is_taxonomy_auto_create_enabled,
+    set_taxonomy_auto_create_enabled,
     validate_proposed_category_names,
 )
 
@@ -149,3 +153,18 @@ def test_does_not_rename_existing_cat1():
     # khớp theo slug → giữ tên chuẩn DB
     assert out["cat1"] == "Giày dép Nữ"
     assert db.query(Category).filter(Category.level == 1).count() == 1
+
+
+def test_auto_create_flag_follows_settings_row():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine, tables=[TaxonomySettings.__table__])
+    db = sessionmaker(bind=engine)()
+    assert is_taxonomy_auto_create_enabled(db) is bool(
+        getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True)
+    )
+    set_taxonomy_auto_create_enabled(db, False)
+    db.commit()
+    assert is_taxonomy_auto_create_enabled(db) is False
+    set_taxonomy_auto_create_enabled(db, True)
+    db.commit()
+    assert is_taxonomy_auto_create_enabled(db) is True

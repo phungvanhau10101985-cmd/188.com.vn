@@ -33,7 +33,7 @@ export default function BirthdayPromoBanner({
     () => `188_birthday_promo_banner_closed_${nextBirthdayLabel || 'unknown'}_${percent}`,
     [nextBirthdayLabel, percent]
   );
-  const [closed, setClosed] = useState(false);
+  const [closed, setClosed] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (!active) return;
@@ -53,7 +53,7 @@ export default function BirthdayPromoBanner({
     }
   };
 
-  if (!active || closed) return null;
+  if (!active || closed !== false) return null;
 
   return (
     <div

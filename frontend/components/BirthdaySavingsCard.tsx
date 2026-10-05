@@ -12,6 +12,8 @@ interface BirthdaySavingsCardProps {
   nextBirthdayLabel?: string | null;
   compact?: boolean;
   className?: string;
+  /** Đóng thẻ giải thích — giá đã trừ CMSN vẫn giữ nguyên. */
+  onDismiss?: () => void;
 }
 
 export default function BirthdaySavingsCard({
@@ -21,6 +23,7 @@ export default function BirthdaySavingsCard({
   nextBirthdayLabel,
   compact = false,
   className = '',
+  onDismiss,
 }: BirthdaySavingsCardProps) {
   const { state: siteSaleState } = useSiteSale();
   const stackedHint =
@@ -32,9 +35,24 @@ export default function BirthdaySavingsCard({
 
   return (
     <div
-      className={`rounded-2xl border border-pink-200 bg-gradient-to-r from-pink-50 via-rose-50 to-orange-50 p-3 shadow-sm ${className}`}
+      className={`relative rounded-2xl border border-pink-200 bg-gradient-to-r from-pink-50 via-rose-50 to-orange-50 py-3 pl-3 shadow-sm ${onDismiss ? 'pr-10' : 'pr-3'} ${className}`}
       role="note"
     >
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onDismiss();
+          }}
+          className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-md bg-white/80 text-gray-600 shadow-sm hover:bg-white hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+          aria-label={`Đóng thông tin ${BIRTHDAY_PROGRAM_NAME}`}
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      ) : null}
       <div className="flex items-start gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pink-600 text-lg text-white shadow-sm" aria-hidden>
           🎁

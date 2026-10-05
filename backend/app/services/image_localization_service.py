@@ -1167,7 +1167,7 @@ class LegacyImageLocalizationPipeline:
         cls = self.image_classifier.classify_image(norm_ocr, [], data.get("original_url") or "")
         image = data["image_data"]
         filename = data.get("filename") or "image.jpg"
-        delete_size_and_laundry = not self.use_gemini_api_for_rich_images
+        delete_size_and_laundry = False
         if cls.get("type") == "delete":
             return "deleted", None, f"Xóa theo classifier: {cls.get('details', {}).get('detected_keyword') or 'keyword'}"
         if cls.get("type") == "keep":
@@ -1180,7 +1180,7 @@ class LegacyImageLocalizationPipeline:
                 )
                 return self._process_local(
                     data, translator, img_proc, data.get("original_url") or "",
-                    delete_size_and_laundry=True,
+                    delete_size_and_laundry=False,
                 )
             return self._run_gemini_image_edit(data, translator, img_proc, image, filename)
 
@@ -1248,7 +1248,7 @@ class LegacyImageLocalizationPipeline:
                         translator,
                         img_proc,
                         url,
-                        delete_size_and_laundry=not self.use_gemini_api_for_rich_images,
+                        delete_size_and_laundry=False,
                     )
                     if loc[0] == "processed":
                         return loc
@@ -1797,10 +1797,9 @@ class ProductImageLocalizationService:
                 new_url = replacement(item["img"])
                 if new_url:
                     nxt["img"] = new_url
-                    colors.append(nxt)
-                else:
-                    nxt.pop("img", None)
-                    colors.append(nxt)
+                # final_url rỗng = pipeline đánh dấu xóa. Giữ URL gốc trên biến thể:
+                # bỏ img khiến storefront lấy gallery[index] và hiện nhầm ảnh SKU khác.
+                colors.append(nxt)
             else:
                 colors.append(item)
         product.colors = colors

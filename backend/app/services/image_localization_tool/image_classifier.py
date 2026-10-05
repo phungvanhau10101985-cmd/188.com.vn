@@ -400,6 +400,11 @@ class ImageClassifier:
             skip_match = SKIP_REGEX.search(text)
             if skip_match:
                 matched_text = skip_match.group()
+
+                # URL trên tem (www.hang.com) khớp SKIP_REGEX nhưng không xóa cả ảnh.
+                without_domain = DOMAIN_REGEX.sub(" ", text)
+                if not SKIP_REGEX.search(without_domain):
+                    continue
                 
                 # PHÂN BIỆT: "尺码" (kích thước) vs "价格" (giá)
                 if '尺码' in text and not any(price_char in text for price_char in ['¥', '￥', '$', '价格', '价目', '报价']):
@@ -415,25 +420,6 @@ class ImageClassifier:
                     'details': {
                         'text_blocks': num_text_blocks,
                         'detected_pattern': matched_text,
-                        'quick_detection': True
-                    }
-                }
-            
-            # Kiểm tra domain (CHÍNH XÁC)
-            domain_match = DOMAIN_REGEX.search(text)
-            if domain_match:
-                domain = domain_match.group()
-                
-                # PHÂN BIỆT: Domain 188.com.vn (của chúng ta) vs domain khác
-                if '188.com.vn' in text:
-                    continue
-                
-                return {
-                    'type': 'delete',
-                    'reason': f'Ảnh chứa domain: {domain}',
-                    'details': {
-                        'text_blocks': num_text_blocks,
-                        'detected_domain': domain,
                         'quick_detection': True
                     }
                 }
@@ -872,7 +858,7 @@ class ImageClassifier:
             print(f"    🧺 PHÁT HIỆN TỪ KHÓA GIẶT TẨY: {laundry_keyword}")
             print(f"    📋 Tất cả từ khóa: {all_laundry_keywords}")
             
-            # Ảnh có từ khóa giặt tẩy -> gửi AI nếu được phép; local translator sẽ xóa.
+            # Ảnh có từ khóa giặt tẩy -> gửi AI nếu được phép; local vẽ chữ, không xóa ảnh.
             return {
                 'type': 'gemini',
                 'reason': f'Chứa từ khóa hướng dẫn giặt tẩy: {laundry_keyword} - {total_hanzi_chars} Hán tự',

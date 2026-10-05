@@ -23,14 +23,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple  # noqa: F401 — List used in API models
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import models
-from app.core.security import require_module_permission
+from app.core.admin_permissions import admin_allowed_operation
+from app.core.security import get_current_admin, require_module_permission
 from app.db.session import get_db
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
@@ -42,6 +43,10 @@ from app.services.category_size_guide_gemini import (
     gemini_generate_image_from_text,
     generate_and_upload_cat1_size_guide,
 )
+from app.services.taxonomy_auto_create import (
+    is_taxonomy_auto_create_enabled,
+    set_taxonomy_auto_create_enabled,
+)
 from app.services.product_taxonomy_mismatch import (
     list_active_category_l1_names,
     reclassify_products_batch,
@@ -52,6 +57,25 @@ from app.services.product_taxonomy_mismatch import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def require_taxonomy_or_products_view(
+    admin: models.AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+) -> models.AdminUser:
+    """Trang cào (products) và trang cây danh mục đều được đọc trạng thái công tắc."""
+    if admin_allowed_operation(admin, db, "taxonomy", "view") or admin_allowed_operation(
+        admin, db, "products", "view"
+    ):
+        return admin
+    raise HTTPException(
+        status_code=403,
+        detail="Không có quyền xem công tắc tạo danh mục.",
+    )
+
+
+class TaxonomyAutoCreateIn(BaseModel):
+    auto_create_enabled: bool = Field(..., description="Bật thì cào/import được tạo cấp 1–3 còn thiếu.")
 
 REQUIRED_SHEETS = {"categories", "category_paths", "seo_clusters", "meta"}
 
@@ -1192,6 +1216,28 @@ def taxonomy_mismatch_reclassify_all(
         raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
 
 
+# ---------- AUTO CREATE TOGGLE ----------
+@router.get("/auto-create")
+def get_taxonomy_auto_create(
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_taxonomy_or_products_view),
+) -> Dict[str, Any]:
+    """Trạng thái công tắc tạo danh mục khi cào/import thiếu nhánh."""
+    return {"auto_create_enabled": is_taxonomy_auto_create_enabled(db)}
+
+
+@router.put("/auto-create")
+def put_taxonomy_auto_create(
+    body: TaxonomyAutoCreateIn = Body(...),
+    db: Session = Depends(get_db),
+    _admin: models.AdminUser = Depends(require_module_permission("taxonomy")),
+) -> Dict[str, Any]:
+    """Bật/tắt tạo cat1–cat3 mới. Áp dụng cho cào, import Excel và tái gán DeepSeek."""
+    enabled = set_taxonomy_auto_create_enabled(db, body.auto_create_enabled)
+    db.commit()
+    return {"auto_create_enabled": enabled}
+
+
 # ---------- INFO ----------
 @router.get("/info")
 def taxonomy_info(
@@ -1211,4 +1257,5 @@ def taxonomy_info(
         "categories": {"cat1": cat1, "cat2": cat2, "cat3": cat3},
         "clusters": clusters,
         "products": {"total": products, "linked_to_cat3": products_linked},
+        "auto_create_enabled": is_taxonomy_auto_create_enabled(db),
     }

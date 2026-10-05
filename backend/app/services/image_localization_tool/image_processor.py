@@ -489,6 +489,361 @@ class ImageProcessor:
 
         return merged_blocks
 
+    def _xyxy(self, bbox) -> Tuple[int, int, int, int]:
+        x1, y1, x2, y2 = map(int, bbox[:4])
+        return x1, y1, x2, y2
+
+    def _cluster_edges(self, values: List[float], gap: float) -> List[List[float]]:
+        groups: List[List[float]] = []
+        current: List[float] = []
+        for value in sorted(values):
+            if not current or value - current[-1] <= gap:
+                current.append(value)
+            else:
+                groups.append(current)
+                current = [value]
+        if current:
+            groups.append(current)
+        return groups
+
+    def _looks_like_table(self, items: List[Dict]) -> bool:
+        if len(items) < 6:
+            return False
+        columns = [g for g in self._cluster_edges([it["x1"] for it in items], 28) if len(g) >= 3]
+        rows = self._cluster_edges([it["y1"] for it in items], 14)
+        return len(columns) >= 2 and len(rows) >= 4
+
+    def _is_compact_label(self, item: Dict) -> bool:
+        text = str(item.get("text") or "").strip()
+        if not text or item.get("erase_only"):
+            return False
+        if item["x2"] - item["x1"] > 110:
+            return False
+        if re.search(r"\d{2,}", text):
+            return False
+        return len(text) <= 18
+
+    def _is_trailing_measurement(self, text: str) -> bool:
+        value = str(text or "").strip()
+        if not value or len(value) > 28 or re.search(r"[\u4e00-\u9fff]", value):
+            return False
+        if not re.search(r"\d", value):
+            return False
+        return bool(re.search(r"cm|mm|kg|ml|%", value, re.I) or re.fullmatch(r"[~±]?\d[\d./~\s-]*", value))
+
+    def _attach_trailing_measurements(self, items: List[Dict], obstacles: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+        measures = [it for it in items if self._is_trailing_measurement(it["text"])]
+        measures += [it for it in obstacles if self._is_trailing_measurement(it["text"])]
+        consumed = set()
+        labels = []
+        for item in items:
+            if self._is_trailing_measurement(item["text"]):
+                continue
+            center_y = (item["y1"] + item["y2"]) / 2
+            match = None
+            for other in sorted(measures, key=lambda it: it["x1"]):
+                if id(other) in consumed:
+                    continue
+                gap = other["x1"] - item["x2"]
+                if gap < -4 or gap > 16:
+                    continue
+                other_center = (other["y1"] + other["y2"]) / 2
+                if abs(other_center - center_y) <= max(item["y2"] - item["y1"], other["y2"] - other["y1"], 14):
+                    match = other
+                    break
+            if not match:
+                labels.append(item)
+                continue
+            consumed.add(id(match))
+            measure_text = str(match["text"]).strip()
+            label = str(item["text"]).strip()
+            text = label if measure_text in label else f"{label} {measure_text}".strip()
+            labels.append({
+                **item,
+                "text": text,
+                "y1": min(item["y1"], match["y1"]),
+                "y2": max(item["y2"], match["y2"]),
+                "x2": match["x2"],
+            })
+        leftover = [it for it in measures if id(it) not in consumed and it in items]
+        obstacles_left = [it for it in obstacles if id(it) not in consumed]
+        return labels + leftover, obstacles_left
+
+    def _merge_stacked_paragraphs(self, items: List[Dict], image_width: int) -> List[Dict]:
+        if len(items) < 2 or image_width < 1:
+            return items
+        sorted_items = sorted(items, key=lambda it: (it["y1"], it["x1"]))
+        used = set()
+        out = []
+        for item in sorted_items:
+            if id(item) in used:
+                continue
+            group = [item]
+            used.add(id(item))
+            last = item
+            for other in sorted_items:
+                if id(other) in used:
+                    continue
+                prev_w = last["x2"] - last["x1"]
+                next_w = other["x2"] - other["x1"]
+                gap = other["y1"] - last["y2"]
+                if (
+                    prev_w >= image_width * 0.42
+                    and next_w >= image_width * 0.28
+                    and next_w < prev_w - 8
+                    and abs(last["x1"] - other["x1"]) <= 16
+                    and -2 <= gap <= 16
+                ):
+                    group.append(other)
+                    used.add(id(other))
+                    last = other
+            if len(group) == 1:
+                out.append(item)
+                continue
+            out.append({
+                **item,
+                "text": " ".join(str(entry["text"]).strip() for entry in group if str(entry["text"]).strip()),
+                "x1": min(entry["x1"] for entry in group),
+                "y1": min(entry["y1"] for entry in group),
+                "x2": max(entry["x2"] for entry in group),
+                "y2": max(entry["y2"] for entry in group),
+            })
+        return out
+
+    def _expand_table_cells(self, items: List[Dict], obstacles: List[Dict], image_width: int) -> List[Dict]:
+        pool = items + obstacles
+        right_edge = min(image_width - 6, max(it["x2"] for it in pool))
+        content_bottom = max(it["y2"] for it in pool) + 72
+        expanded = []
+        for item in items:
+            contained = []
+            area_item = max(1, (item["x2"] - item["x1"]) * (item["y2"] - item["y1"]))
+            for other in pool:
+                if other is item:
+                    continue
+                cx = (other["x1"] + other["x2"]) / 2
+                cy = (other["y1"] + other["y2"]) / 2
+                inside = (
+                    item["x1"] + 2 < cx < item["x2"] - 2
+                    and item["y1"] + 2 < cy < item["y2"] - 2
+                )
+                area_other = (other["x2"] - other["x1"]) * (other["y2"] - other["y1"])
+                if inside and area_other < area_item * 0.5:
+                    contained.append(other)
+            if len(contained) >= 2:
+                expanded.append({**item, "text": "", "erase_only": True})
+                continue
+            center_y = (item["y1"] + item["y2"]) / 2
+            to_the_right = sorted(
+                (
+                    other for other in pool
+                    if other is not item
+                    and other["x1"] >= item["x2"] - 4
+                    and abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(item["y2"] - item["y1"], other["y2"] - other["y1"], 18)
+                ),
+                key=lambda it: it["x1"],
+            )
+            right = to_the_right[0] if to_the_right else None
+            below_all = sorted(
+                (other for other in pool if other is not item and other["y1"] >= item["y2"] - 2),
+                key=lambda it: (it["y1"], it["x1"]),
+            )
+            below = below_all[0] if below_all else None
+            x2 = right["x1"] - 8 if right else right_edge
+            if right and self._is_compact_label(item) and self._is_compact_label(right):
+                gap = right["x1"] - item["x2"]
+                if gap > 36:
+                    x2 = min(x2, item["x2"] + gap // 2)
+            y2 = below["y1"] - 4 if below else item["y2"]
+            if not below and (item["x2"] - item["x1"]) >= image_width * 0.45:
+                y2 = max(y2, min(content_bottom, item["y1"] + max(item["y2"] - item["y1"], 64)))
+            if not below and to_the_right:
+                beside = [
+                    other for other in to_the_right
+                    if abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(item["y2"] - item["y1"], other["y2"] - other["y1"], 14)
+                ]
+                if beside:
+                    y2 = max(y2, max(other["y2"] for other in beside))
+            for other in pool:
+                if other is item:
+                    continue
+                cx = (other["x1"] + other["x2"]) / 2
+                cy = (other["y1"] + other["y2"]) / 2
+                if cx <= item["x1"] + 6 or cx >= x2 or cy <= item["y1"] + 6 or cy >= y2:
+                    continue
+                if other["y1"] >= item["y1"] + 4:
+                    y2 = min(y2, other["y1"] - 2)
+                elif other["x1"] >= item["x1"] + 4:
+                    x2 = min(x2, other["x1"] - 2)
+            x2 = max(item["x2"], x2)
+            y2 = max(item["y2"], y2)
+            if below:
+                y2 = min(y2, below["y1"] - 2)
+            expanded.append({
+                **item,
+                "x1": item["x1"],
+                "y1": item["y1"],
+                "x2": max(item["x1"] + 1, int(x2)),
+                "y2": max(item["y1"] + 1, int(y2)),
+            })
+        with_erase = []
+        for item in expanded:
+            if not self._is_compact_label(item):
+                with_erase.append(item)
+                continue
+            center_y = (item["y1"] + item["y2"]) / 2
+            left_sibling = any(
+                other is not item
+                and self._is_compact_label(other)
+                and other["x2"] <= item["x1"] + 6
+                and abs(((other["y1"] + other["y2"]) / 2) - center_y) <= 14
+                for other in expanded
+            )
+            if left_sibling:
+                with_erase.append(item)
+                continue
+            titles = [
+                other for other in expanded
+                if other is not item
+                and self._is_compact_label(other)
+                and other["x1"] <= item["x1"] + 4
+                and other["y2"] <= item["y1"] + 2
+                and item["y1"] - other["y2"] <= 24
+            ]
+            title = max(titles, key=lambda it: it["y1"]) if titles else None
+            if not title or title["x1"] >= item["x1"] - 8:
+                with_erase.append(item)
+                continue
+            y = max(0, item["y1"] - 1)
+            with_erase.append({
+                **item,
+                "erase": (title["x1"], y, item["x2"], item["y2"] + 2),
+            })
+        return with_erase
+
+    def _layout_table_blocks(self, processed_blocks: List, ignore_blocks: List, img_w: int, img_h: int) -> List[Dict] | None:
+        items = []
+        for text, bbox in processed_blocks:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            items.append({"text": str(text or "").strip(), "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        obstacles = []
+        for text, bbox in ignore_blocks:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            obstacles.append({"text": str(text or "").strip(), "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        items, obstacles = self._attach_trailing_measurements(items, obstacles)
+        items = self._merge_stacked_paragraphs(items, img_w)
+        if not self._looks_like_table(items):
+            return None
+        return self._expand_table_cells(items, obstacles, img_w)
+
+    def _fit_cell_lines(self, text: str, width: int, height: int):
+        text = re.sub(r"[˙•]+\s*$", "", str(text or "").strip())
+        text = re.sub(r"(IP65)(?=[A-Za-z])", r"\1\n", text)
+        text = re.sub(r"\s*:\s*", ": ", text)
+        text = re.sub(r"\s*,\s*", ", ", text)
+        pad = 4 if width >= 80 else 1
+        inner_w = max(8, width - pad * 2)
+        inner_h = max(8, height - 2)
+        probe = ImageDraw.Draw(Image.new("RGB", (max(width, 8), max(height, 8))))
+
+        def width_of(font, line: str) -> int:
+            box = probe.textbbox((0, 0), line, font=font)
+            return box[2] - box[0]
+
+        def wrap_words(value: str, max_chars: int) -> List[str]:
+            lines = []
+            for part in value.split("\n"):
+                words = [w for w in part.split() if w]
+                current = ""
+                for word in words:
+                    candidate = f"{current} {word}".strip()
+                    if not current or len(candidate) <= max_chars:
+                        current = candidate
+                    else:
+                        lines.append(current)
+                        current = word
+                if current:
+                    lines.append(current)
+            return lines or [""]
+
+        parts = [line.strip() for line in text.split("\n") if line.strip()]
+        single = len(parts) <= 1
+        body = text if single else text
+        if single:
+            for size in range(min(14, inner_h), 5, -1):
+                font = self._get_font(size)
+                if font and width_of(font, body) <= inner_w + 1:
+                    return font, [body], pad
+        for size in range(min(13, inner_h), 5, -1):
+            font = self._get_font(size)
+            if not font:
+                continue
+            max_chars = max(1, int(inner_w / max(1, size * 0.56)))
+            lines = parts if len(parts) > 1 else wrap_words(body, max_chars)
+            line_h = max(size, round(size * 1.12))
+            widest = max(width_of(font, line) for line in lines)
+            if widest <= inner_w + 1 and len(lines) * line_h <= inner_h + 1:
+                return font, lines, pad
+        font = self._get_font(6)
+        max_chars = max(1, int(inner_w / (6 * 0.56)))
+        wrapped = parts if len(parts) > 1 else wrap_words(body, max_chars)
+        line_h = round(6 * 1.12)
+        max_lines = max(1, inner_h // line_h)
+        clipped = []
+        for line in wrapped[:max_lines]:
+            if not font or width_of(font, line) <= inner_w + 1:
+                clipped.append(line)
+                continue
+            out = ""
+            for ch in line:
+                if width_of(font, out + ch) > inner_w:
+                    break
+                out += ch
+            clipped.append(out.strip() or line[:1])
+        return font, clipped or [""], pad
+
+    def _draw_table_blocks(self, image_data: np.ndarray, blocks: List[Dict]) -> np.ndarray:
+        img = image_data.copy()
+        h_img, w_img = img.shape[:2]
+        ordered = sorted(blocks, key=lambda it: ((it["x2"] - it["x1"]) * (it["y2"] - it["y1"])), reverse=True)
+        for item in ordered:
+            erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
+            x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, erase)), h_img, w_img)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            img[y1:y2, x1:x2] = (255, 255, 255)
+        pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        for item in blocks:
+            text = str(item.get("text") or "").strip()
+            if not text or item.get("erase_only"):
+                continue
+            x1, y1, x2, y2 = self._clip_bbox((item["x1"], item["y1"], item["x2"], item["y2"]), h_img, w_img)
+            w, h = x2 - x1, y2 - y1
+            if w < 2 or h < 2:
+                continue
+            font, lines, pad = self._fit_cell_lines(text, w, h)
+            if not font:
+                continue
+            cell = Image.new("RGB", (w, h), (255, 255, 255))
+            draw = ImageDraw.Draw(cell)
+            y_cursor = 1
+            for line in lines:
+                draw.text((pad, y_cursor), line, font=font, fill=(0, 0, 0))
+                box = draw.textbbox((pad, y_cursor), line, font=font)
+                y_cursor = box[3] + 1
+                if y_cursor >= h:
+                    break
+            pil.paste(cell, (x1, y1))
+        return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
     def check_processed_overlap(self, processed_blocks: List, img_w: int, img_h: int, threshold: float = 0.01) -> Tuple[bool, float]:
         """
         Kiểm tra xem các khối text sau khi dịch (processed_blocks) có bị đè lên nhau không.
@@ -544,6 +899,10 @@ class ImageProcessor:
 
     def process_image_with_text(self, image_data: np.ndarray, processed_blocks: List, ignore_blocks: List) -> np.ndarray:
         img_h, img_w = image_data.shape[:2]
+        table_blocks = self._layout_table_blocks(processed_blocks, ignore_blocks, img_w, img_h)
+        if table_blocks is not None:
+            print(f"  [TABLE] vẽ {len(table_blocks)} ô trong khung, không gộp đè")
+            return self.add_smart_watermark(self._draw_table_blocks(image_data, table_blocks), [])
         processed_blocks = self._merge_dense_processed_blocks(processed_blocks, img_w, img_h)
 
         all_blocks = []

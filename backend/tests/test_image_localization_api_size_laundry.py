@@ -1,4 +1,4 @@
-"""Bảng size / giặt tẩy: xóa khi local-only, giữ khi Gemini API mode."""
+"""Bảng size / giặt tẩy: local vẽ chữ, không xóa ảnh."""
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -29,9 +29,13 @@ LAUNDRY_OCR = [
 ]
 
 
-def test_size_table_deleted_by_default_local_policy():
+def test_size_table_drawn_on_local_path():
     tr = _translator()
-    assert tr.classify_and_process_blocks(SIZE_OCR, delete_size_and_laundry=True) is None
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Ngực"):
+        result = tr.classify_and_process_blocks(SIZE_OCR, delete_size_and_laundry=True)
+    assert result is not None
+    processed, _ignore = result
+    assert any(block[0] == "Ngực" for block in processed)
 
 
 def test_size_table_preserved_when_api_mode_local_fallback():
@@ -42,12 +46,14 @@ def test_size_table_preserved_when_api_mode_local_fallback():
     assert result is not None
 
 
-def test_laundry_deleted_locally_but_detected_for_api():
+def test_laundry_drawn_locally_and_detected_for_api():
     tr = _translator()
     assert tr.has_size_or_laundry_context(LAUNDRY_OCR) is True
-    assert tr.classify_and_process_blocks(LAUNDRY_OCR, delete_size_and_laundry=True) is None
     with patch.object(tr, "call_deepseek_for_translation_single", return_value="Giặt tay"):
-        assert tr.classify_and_process_blocks(LAUNDRY_OCR, delete_size_and_laundry=False) is not None
+        local = tr.classify_and_process_blocks(LAUNDRY_OCR, delete_size_and_laundry=True)
+        kept = tr.classify_and_process_blocks(LAUNDRY_OCR, delete_size_and_laundry=False)
+    assert local is not None and kept is not None
+    assert any(block[0] == "Giặt tay" for block in local[0])
 
 
 def test_forbidden_still_deletes_even_when_preserve_size_laundry():
@@ -91,3 +97,36 @@ def test_deepseek_payload_disables_v4_thinking():
     assert out == "Chất lượng cao"
     assert captured.get("thinking") == {"type": "disabled"}
     assert int(captured.get("max_tokens") or 0) >= 256
+
+
+def test_domain_on_label_keeps_image_and_blanks_url():
+    """Tem SP có www… không được xóa cả ảnh biến thể."""
+    tr = _translator()
+    ocr = [
+        {"text": "www.yongchuang.com", "bbox": [0, 0, 80, 20]},
+        {"text": "好阀选永创", "bbox": [0, 40, 120, 60]},
+    ]
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Van tốt"):
+        result = tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True)
+    assert result is not None
+    processed, _ignore = result
+    assert ("", (0, 0, 80, 20)) in processed or ("", [0, 0, 80, 20]) in processed
+    assert any(block[0] == "Van tốt" for block in processed)
+
+
+def test_dropship_keyword_still_deletes_image():
+    tr = _translator()
+    ocr = [{"text": "www.shop.com 一件代发", "bbox": [0, 0, 100, 20]}]
+    assert tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True) is None
+
+
+def test_classifier_does_not_delete_product_photo_for_label_domain():
+    from image_classifier import ImageClassifier
+
+    clf = ImageClassifier()
+    ocr = [
+        {"text": "www.yongchuang.com", "bbox": [10, 10, 90, 30]},
+        {"text": "好阀选永创", "bbox": [10, 200, 200, 240]},
+    ]
+    result = clf.classify_image(ocr, [], "https://example.com/valve.jpg")
+    assert result.get("type") != "delete"

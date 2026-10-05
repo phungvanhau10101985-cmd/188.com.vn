@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
+import Link from 'next/link';
 import {
   adminProductAPI,
   type AdminImport1688Draft,
@@ -26,7 +27,7 @@ import {
   type AdminProductListSort,
 } from '@/lib/admin-api';
 import { bulkDeleteAdminProducts } from '@/lib/admin-product-delete';
-import { getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase } from '@/lib/api-base';
+import { getApiBaseUrl, getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase, ngrokFetchHeaders } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 import {
@@ -648,6 +649,7 @@ export default function AdminProductsPage() {
   } | null>(null);
   const [importScraperCookieText, setImportScraperCookieText] = useState('');
   const [importScraperCookieSettings, setImportScraperCookieSettings] = useState<AdminImport1688CookieSettings | null>(null);
+  const [taxonomyAutoCreate, setTaxonomyAutoCreate] = useState<boolean | null>(null);
   const [importScraperCookieSaving, setImportScraperCookieSaving] = useState(false);
   const [importScraperCookieLoading, setImportScraperCookieLoading] = useState(false);
   const [importScraperCookieDeleting, setImportScraperCookieDeleting] = useState(false);
@@ -1296,6 +1298,29 @@ export default function AdminProductsPage() {
   useEffect(() => {
     void loadImportScraperCookieSettings();
   }, [loadImportScraperCookieSettings]);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('admin_token') : null;
+    if (!token) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/taxonomy/auto-create`, {
+          headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { auto_create_enabled?: boolean };
+        if (!cancelled && typeof data.auto_create_enabled === 'boolean') {
+          setTaxonomyAutoCreate(data.auto_create_enabled);
+        }
+      } catch {
+        /* trạng thái công tắc là phụ — trang cào vẫn dùng được */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSaveImportScraperCookie = async () => {
     const cookie = importScraperCookieText.trim();
@@ -2801,6 +2826,16 @@ export default function AdminProductsPage() {
                     Một URL hoặc Excel nhiều dòng → bản nháp (Vipomall, PandaMall hoặc taobao1688.kz). Luôn kiểm tra nháp trước khi
                     đăng hoặc xuất Excel.
                   </p>
+                  {taxonomyAutoCreate !== null ? (
+                    <p className="mt-2 max-w-2xl text-sm text-slate-700">
+                      {taxonomyAutoCreate
+                        ? 'Đang cho phép tạo danh mục mới (cấp 1–3) khi cào thiếu nhánh.'
+                        : 'Khi cào chỉ gán danh mục có sẵn.'}{' '}
+                      <Link href="/admin/taxonomy" className="font-medium text-orange-700 underline">
+                        Đổi tại Cây danh mục
+                      </Link>
+                    </p>
+                  ) : null}
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-950">
                       Vipomall · PandaMall · kiểm tra tồn kho — một bộ cookie

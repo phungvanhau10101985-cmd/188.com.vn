@@ -17,8 +17,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.category import Category
 from app.models.seo_cluster import SeoCluster
+from app.models.taxonomy_settings import TaxonomySettings
 from app.utils.slug import create_slug
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,35 @@ def _name_key(text: str) -> str:
 
 def _slug_key(text: str) -> str:
     return create_slug(_norm_label(text))
+
+
+def is_taxonomy_auto_create_enabled(db: Session) -> bool:
+    """
+    Công tắc admin trên /admin/taxonomy (bảng taxonomy_settings).
+    Chưa có hàng thì theo ``IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED`` (mặc định bật).
+    """
+    env_default = bool(getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True))
+    try:
+        with db.begin_nested():
+            row = db.query(TaxonomySettings).filter(TaxonomySettings.id == 1).first()
+    except Exception:
+        logger.warning("taxonomy_auto_create: không đọc được taxonomy_settings — dùng mặc định env.")
+        return env_default
+    if row is None:
+        return env_default
+    return bool(row.auto_create_enabled)
+
+
+def set_taxonomy_auto_create_enabled(db: Session, enabled: bool) -> bool:
+    """Ghi công tắc. Caller commit."""
+    row = db.query(TaxonomySettings).filter(TaxonomySettings.id == 1).first()
+    if row is None:
+        row = TaxonomySettings(id=1, auto_create_enabled=bool(enabled))
+        db.add(row)
+    else:
+        row.auto_create_enabled = bool(enabled)
+    db.flush()
+    return bool(row.auto_create_enabled)
 
 
 def validate_proposed_category_names(cat1: str, cat2: str, cat3: str) -> Optional[str]:

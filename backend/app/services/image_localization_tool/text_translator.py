@@ -399,18 +399,12 @@ YÊU CẦU:
             return None
 
         size_table_context = self._has_size_table_context(normalized_items)
-        if size_table_context and delete_size_and_laundry:
-            print("    [SIZE TABLE] delete image")
-            return None
-
-        if self._has_laundry_care_context(normalized_items) and delete_size_and_laundry:
-            print("    [LAUNDRY CARE] delete image")
-            return None
-
-        if size_table_context and not delete_size_and_laundry:
-            print("    [SIZE TABLE] giữ ảnh — không xóa (Gemini API)")
-        elif self._has_laundry_care_context(normalized_items) and not delete_size_and_laundry:
-            print("    [LAUNDRY CARE] giữ ảnh — không xóa (Gemini API)")
+        if size_table_context:
+            print("    [SIZE TABLE] vẽ local — không xóa ảnh")
+        elif self._has_laundry_care_context(normalized_items):
+            print("    [LAUNDRY CARE] vẽ local — không xóa ảnh")
+        # Tham số cũ: bảng size / giặt không còn xóa ảnh dù caller truyền True.
+        _ = delete_size_and_laundry
 
         for text, bbox in normalized_items:
             if self._is_standalone_cm_measurement(text.strip()):
@@ -419,8 +413,15 @@ YÊU CẦU:
                 continue
             
             if self.contains_forbidden_content(text):
-                print(f"    🔴 [CẤM] Phát hiện từ khóa: '{text}' -> XÓA ẢNH")
-                return None
+                # SKIP_REGEX cũng khớp domain. URL trên tem SP chỉ xóa dòng chữ,
+                # không xóa cả ảnh — nếu không storefront gắn nhầm ảnh gallery vào SKU.
+                without_domain = self.domain_regex.sub(" ", text)
+                if self.skip_regex.search(without_domain):
+                    print(f"    🔴 [CẤM] Phát hiện từ khóa: '{text}' -> XÓA ẢNH")
+                    return None
+                print(f"    🗑️ [XÓA] Domain (giữ ảnh): '{text}'")
+                processed_blocks.append(("", bbox))
+                continue
             
             has_chinese = self.contains_chinese(text)
             has_jin = '斤' in text

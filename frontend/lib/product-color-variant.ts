@@ -51,10 +51,15 @@ export function resolveColorSwatchImageUrl(product: ColorSwatchProductRef, index
     if (fromVariant) return fromVariant;
   }
 
-  const galleryPool = dedupeTrimmedUrls([...(product.gallery || []), ...(product.images || [])]);
-  if (galleryPool[index]) return galleryPool[index];
+  // Gallery không cùng thứ tự với SKU. Chỉ mượn gallery khi không màu nào có ảnh riêng.
+  // Nếu một số SKU mất img, lấy gallery[index] sẽ gắn nhầm ảnh chi tiết / banner.
+  const anyColorHasOwnImage = colors.some((c) => Boolean(colorEntryImageUrl(c)));
+  if (!anyColorHasOwnImage) {
+    const galleryPool = dedupeTrimmedUrls([...(product.gallery || []), ...(product.images || [])]);
+    if (galleryPool[index]) return galleryPool[index];
+  }
 
-  if (index === 0) {
+  if (!anyColorHasOwnImage && index === 0) {
     const main = (product.main_image ?? '').trim();
     if (main) return main;
   }

@@ -35,6 +35,41 @@ import WarehouseClearanceBlock from '@/components/product-detail/WarehouseCleara
 import { warehouseVariantsInStock } from '@/lib/warehouse-clearance';
 import { productPricedForVariant } from '@/lib/variant-list-price';
 
+const MODAL_PROMO_DISMISS_KEYS = {
+  birthdaySavings: '188_variant_modal_promo_birthday_savings',
+  google: '188_variant_modal_promo_google',
+  loyalty: '188_variant_modal_promo_loyalty',
+} as const;
+
+type ModalPromoDismissKey = keyof typeof MODAL_PROMO_DISMISS_KEYS;
+
+function readSessionDismissed(key: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function PromoNoticeDismissButton({ label, onDismiss }: { label: string; onDismiss: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onDismiss();
+      }}
+      className="absolute right-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-white/80 text-gray-600 shadow-sm hover:bg-white hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+      aria-label={`Đóng ${label}`}
+    >
+      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  );
+}
+
 /** Số tồn hiển thị (ảo) random 1–3 cho mỗi phiên bản. */
 function getRandomDisplayStock(): number {
   return Math.floor(Math.random() * 3) + 1;
@@ -183,12 +218,36 @@ export default function ProductVariantModal({
   const [imagePreviewOpen, setImagePreviewOpen] = useState(false);
   const imagePreviewCloseRef = useRef<HTMLButtonElement>(null);
   const [portalReady, setPortalReady] = useState(false);
+  const [promoDismissed, setPromoDismissed] = useState<Record<ModalPromoDismissKey, boolean>>({
+    birthdaySavings: false,
+    google: false,
+    loyalty: false,
+  });
+  const [promoDismissReady, setPromoDismissReady] = useState(false);
   const wasOpenRef = useRef(false);
   const catLevel1Slug = product.category_level1_slug ?? null;
   const catLevel2Slug = product.category_level2_slug ?? null;
 
   useEffect(() => {
     setPortalReady(true);
+  }, []);
+
+  useEffect(() => {
+    setPromoDismissed({
+      birthdaySavings: readSessionDismissed(MODAL_PROMO_DISMISS_KEYS.birthdaySavings),
+      google: readSessionDismissed(MODAL_PROMO_DISMISS_KEYS.google),
+      loyalty: readSessionDismissed(MODAL_PROMO_DISMISS_KEYS.loyalty),
+    });
+    setPromoDismissReady(true);
+  }, []);
+
+  const dismissModalPromo = useCallback((key: ModalPromoDismissKey) => {
+    try {
+      sessionStorage.setItem(MODAL_PROMO_DISMISS_KEYS[key], '1');
+    } catch {
+      /* noop */
+    }
+    setPromoDismissed((prev) => ({ ...prev, [key]: true }));
   }, []);
 
   useEffect(() => {
@@ -863,30 +922,40 @@ export default function ProductVariantModal({
             compact
             className="mb-3 p-3"
           />
-          <BirthdaySavingsCard
-            active={birthdayOnPdp}
-            percent={birthdayDiscount.percent}
-            savings={birthdaySavingsAmount * effectiveQuantity}
-            nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
-            compact
-            className="mb-3"
-          />
-          {googleDiscount && googleSavingsAmount > 0 ? (
-            <div className="bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mb-3 text-center">
-              <span className="text-xs text-emerald-800 font-medium">
+          {promoDismissReady && !promoDismissed.birthdaySavings ? (
+            <BirthdaySavingsCard
+              active={birthdayOnPdp}
+              percent={birthdayDiscount.percent}
+              savings={birthdaySavingsAmount * effectiveQuantity}
+              nextBirthdayLabel={birthdayDiscount.nextBirthdayLabel}
+              compact
+              className="mb-3"
+              onDismiss={() => dismissModalPromo('birthdaySavings')}
+            />
+          ) : null}
+          {promoDismissReady && googleDiscount && googleSavingsAmount > 0 && !promoDismissed.google ? (
+            <div className="relative mb-3 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 pr-10 text-center">
+              <PromoNoticeDismissButton
+                label="thông tin Google Mua sắm"
+                onDismiss={() => dismissModalPromo('google')}
+              />
+              <span className="text-xs font-medium text-emerald-800">
                 {googleShoppingSavingsLine(formatPrice(googleSavingsAmount * effectiveQuantity))}
               </span>
             </div>
           ) : null}
-          {/* Loyalty Discount Message */}
-          {isAuthenticated && loyaltyDiscountAmount > 0 && (
-            <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 mb-3 text-center">
-              <span className="text-xs text-green-700 font-medium flex items-center justify-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+          {promoDismissReady && isAuthenticated && loyaltyDiscountAmount > 0 && !promoDismissed.loyalty ? (
+            <div className="relative mb-3 rounded-lg border border-green-100 bg-green-50 px-3 py-2 pr-10 text-center">
+              <PromoNoticeDismissButton
+                label="thông tin hạng thành viên"
+                onDismiss={() => dismissModalPromo('loyalty')}
+              />
+              <span className="flex items-center justify-center gap-1.5 text-xs font-medium text-green-700">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
                 Hạng <strong>{loyaltyTierName}</strong> giảm <strong>{formatPrice(loyaltyDiscountAmount)}</strong> khi mua hàng
               </span>
             </div>
-          )}
+          ) : null}
 
           {orderingWarehouse ? (
             <p className="mb-2 text-center text-[11px] text-amber-800">

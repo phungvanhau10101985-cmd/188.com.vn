@@ -3,7 +3,7 @@ Gán danh mục cấp 1–3: đọc taxonomy từ bảng `categories`, gọi Dee
 hoặc tên Việt.
 
 Ưu tiên khớp bộ ba đã có trong taxonomy (taxonomy_import.xlsx). Nếu không khớp và
-``IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED`` bật: bổ sung nhánh thiếu (chỉ tạo mới, không sửa cũ)
+công tắc admin ``taxonomy_settings.auto_create_enabled`` bật: bổ sung nhánh thiếu (chỉ tạo mới, không sửa cũ)
 qua ``taxonomy_auto_create.ensure_additive_category_triple`` — lần sau coi như taxonomy chuẩn.
 """
 from __future__ import annotations
@@ -696,13 +696,17 @@ def _try_auto_create_taxonomy_triple(
     Khi bộ ba không có trong taxonomy: tạo bổ sung (additive) nếu cấu hình bật.
     """
     warnings: List[str] = []
-    if not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
+    from app.services.taxonomy_auto_create import (
+        ensure_additive_category_triple,
+        is_taxonomy_auto_create_enabled,
+    )
+
+    if not is_taxonomy_auto_create_enabled(db):
         warnings.append(
             f"deepseek_taxonomy: bộ «{cat1} / {cat2} / {cat3}» không trùng taxonomy "
-            "(IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED=false — không tạo mới)."
+            "(công tắc «Tạo danh mục khi thiếu nhánh» đang tắt — không tạo mới)."
         )
         return None, warnings
-    from app.services.taxonomy_auto_create import ensure_additive_category_triple
 
     ensured, tw = ensure_additive_category_triple(db, cat1, cat2, cat3)
     warnings.extend(tw)
@@ -753,7 +757,9 @@ def classify_product_taxonomy_deepseek(
 
     triples = load_active_category_triples(db)
     if not triples:
-        if not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
+        from app.services.taxonomy_auto_create import is_taxonomy_auto_create_enabled
+
+        if not is_taxonomy_auto_create_enabled(db):
             warnings.append(
                 "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
             )
@@ -1443,7 +1449,7 @@ def _merge_product_info_categories(
 def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str, Any]) -> List[str]:
     """
     Điền category / subcategory / sub_subcategory (+ slug_seo = full_slug cat3) vào product_data.
-    Ưu tiên khớp taxonomy có sẵn; nếu thiếu nhánh và ``IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED``
+    Ưu tiên khớp taxonomy có sẵn; nếu thiếu nhánh và công tắc admin đang bật
     thì bổ sung cat thiếu (không sửa nhánh cũ).
 
     Nếu taxonomy có cả nhánh Nam/Nữ cho cùng loại cat1 mà text không cho biết giới tính,
@@ -1496,7 +1502,9 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
         return warnings
 
     triples = load_active_category_triples(db)
-    if not triples and not getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True):
+    from app.services.taxonomy_auto_create import is_taxonomy_auto_create_enabled
+
+    if not triples and not is_taxonomy_auto_create_enabled(db):
         warnings.append(
             "deepseek_taxonomy: chưa có nhánh cat3 active trong bảng categories — import taxonomy_import.xlsx trước."
         )

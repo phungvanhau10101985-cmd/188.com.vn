@@ -120,6 +120,9 @@ print("[OK] PendingProductReplyEmail model loaded")
 from app.models.category_seo import CategorySeoMapping, CategorySeoDictionary, CategorySeoMeta, CategorySeoGeminiTarget, CategorySeoSettings
 print("[OK] CategorySeoMapping model loaded")
 
+from app.models.taxonomy_settings import TaxonomySettings
+print("[OK] TaxonomySettings model loaded")
+
 # 6f. Category transform rules (lưu lịch sử chỉnh danh mục)
 from app.models.category_transform_rule import CategoryTransformRule
 print("[OK] CategoryTransformRule model loaded")
@@ -270,6 +273,7 @@ __all__ = [
     "CategorySeoMeta",
     "CategorySeoGeminiTarget",
     "CategorySeoSettings",
+    "TaxonomySettings",
     "CategoryTransformRule",
     "CategoryFinalMapping",
     "SearchQueryMapping",

@@ -782,7 +782,7 @@ class Settings:
         self.IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE: bool = os.getenv(
             "IMPORT_LINK_DEEPSEEK_TAXONOMY_FORCE", ""
         ).strip().lower() in ("1", "true", "yes", "on")
-        # Khi bộ cat1/2/3 từ AI không có trong DB: tạo bổ sung (không sửa nhánh cũ).
+        # Giá trị ban đầu khi chưa có hàng taxonomy_settings. Sau đó công tắc /admin/taxonomy quyết định.
         self.IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED: bool = os.getenv(
             "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", "true"
         ).strip().lower() in ("1", "true", "yes", "on")

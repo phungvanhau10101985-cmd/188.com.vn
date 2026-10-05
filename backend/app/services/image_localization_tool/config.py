@@ -266,9 +266,7 @@ IMAGE_CLASSIFICATION = {
         '百亿补贴', '限时优惠', '限时特价', '限时抢购', '限时秒杀',
         '热卖促销', '促销价', '活动价', '购物津贴', '红包',
         
-        # 10. Domain & website (cụm từ)
-        'www.', '.com', '.cn', '.net', '.org', '.vn',
-        
+        # Domain trên tem (www. / .com) không xóa cả ảnh — translator xóa riêng dòng URL.
         # 11. Nút kêu gọi hành động trên ảnh (cụm từ)
         '点击进入', '立即购买', 'BUY NOW', '购买链接',
         

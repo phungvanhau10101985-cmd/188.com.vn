@@ -325,6 +325,25 @@ class MigrationManager:
             logger.warning("  _seed_category_seo_settings_singleton: %s", e)
             return False
 
+    def _seed_taxonomy_settings_singleton(self) -> bool:
+        """Hàng id=1: lấy giá trị env lần đầu, sau đó admin đổi trên /admin/taxonomy."""
+        try:
+            from app.db.session import SessionLocal
+            from app.models.taxonomy_settings import TaxonomySettings as _Ts
+
+            db = SessionLocal()
+            try:
+                if db.query(_Ts).filter(_Ts.id == 1).first() is None:
+                    enabled = bool(getattr(settings, "IMPORT_LINK_TAXONOMY_AUTO_CREATE_ENABLED", True))
+                    db.add(_Ts(id=1, auto_create_enabled=enabled))
+                    db.commit()
+                return True
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning("  _seed_taxonomy_settings_singleton: %s", e)
+            return False
+
     def _seed_affiliate_settings_singleton(self) -> bool:
         """Seed cấu hình affiliate từ .env để giữ hành vi cũ sau khi có bảng admin."""
         try:
@@ -1835,6 +1854,16 @@ class MigrationManager:
         results['guest_cohort_view_pool_cache_sync'] = self._sync_table_columns(
             "guest_cohort_view_pool_cache", GuestCohortPoolCache
         )
+
+        from app.models.taxonomy_settings import TaxonomySettings
+
+        results['taxonomy_settings_create'] = self._create_table_if_not_exists(
+            "taxonomy_settings", TaxonomySettings
+        )
+        results['taxonomy_settings_sync'] = self._sync_table_columns(
+            "taxonomy_settings", TaxonomySettings
+        )
+        results['taxonomy_settings_seed'] = self._seed_taxonomy_settings_singleton()
 
         return results
 
