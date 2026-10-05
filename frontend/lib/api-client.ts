@@ -1314,6 +1314,11 @@ class ApiClient {
   }
 
   // BANK ACCOUNTS (public - cho trang đặt cọc)
+  async getDepositPercent(): Promise<number> {
+    const data = await this.fetch<{ partial_percent: number }>('/bank-accounts/deposit-percent', { quiet: true });
+    return Number(data?.partial_percent);
+  }
+
   async getBankAccounts(): Promise<BankAccountInfo[]> {
     const rows = await this.fetch<BankAccountInfo[]>('/bank-accounts/');
     return rows.map((r) => ({

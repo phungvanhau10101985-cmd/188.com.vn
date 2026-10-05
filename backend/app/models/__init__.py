@@ -105,6 +105,9 @@ print("[OK] SiteEmbedCode model loaded")
 from app.models.shop_video_fab_setting import ShopVideoFabSetting
 print("[OK] ShopVideoFabSetting model loaded")
 
+from app.models.deposit_settings import DepositSettings
+print("[OK] DepositSettings model loaded")
+
 # 6c. Product questions (câu hỏi câu trả lời sản phẩm)
 from app.models.product_question import ProductQuestion, ProductQuestionUsefulVote
 print("[OK] ProductQuestion model loaded")
@@ -268,6 +271,7 @@ __all__ = [
     "BankAccount",
     "SiteEmbedCode",
     "ShopVideoFabSetting",
+    "DepositSettings",
     "CategorySeoMapping",
     "CategorySeoDictionary",
     "CategorySeoMeta",

@@ -6,6 +6,8 @@ from typing import List
 from app.db.session import get_db
 from app.core.security import require_module_permission
 from app import models, crud, schemas
+from app.crud import deposit_settings as deposit_settings_crud
+from app.schemas.deposit_settings import DepositPercentOut
 
 router = APIRouter()
 
@@ -18,6 +20,12 @@ def list_bank_accounts(
 ):
     """Danh sách tài khoản ngân hàng (public - cho trang đặt cọc)."""
     return crud.bank_account.get_bank_accounts(db, active_only=active_only)
+
+
+@router.get("/deposit-percent", response_model=DepositPercentOut)
+def public_deposit_percent(db: Session = Depends(get_db)):
+    """Mức cọc một phần đang bật — giỏ hàng, trang SP, trang thanh toán cọc."""
+    return DepositPercentOut(partial_percent=deposit_settings_crud.get_partial_percent(db))
 
 
 @router.get("/admin/all", response_model=List[schemas.BankAccountResponse])

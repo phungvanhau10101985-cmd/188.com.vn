@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from app.db.session import get_db
 from app import crud, models, schemas
+from app.crud.deposit_settings import clamp_partial_percent, get_partial_percent
 from app.models.order import (
     OrderStatus as OrderStatusEnum,
     DepositType as DepositTypeEnum,
@@ -75,10 +76,11 @@ def _admin_expected_deposit_rows(order: models.Order) -> bool:
     return False
 
 
-def resolve_order_deposit_due(order: models.Order) -> Decimal:
+def resolve_order_deposit_due(order: models.Order, *, partial_percent: int = 30) -> Decimal:
     """
-    Số tiền cọc cần thu: khớp logic khách hàng FE / admin FE — ưu tiên deposit_amount lưu;
-    nếu bằng 0 nhưng đơn thuộc trường hợp cần cọc thì suy từ % / deposit_type / mặc định 30%.
+    Số tiền cọc cần thu: ưu tiên deposit_amount đã lưu.
+    Nếu bằng 0 nhưng đơn cần cọc thì tính trên giá trị hàng (tổng − ship), theo % đã chốt trên đơn
+    hoặc mức cọc đang cấu hình.
     """
     stored = _dec(getattr(order, "deposit_amount", None))
     if stored > 0:
@@ -91,17 +93,20 @@ def resolve_order_deposit_due(order: models.Order) -> Decimal:
     if total <= 0:
         return Decimal("0")
 
+    goods = max(Decimal("0"), total - _dec(getattr(order, "shipping_fee", None)))
     dt = getattr(order.deposit_type, "value", order.deposit_type)
     pct = int(getattr(order, "deposit_percentage", None) or 0)
 
-    if dt == DepositTypeEnum.PERCENT_100.value or pct == 100:
-        return total.quantize(Decimal("0.01"))
-    if dt == DepositTypeEnum.PERCENT_30.value or pct == 30:
-        return (total * Decimal("0.3")).quantize(Decimal("0.01"))
+    if dt == DepositTypeEnum.PERCENT_100.value or pct >= 100:
+        return goods.quantize(Decimal("0.01"))
+
+    applied = pct if 0 < pct < 100 else clamp_partial_percent(partial_percent)
+    if dt == DepositTypeEnum.PERCENT_30.value or 0 < pct < 100:
+        return (goods * Decimal(applied) / Decimal(100)).quantize(Decimal("0.01"))
 
     status_val = getattr(order.status, "value", order.status)
     if status_val == OrderStatusEnum.WAITING_DEPOSIT.value:
-        return (total * Decimal("0.3")).quantize(Decimal("0.01"))
+        return (goods * Decimal(applied) / Decimal(100)).quantize(Decimal("0.01"))
     return Decimal("0")
 
 
@@ -219,7 +224,7 @@ def update_deposit_type(
     current_user: models.User = Depends(get_current_user)
 ):
     """
-    Khách hàng đổi mức cọc (30% hoặc 100%) khi đơn đang chờ đặt cọc.
+    Khách hàng đổi mức cọc (mức đang cấu hình hoặc 100%) khi đơn đang chờ đặt cọc.
     Body: { "deposit_type": "percent_30" | "percent_100" }
     """
     deposit_type = body.get("deposit_type")
@@ -1449,7 +1454,7 @@ def admin_confirm_deposit_manual(
     status_val = getattr(order.status, "value", order.status)
     if status_val != OrderStatusEnum.WAITING_DEPOSIT.value:
         raise HTTPException(status_code=400, detail="Chỉ xác nhận được đơn đang chờ đặt cọc")
-    amount_due = resolve_order_deposit_due(order)
+    amount_due = resolve_order_deposit_due(order, partial_percent=get_partial_percent(db))
     if not _admin_expected_deposit_rows(order) and _dec(order.deposit_amount) <= 0:
         raise HTTPException(status_code=400, detail="Đơn không yêu cầu cọc")
     if amount_due <= 0:
@@ -1464,7 +1469,10 @@ def admin_confirm_deposit_manual(
         order.deposit_amount = amount_due
         if dt_val in (None, DepositTypeEnum.NONE.value, "", "none"):
             order.deposit_type = DepositTypeEnum.PERCENT_30
-            order.deposit_percentage = 30
+            stored_pct = int(getattr(order, "deposit_percentage", None) or 0)
+            order.deposit_percentage = (
+                stored_pct if 0 < stored_pct < 100 else get_partial_percent(db)
+            )
 
     received = _coerce_received_deposit_amount(
         body.received_amount,

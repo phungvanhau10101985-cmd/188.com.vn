@@ -391,6 +391,7 @@ export interface AdminOrder {
   deposit_paid: number;
   deposit_percentage?: number;
   deposit_type?: string | null;
+  shipping_fee?: number;
   remaining_amount?: number;
   tracking_number?: string | null;
   shipping_provider?: string | null;
@@ -3657,7 +3658,17 @@ export interface AdminSepayHmacSecretStatus {
   env_configured: boolean;
 }
 
+export interface DepositPercentSetting {
+  partial_percent: number;
+}
+
 export const adminBankAPI = {
+  getDepositPercent: () => fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent'),
+  saveDepositPercent: (partial_percent: number) =>
+    fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent', {
+      method: 'PUT',
+      body: JSON.stringify({ partial_percent }),
+    }),
   getSepayHmacSecret: () => fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret'),
   saveSepayHmacSecret: (secret_key: string) =>
     fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret', {

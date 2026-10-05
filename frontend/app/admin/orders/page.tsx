@@ -75,11 +75,13 @@ function depositRequiredDisplay(order: AdminOrder): number {
   if (stored > 0) return stored;
   if (!adminOrderExpectsDeposit(order)) return 0;
   const total = parseMoney(order.total_amount);
-  if (order.deposit_percentage === 100) return total;
-  if (order.deposit_percentage === 30) return Math.round(total * 0.3);
-  if (order.deposit_type === 'percent_100') return total;
-  if (order.deposit_type === 'percent_30') return Math.round(total * 0.3);
-  if (order.status === 'waiting_deposit' && total > 0) return Math.round(total * 0.3);
+  const shipping = parseMoney(order.shipping_fee);
+  const goods = Math.max(0, total - shipping);
+  const pct = Number(order.deposit_percentage) || 0;
+  if (pct >= 100 || order.deposit_type === 'percent_100') return goods;
+  if (pct > 0 && pct < 100) return Math.round((goods * pct) / 100);
+  if (order.deposit_type === 'percent_30') return Math.round(goods * 0.3);
+  if (order.status === 'waiting_deposit' && total > 0) return Math.round(goods * 0.3);
   return 0;
 }
 

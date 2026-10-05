@@ -1,4 +1,5 @@
 import InfoPageLayout from '@/components/info/InfoPageLayout';
+import DepositPercentInline from '@/components/info/DepositPercentInline';
 import Link from 'next/link';
 
 export const metadata = {
@@ -27,7 +28,7 @@ export default function HuongDanMuaHangPage() {
         </p>
         <p>
           Yêu cầu đặt cọc được quy định <strong className="text-zinc-800">theo từng sản phẩm</strong>, không phụ thuộc sản phẩm ở Trung Quốc hay đã có sẵn tại Việt Nam. Với sản phẩm có nhãn cần đặt cọc, khách hàng thanh toán trước mặc định{' '}
-          <strong className="text-zinc-800">30% giá trị hàng</strong> (hoặc chọn thanh toán trước 100%); phần còn lại và phí giao hàng, nếu có, được{' '}
+          <DepositPercentInline /> (hoặc chọn thanh toán trước 100%); phần còn lại và phí giao hàng, nếu có, được{' '}
           <strong className="text-zinc-800">thanh toán khi nhận hàng</strong>. Sản phẩm không yêu cầu đặt cọc được xử lý ngay sau khi đặt đơn.
         </p>
         <p>

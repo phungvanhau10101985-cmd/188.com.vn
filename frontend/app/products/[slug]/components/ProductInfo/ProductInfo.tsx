@@ -18,6 +18,7 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
+import { useDepositPercent } from '@/lib/use-deposit-percent';
 import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing, stackedSaleProgramLabel } from '@/lib/site-sale';
 import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
 import {
@@ -94,6 +95,7 @@ export default function ProductInfo({
   const [stickyPortalReady, setStickyPortalReady] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const { isAuthenticated } = useAuth();
+  const depositPercent = useDepositPercent();
   const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
@@ -677,7 +679,7 @@ export default function ProductInfo({
       <div className="border-t border-gray-100 pt-3">
         <p className="text-xs text-gray-900 leading-snug">
           🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k (phí ship 30k nếu dưới 500k). 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
-          💳 Một số đơn yêu cầu đặt cọc 30% —{' '}
+          💳 Một số đơn yêu cầu đặt cọc {depositPercent}% —{' '}
           <Link href="/info/huong-dan-mua-hang" className="text-[#ea580c] hover:underline font-medium">
             xem hướng dẫn
           </Link>

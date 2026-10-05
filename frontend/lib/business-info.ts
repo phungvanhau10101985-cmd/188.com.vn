@@ -20,6 +20,7 @@ export const BOCT_REGISTRATION_URL =
 
 export const SHIPPING_FREE_THRESHOLD_VND = 500_000;
 export const SHIPPING_FEE_VND = 30_000;
+/** Fallback khi chưa tải được mức cọc từ quản trị. Giá trị thật nằm ở cài đặt Nạp tiền / QR. */
 export const DEPOSIT_PERCENT = 30;
 
 export const RETURN_POLICY_URL = "/info/doi-tra-hoan-tien";

@@ -195,8 +195,22 @@ def test_four_source_and_deposit_combinations_have_expected_initial_flow():
         )
         assert deposit["initial_status"] == "waiting_deposit"
         assert deposit["deposit_amount"] == Decimal("117000.00")
+        assert deposit["deposit_percentage"] == 30
         assert deposit["remaining_amount"] + deposit["deposit_amount"] == deposit["total"]
         assert _step_defs(True, source)
+
+
+def test_partial_deposit_uses_configured_percent():
+    deposit = build_group_financial_plan(
+        [{"fulfillment_source": "vietnam", "total_price": Decimal("400000"), "requires_deposit": True}],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("30000"),
+        requested_deposit_type=None,
+        partial_percent=40,
+    )
+    assert deposit["deposit_percentage"] == 40
+    assert deposit["deposit_amount"] == Decimal("160000.00")
+    assert deposit["remaining_amount"] == Decimal("270000.00")
 
 
 def test_mixed_checkout_money_invariant_and_shipping_only_vietnam():

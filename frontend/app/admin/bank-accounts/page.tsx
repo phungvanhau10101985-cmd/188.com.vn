@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminBankAPI, type BankAccountAdmin } from '@/lib/admin-api';
 import { DEFAULT_SEPAY_QR_TEMPLATE } from '@/lib/deposit-qr';
+import DepositPercentPanel from '@/components/admin/DepositPercentPanel';
 import SepayHmacSecretPanel from '@/components/admin/SepayHmacSecretPanel';
 
 type DepositFormState = {
@@ -131,9 +132,11 @@ export default function AdminBankAccountsPage() {
       <div className="p-6">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Cấu hình nạp tiền / đặt cọc</h1>
         <p className="text-gray-600 mb-6 max-w-3xl">
-          Quản lý tài khoản nhận tiền và URL mẫu QR (SePay, VietQR…). Chỉ tài khoản đang bật mới hiện cho khách khi
-          thanh toán cọc.
+          Đặt mức cọc, quản lý tài khoản nhận tiền và URL mẫu QR (SePay, VietQR…). Chỉ tài khoản đang bật mới hiện cho
+          khách khi thanh toán cọc.
         </p>
+
+        <DepositPercentPanel />
 
         <SepayHmacSecretPanel />
 

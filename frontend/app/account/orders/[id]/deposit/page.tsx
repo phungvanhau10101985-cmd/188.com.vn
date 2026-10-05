@@ -36,6 +36,7 @@ import {
 import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
 import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 import { useGoogleCustomerReviewsMerchantId } from '@/lib/use-google-customer-reviews-merchant-id';
+import { useDepositPercent } from '@/lib/use-deposit-percent';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
@@ -56,6 +57,7 @@ interface Order {
   status: string;
   requires_deposit?: boolean;
   deposit_type?: string;
+  deposit_percentage?: number;
   items?: OrderApiLineForMeta[];
 }
 
@@ -157,6 +159,7 @@ export default function OrderDepositPage() {
     account_number?: string | null;
   } | null>(null);
   const { pushToast } = useToast();
+  const configuredDepositPercent = useDepositPercent();
   const gcrMerchantId = useGoogleCustomerReviewsMerchantId();
   const prevStatusRef = useRef<string | null>(null);
   /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
@@ -785,7 +788,13 @@ export default function OrderDepositPage() {
                       disabled={updatingDeposit}
                       className="text-orange-600"
                     />
-                    <span className="text-gray-800">Cọc 30%</span>
+                    <span className="text-gray-800">
+                      Cọc{' '}
+                      {order.deposit_percentage && order.deposit_percentage > 0 && order.deposit_percentage < 100
+                        ? order.deposit_percentage
+                        : configuredDepositPercent}
+                      %
+                    </span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input

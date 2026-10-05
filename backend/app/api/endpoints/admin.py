@@ -33,6 +33,8 @@ from app.schemas.admin import (
     StaffRolePresetPutPayload,
 )
 from app.schemas.bank_account import BankAccountCreate, BankAccountUpdate, BankAccountResponse
+from app.schemas.deposit_settings import DepositPercentOut, DepositPercentUpdate
+from app.crud import deposit_settings as deposit_settings_crud
 from app.schemas.step_up import AdminOtpVerify, AdminStepUpRequest, AdminStepUpResponse
 from app.schemas.user import (
     UserResponse,
@@ -472,6 +474,25 @@ def admin_bank_list_all(
 ):
     """Danh sách tất cả tài khoản ngân hàng."""
     return crud.bank_account.get_bank_accounts(db, active_only=False)
+
+
+@router.get("/bank-accounts/deposit-percent", response_model=DepositPercentOut)
+def admin_get_deposit_percent(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("bank_accounts")),
+):
+    """Mức cọc một phần (1–99)."""
+    return deposit_settings_crud.to_out(deposit_settings_crud.get_or_create_singleton(db))
+
+
+@router.put("/bank-accounts/deposit-percent", response_model=DepositPercentOut)
+def admin_put_deposit_percent(
+    data: DepositPercentUpdate,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("bank_accounts")),
+):
+    """Đặt mức cọc cho đơn mới và lần khách đổi mức cọc sau này."""
+    return deposit_settings_crud.update_partial_percent(db, data)
 
 
 @router.post("/bank-accounts/", response_model=BankAccountResponse)
