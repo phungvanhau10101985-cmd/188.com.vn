@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
 from app.crud import promotion as crud_promotion
-from app.crud.deposit_settings import clamp_partial_percent, get_partial_percent
+from app.crud.deposit_settings import apply_partial_deposit, clamp_partial_percent, get_rule
 from app.crud.cart import _resolve_cart_line_image, cart as cart_crud
 from app.crud.promotion import PromoValidationError
 from app.models.order import PaymentMethod as PaymentMethodEnum
@@ -110,6 +110,7 @@ def build_group_financial_plan(
     shipping_fee: Decimal,
     requested_deposit_type: Optional[str],
     partial_percent: int = 30,
+    min_amount: int = 100_000,
 ) -> dict[str, Any]:
     subtotal = sum((_dec(row["total_price"]) for row in rows), Decimal("0"))
     discounted_subtotal = max(Decimal("0"), subtotal - discount)
@@ -130,7 +131,7 @@ def build_group_financial_plan(
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
             percentage = clamp_partial_percent(partial_percent)
-            deposit = (discounted_subtotal * Decimal(percentage) / Decimal(100)).quantize(Decimal("0.01"))
+            deposit = apply_partial_deposit(discounted_subtotal, percentage, min_amount)
     return {
         "subtotal": subtotal,
         "discounted_subtotal": discounted_subtotal,
@@ -349,7 +350,7 @@ def _create_checkout_fulfillment(
 
     created_orders: list[models.Order] = []
     pre_wallet_totals: dict[str, Decimal] = {}
-    partial_percent = get_partial_percent(db)
+    partial_percent, min_amount = get_rule(db)
     for split_index, source in enumerate(sources, start=1):
         rows = grouped[source]
         discount = discounts[source]
@@ -363,6 +364,7 @@ def _create_checkout_fulfillment(
             shipping_fee=shipping_fee,
             requested_deposit_type=requested_deposit_type,
             partial_percent=partial_percent,
+            min_amount=min_amount,
         )
         subtotal = plan["subtotal"]
         total = plan["total"]

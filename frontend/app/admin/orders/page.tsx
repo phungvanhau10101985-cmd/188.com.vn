@@ -7,6 +7,7 @@ import { adminOrderAPI, type AdminOrder, type AdminOrderStats, type AdminOrderSt
 import OrderItemVariantMeta, { orderItemImageLink } from '@/components/orders/OrderItemVariantMeta';
 import { cdnUrl, normalizeRemoteImageUrlForDisplay } from '@/lib/cdn-url';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { partialDepositAmount } from '@/lib/order-deposit';
 
 const STATUS_TEXTS: Record<string, string> = {
   pending: 'Chờ xác nhận',
@@ -79,9 +80,9 @@ function depositRequiredDisplay(order: AdminOrder): number {
   const goods = Math.max(0, total - shipping);
   const pct = Number(order.deposit_percentage) || 0;
   if (pct >= 100 || order.deposit_type === 'percent_100') return goods;
-  if (pct > 0 && pct < 100) return Math.round((goods * pct) / 100);
-  if (order.deposit_type === 'percent_30') return Math.round(goods * 0.3);
-  if (order.status === 'waiting_deposit' && total > 0) return Math.round(goods * 0.3);
+  if (pct > 0 && pct < 100) return partialDepositAmount(goods, pct);
+  if (order.deposit_type === 'percent_30') return partialDepositAmount(goods, 30);
+  if (order.status === 'waiting_deposit' && total > 0) return partialDepositAmount(goods, 30);
   return 0;
 }
 

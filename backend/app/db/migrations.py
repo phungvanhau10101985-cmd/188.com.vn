@@ -59,6 +59,7 @@ from app.models.affiliate import (
     WalletWithdrawal,
 )
 from app.models.bank_account import BankAccount
+from app.models.deposit_settings import DepositSettings
 from app.models.site_embed_code import SiteEmbedCode
 from app.models.category_seo import CategorySeoGeminiTarget, CategorySeoSettings
 from app.models.category_final_mapping import CategoryFinalMapping
@@ -1544,6 +1545,9 @@ class MigrationManager:
         )
         # 14. bank_accounts: mã NH + URL mẫu QR SePay/VietQR
         results['bank_accounts_sync_columns'] = self._sync_table_columns("bank_accounts", BankAccount)
+        results['deposit_settings_sync_columns'] = self._sync_table_columns(
+            "deposit_settings", DepositSettings
+        )
         # 14b. admin_users: linked_user_id, granular_permissions (+ sync cột khác theo model); index unique linked_user_id
         results['admin_users_sync_columns'] = self._sync_table_columns("admin_users", AdminUser)
         results['admin_users_linked_unique_index'] = self.migrate_admin_users_linked_user_unique_index()

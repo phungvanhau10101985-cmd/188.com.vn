@@ -213,6 +213,55 @@ def test_partial_deposit_uses_configured_percent():
     assert deposit["remaining_amount"] == Decimal("270000.00")
 
 
+def test_min_deposit_setting_cannot_go_below_100k():
+    from app.crud.deposit_settings import clamp_min_amount
+
+    assert clamp_min_amount(50_000) == 100_000
+    assert clamp_min_amount(None) == 100_000
+    assert clamp_min_amount(100_000) == 100_000
+    assert clamp_min_amount(150_000) == 150_000
+
+
+def test_partial_deposit_floors_at_min_amount():
+    deposit = build_group_financial_plan(
+        [{"fulfillment_source": "china", "total_price": Decimal("200000"), "requires_deposit": True}],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=30,
+        min_amount=100_000,
+    )
+    assert deposit["deposit_percentage"] == 30
+    assert deposit["deposit_amount"] == Decimal("100000.00")
+    assert deposit["remaining_amount"] == Decimal("100000.00")
+
+
+def test_partial_deposit_floor_does_not_exceed_goods():
+    deposit = build_group_financial_plan(
+        [{"fulfillment_source": "china", "total_price": Decimal("80000"), "requires_deposit": True}],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("30000"),
+        requested_deposit_type=None,
+        partial_percent=30,
+        min_amount=100_000,
+    )
+    assert deposit["deposit_amount"] == Decimal("80000.00")
+    assert deposit["remaining_amount"] == Decimal("30000.00")
+
+
+def test_full_deposit_ignores_min_amount():
+    deposit = build_group_financial_plan(
+        [{"fulfillment_source": "china", "total_price": Decimal("80000"), "requires_deposit": True}],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type="percent_100",
+        partial_percent=30,
+        min_amount=100_000,
+    )
+    assert deposit["deposit_percentage"] == 100
+    assert deposit["deposit_amount"] == Decimal("80000")
+
+
 def test_mixed_checkout_money_invariant_and_shipping_only_vietnam():
     group_totals = {"vietnam": Decimal("400000"), "china": Decimal("600000")}
     discounts = allocate_decimal_total(

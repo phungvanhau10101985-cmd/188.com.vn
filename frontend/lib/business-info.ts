@@ -22,6 +22,8 @@ export const SHIPPING_FREE_THRESHOLD_VND = 500_000;
 export const SHIPPING_FEE_VND = 30_000;
 /** Fallback khi chưa tải được mức cọc từ quản trị. Giá trị thật nằm ở cài đặt Nạp tiền / QR. */
 export const DEPOSIT_PERCENT = 30;
+/** Sàn tiền cọc một phần. Cài đặt quản trị không được thấp hơn số này. */
+export const DEPOSIT_MIN_VND = 100_000;
 
 export const RETURN_POLICY_URL = "/info/doi-tra-hoan-tien";
 export const SHIPPING_POLICY_URL = "/info/chinh-sach-giao-hang";

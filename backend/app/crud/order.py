@@ -18,7 +18,7 @@ from app.models.order import (
 )
 from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
-from app.crud.deposit_settings import clamp_partial_percent, get_partial_percent
+from app.crud.deposit_settings import apply_partial_deposit, clamp_partial_percent, get_rule
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 from app.services.fulfillment_transition_contract import (
@@ -33,14 +33,19 @@ def generate_order_code(db: Session) -> str:
     max_id = db.query(func.coalesce(func.max(Order.id), 0)).scalar() or 0
     return f"DH{max_id + 1:03d}"
 
-def calculate_deposit(product: Product, deposit_type: str, partial_percent: int = 30) -> Decimal:
+def calculate_deposit(
+    product: Product,
+    deposit_type: str,
+    partial_percent: int = 30,
+    min_amount: int = 100_000,
+) -> Decimal:
     """Calculate deposit amount for a product"""
     if not product.deposit_require:
         return Decimal('0')
     
     if deposit_type == DepositType.PERCENT_30.value:
         pct = clamp_partial_percent(partial_percent)
-        return (product.price * Decimal(pct) / Decimal(100)).quantize(Decimal('0.01'))
+        return apply_partial_deposit(Decimal(product.price or 0), pct, min_amount)
     elif deposit_type == DepositType.PERCENT_100.value:
         return product.price
     else:
@@ -196,9 +201,9 @@ def update_order_deposit_type(
         order.deposit_amount = deposit_base
         order.remaining_amount = total - deposit_base
     else:
-        partial = get_partial_percent(db)
+        partial, minimum = get_rule(db)
         order.deposit_percentage = partial
-        order.deposit_amount = (deposit_base * Decimal(partial) / Decimal(100)).quantize(Decimal('0.01'))
+        order.deposit_amount = apply_partial_deposit(deposit_base, partial, minimum)
         order.remaining_amount = (total - order.deposit_amount).quantize(Decimal('0.01'))
     order.deposit_type = DepositType(deposit_type)
     order.updated_at = datetime.now()

@@ -87,7 +87,8 @@ import {
   SHIPPING_POLICY_URL,
   TERMS_URL,
 } from '@/lib/business-info';
-import { useDepositPercent } from '@/lib/use-deposit-percent';
+import { formatDepositMinVnd } from '@/lib/order-deposit';
+import { useDepositPolicy } from '@/lib/use-deposit-percent';
 import { useToast } from '@/components/ToastProvider';
 
 function formatAddressLine(addr: UserAddress): string {
@@ -131,7 +132,7 @@ export default function CartPage() {
   const { state: globalSiteSale, reload: reloadSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
-  const depositPercent = useDepositPercent();
+  const { percent: depositPercent, minAmount: depositMinAmount } = useDepositPolicy();
   const [pageReady, setPageReady] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
@@ -566,7 +567,7 @@ export default function CartPage() {
         item.requires_deposit === true || item.product_data?.deposit_require === true
     ) || false;
   const paymentMethodLabel = depositRequiredForSelected
-    ? `Chuyển khoản cọc ${depositPercent}%`
+    ? `Chuyển khoản cọc ${depositPercent}%, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`
     : 'Thanh toán khi nhận hàng (COD)';
 
   const customerAddressLine = selectedAddress
@@ -1668,7 +1669,8 @@ export default function CartPage() {
               <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-[11px] text-blue-900 md:text-sm">
                 <p>
                   Đơn có sản phẩm yêu cầu đặt cọc{' '}
-                  <strong>{depositPercent}%</strong> trước khi xử lý. Số tiền chính xác của từng đơn sẽ hiển thị sau khi tách; phần còn lại thanh toán khi nhận hàng.
+                  <strong>{depositPercent}%</strong> giá trị hàng, tối thiểu{' '}
+                  <strong>{formatDepositMinVnd(depositMinAmount)}</strong>, trước khi xử lý. Số tiền chính xác của từng đơn sẽ hiển thị sau khi tách; phần còn lại thanh toán khi nhận hàng.
                 </p>
                 <p className="mt-1">
                   <Link href={PURCHASE_GUIDE_URL} className="text-blue-700 underline font-medium">

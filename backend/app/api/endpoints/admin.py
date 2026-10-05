@@ -481,7 +481,7 @@ def admin_get_deposit_percent(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("bank_accounts")),
 ):
-    """Mức cọc một phần (1–99)."""
+    """Mức cọc một phần (1–99) và sàn tiền cọc (tối thiểu 100.000đ)."""
     return deposit_settings_crud.to_out(deposit_settings_crud.get_or_create_singleton(db))
 
 
@@ -491,7 +491,7 @@ def admin_put_deposit_percent(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("bank_accounts")),
 ):
-    """Đặt mức cọc cho đơn mới và lần khách đổi mức cọc sau này."""
+    """Đặt % cọc và sàn tiền cho đơn mới và lần khách đổi mức cọc sau này."""
     return deposit_settings_crud.update_partial_percent(db, data)
 
 

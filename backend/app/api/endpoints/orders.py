@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from app.db.session import get_db
 from app import crud, models, schemas
-from app.crud.deposit_settings import clamp_partial_percent, get_partial_percent
+from app.crud.deposit_settings import apply_partial_deposit, clamp_partial_percent, get_min_amount, get_partial_percent
 from app.models.order import (
     OrderStatus as OrderStatusEnum,
     DepositType as DepositTypeEnum,
@@ -76,7 +76,12 @@ def _admin_expected_deposit_rows(order: models.Order) -> bool:
     return False
 
 
-def resolve_order_deposit_due(order: models.Order, *, partial_percent: int = 30) -> Decimal:
+def resolve_order_deposit_due(
+    order: models.Order,
+    *,
+    partial_percent: int = 30,
+    min_amount: int = 100_000,
+) -> Decimal:
     """
     Số tiền cọc cần thu: ưu tiên deposit_amount đã lưu.
     Nếu bằng 0 nhưng đơn cần cọc thì tính trên giá trị hàng (tổng − ship), theo % đã chốt trên đơn
@@ -102,11 +107,11 @@ def resolve_order_deposit_due(order: models.Order, *, partial_percent: int = 30)
 
     applied = pct if 0 < pct < 100 else clamp_partial_percent(partial_percent)
     if dt == DepositTypeEnum.PERCENT_30.value or 0 < pct < 100:
-        return (goods * Decimal(applied) / Decimal(100)).quantize(Decimal("0.01"))
+        return apply_partial_deposit(goods, applied, min_amount)
 
     status_val = getattr(order.status, "value", order.status)
     if status_val == OrderStatusEnum.WAITING_DEPOSIT.value:
-        return (goods * Decimal(applied) / Decimal(100)).quantize(Decimal("0.01"))
+        return apply_partial_deposit(goods, applied, min_amount)
     return Decimal("0")
 
 
@@ -1454,7 +1459,11 @@ def admin_confirm_deposit_manual(
     status_val = getattr(order.status, "value", order.status)
     if status_val != OrderStatusEnum.WAITING_DEPOSIT.value:
         raise HTTPException(status_code=400, detail="Chỉ xác nhận được đơn đang chờ đặt cọc")
-    amount_due = resolve_order_deposit_due(order, partial_percent=get_partial_percent(db))
+    amount_due = resolve_order_deposit_due(
+        order,
+        partial_percent=get_partial_percent(db),
+        min_amount=get_min_amount(db),
+    )
     if not _admin_expected_deposit_rows(order) and _dec(order.deposit_amount) <= 0:
         raise HTTPException(status_code=400, detail="Đơn không yêu cầu cọc")
     if amount_due <= 0:

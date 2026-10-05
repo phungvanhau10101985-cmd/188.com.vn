@@ -3660,14 +3660,15 @@ export interface AdminSepayHmacSecretStatus {
 
 export interface DepositPercentSetting {
   partial_percent: number;
+  min_amount: number;
 }
 
 export const adminBankAPI = {
   getDepositPercent: () => fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent'),
-  saveDepositPercent: (partial_percent: number) =>
+  saveDepositPercent: (partial_percent: number, min_amount: number) =>
     fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent', {
       method: 'PUT',
-      body: JSON.stringify({ partial_percent }),
+      body: JSON.stringify({ partial_percent, min_amount }),
     }),
   getSepayHmacSecret: () => fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret'),
   saveSepayHmacSecret: (secret_key: string) =>
