@@ -388,7 +388,7 @@ class ExcelImporter:
                 logger.info(f"   ➕ Tạo mới: {result.get('created', 0)}")
                 logger.info(f"   🔄 Cập nhật: {result.get('updated', 0)}")
                 logger.info(f"   🗑 Xóa khỏi DB (listed=0): {result.get('deleted', 0)}")
-                logger.info(f"   ⏭ Bỏ qua (trùng id/SKU kiểu a188): {skipped_count}")
+                logger.info(f"   ⏭ Bỏ qua (trùng mã cột A hoặc SKU): {skipped_count}")
                 logger.info(f"   ⚠️  Cảnh báo: {len(all_warnings)}")
                 logger.info(f"   ❌ Lỗi: {len(all_errors)}")
                 logger.info(f"   📈 Tỷ lệ thành công: {result.get('success_rate', '0%')}")
