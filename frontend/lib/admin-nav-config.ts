@@ -22,7 +22,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: '/admin/orders', label: 'Đơn hàng', moduleKey: 'orders' },
       {
         href: '/admin/ad-spend',
-        label: 'Chi phí quảng cáo',
+        label: 'Chi phí và lợi nhuận',
         moduleKey: 'ad_spend',
         privilegedOnly: true,
       },

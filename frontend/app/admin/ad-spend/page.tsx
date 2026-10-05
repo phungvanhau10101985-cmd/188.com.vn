@@ -542,7 +542,7 @@ export default function AdminAdSpendPage() {
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      <h1 className="text-xl font-bold text-slate-900">Chi phí quảng cáo</h1>
+      <h1 className="text-xl font-bold text-slate-900">Chi phí và lợi nhuận</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
         Chọn hôm nay, tuần hoặc tháng. Chi phí quảng cáo và lợi nhuận của kỳ đó hiện ngay bên dưới, màu cam. Bảng chi
         tiết nằm phía dưới.
