@@ -160,6 +160,24 @@ function formatRoas(value: number, spend: number): string {
   return new Intl.NumberFormat('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value / spend);
 }
 
+function formatReturnRate(returned: number, orders: number): string {
+  if (orders <= 0) return '—';
+  const pct = (returned / orders) * 100;
+  const rounded = Math.round(pct * 10) / 10;
+  const digits = Number.isInteger(rounded) ? 0 : 1;
+  return `${new Intl.NumberFormat('vi-VN', { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(rounded)}%`;
+}
+
+function returnRateLines(loading: boolean, summary: AdSpendProfitSummary | null): string[] | undefined {
+  if (loading || !summary) return undefined;
+  if (summary.orderCount <= 0) return ['Chưa có đơn đã cọc'];
+  if (summary.returnedCount <= 0) return [`0/${formatCount(summary.orderCount)} đơn đã cọc`];
+  return [
+    `${formatCount(summary.returnedCount)}/${formatCount(summary.orderCount)} đơn đã cọc`,
+    `Trừ ${formatMoney(summary.uncollected, 'VND')} phần chưa thu`,
+  ];
+}
+
 function sourceLabel(source: string): string {
   if (source === 'database') return 'Đang dùng khóa đã lưu trên quản trị.';
   if (source === 'environment') return 'Đang dùng biến môi trường trên server.';
@@ -544,8 +562,8 @@ export default function AdminAdSpendPage() {
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <h1 className="text-xl font-bold text-slate-900">Chi phí và lợi nhuận</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Chọn hôm nay, tuần hoặc tháng. Chi phí quảng cáo và lợi nhuận của kỳ đó hiện ngay bên dưới, màu cam. Bảng chi
-        tiết nằm phía dưới.
+        Chọn hôm nay, tuần hoặc tháng. Chi phí quảng cáo, lợi nhuận và tỷ lệ hoàn của kỳ đó hiện ngay bên dưới, màu cam.
+        Bảng chi tiết nằm phía dưới.
       </p>
 
       {error ? (
@@ -670,7 +688,7 @@ export default function AdminAdSpendPage() {
           />
           <HeroStat label="Lợi nhuận" value={profitText} hint={profitHint} negative={profitNegative} />
         </div>
-        <div className="grid grid-cols-2 gap-px border-t border-orange-100 bg-orange-100 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-px border-t border-orange-100 bg-orange-100 lg:grid-cols-5">
           <MiniStat label="Google Ads" value={platformText(focusSpend?.google, spendLoading)} lines={platformLines(focusSpend?.google)} />
           <MiniStat
             label="Facebook Ads"
@@ -680,13 +698,7 @@ export default function AdminAdSpendPage() {
           <MiniStat
             label="Doanh thu đã cọc"
             value={profitLoading ? 'Đang tính…' : formatMoney(profitForFocus?.revenue ?? 0, 'VND')}
-            hint={
-              profitLoading
-                ? undefined
-                : profitForFocus?.returnedCount
-                  ? `${profitForFocus.orderCount} đơn · trừ ${formatMoney(profitForFocus.uncollected, 'VND')} chưa cọc của ${profitForFocus.returnedCount} đơn hoàn`
-                  : `${profitForFocus?.orderCount ?? 0} đơn`
-            }
+            hint={profitLoading ? undefined : `${profitForFocus?.orderCount ?? 0} đơn đã cọc`}
           />
           <MiniStat
             label="Giá vốn"
@@ -694,6 +706,16 @@ export default function AdminAdSpendPage() {
               profitLoading ? 'Đang tính…' : profitForFocus?.cost == null ? '—' : formatMoney(profitForFocus.cost, 'VND')
             }
             hint={profitForFocus?.missing ? 'Còn đơn thiếu giá nhập' : 'Giá hàng và ship'}
+          />
+          <MiniStat
+            label="Tỷ lệ hoàn"
+            className="col-span-2 lg:col-span-1"
+            value={
+              profitLoading
+                ? 'Đang tính…'
+                : formatReturnRate(profitForFocus?.returnedCount ?? 0, profitForFocus?.orderCount ?? 0)
+            }
+            lines={returnRateLines(profitLoading, profitForFocus)}
           />
         </div>
       </section>
@@ -930,9 +952,21 @@ function HeroStat({
   );
 }
 
-function MiniStat({ label, value, hint, lines }: { label: string; value: string; hint?: string; lines?: string[] }) {
+function MiniStat({
+  label,
+  value,
+  hint,
+  lines,
+  className,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  lines?: string[];
+  className?: string;
+}) {
   return (
-    <div className="bg-white px-4 py-3">
+    <div className={`bg-white px-4 py-3 ${className || ''}`}>
       <p className="text-xs text-slate-500">{label}</p>
       <p className="mt-1 text-base font-bold tabular-nums text-[#ea580c]">{value}</p>
       {lines?.length ? (
