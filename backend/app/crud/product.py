@@ -6589,6 +6589,7 @@ def bulk_import_products(
         "by_name": {},
     }
     unmatched_cat3: List[str] = []
+    rating_group_cache: Dict[Any, Any] = {}
 
     sku_batch_reserved: Set[str] = set()
 
@@ -6901,6 +6902,8 @@ def bulk_import_products(
                 proposed_u = ""
 
         row_reserved_sku: Optional[str] = None
+        row_rating_warnings: List[str] = []
+        row_rating_cache: Dict[Any, Any] = {}
         try:
             row_slug_warning: Optional[str] = None
             resolved_cat_id: Optional[int] = None
@@ -6939,6 +6942,16 @@ def bulk_import_products(
 
                 resolved_cat_id = _resolve_category_id_from_row(product_data, cat3_idx)
                 product_data["category_id"] = resolved_cat_id
+                from app.services.import_category_rating import apply_import_category_rating_group
+
+                row_rating_warnings = apply_import_category_rating_group(
+                    db,
+                    product_data,
+                    cat3_idx=cat3_idx,
+                    cache=row_rating_cache,
+                    read_cache=rating_group_cache,
+                )
+                resolved_cat_id = product_data.get("category_id") or resolved_cat_id
 
                 product_data["code"] = final_sku
                 product_data["product_info"] = sync_internal_code_into_product_info(
@@ -6971,6 +6984,10 @@ def bulk_import_products(
 
             if row_slug_warning:
                 warnings.append(row_slug_warning)
+            if row_rating_warnings:
+                warnings.extend(row_rating_warnings)
+            if row_rating_cache:
+                rating_group_cache.update(row_rating_cache)
             if resolved_cat_id is None and (
                 product_data.get("category") or product_data.get("sub_subcategory")
             ):

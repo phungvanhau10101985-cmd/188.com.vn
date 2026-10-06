@@ -208,6 +208,69 @@ def _ensure_seo_cluster_for_cat3(db: Session, cat3: Category) -> None:
     cat3.seo_cluster_id = cluster.id
 
 
+def _dedicated_rating_group_id(raw: Optional[int]) -> int:
+    """Mã nhóm riêng của cat3 mới. Nhóm dùng chung (whitelist, 888, nhóm câu hỏi) thì bỏ."""
+    from app.services.product_rating_question_groups import (
+        RATING_GROUP_ID_UNASSIGNED,
+        RATING_GROUP_ID_WHITELIST,
+    )
+
+    try:
+        gid = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    reserved = set(RATING_GROUP_ID_WHITELIST) | {0, 88, 99, 100, 1000, RATING_GROUP_ID_UNASSIGNED}
+    if gid <= 0 or gid in reserved:
+        return 0
+    return gid
+
+
+def _choose_rating_group_id(db: Session, used: set, preferred: Optional[int]) -> int:
+    """Ưu tiên mã file import nếu chưa gắn danh mục nào; không được thì cấp mã mới."""
+    from app.services.rating_group_alloc import allocate_rating_group_id
+
+    pref = _dedicated_rating_group_id(preferred)
+    if pref:
+        owner = db.query(Category.id).filter(Category.rating_group_id == pref).first()
+        if owner is None:
+            used.add(pref)
+            return pref
+    return allocate_rating_group_id(db, used)
+
+
+def _seed_group_reviews(
+    db: Session,
+    gid: int,
+    *,
+    cat1: str,
+    cat2: str,
+    cat3: str,
+    warnings: List[str],
+    label: str,
+) -> int:
+    if int(gid or 0) <= 0:
+        return 0
+    try:
+        from app.services.rating_group_seed_reviews import seed_reviews_for_new_group
+
+        seeded = seed_reviews_for_new_group(
+            db,
+            int(gid),
+            cat1=cat1,
+            cat2=cat2,
+            cat3=cat3,
+        )
+    except Exception as exc:
+        logger.warning("%s: tạo đánh giá nhóm %s thất bại: %s", label, gid, exc)
+        warnings.append(f"{label}: chưa tạo được đánh giá cho nhóm {gid} — {exc}")
+        return 0
+    if seeded:
+        warnings.append(
+            f"{label}: đã tạo {seeded} đánh giá cho nhóm {gid} (theo «{cat3}»)."
+        )
+    return seeded
+
+
 def _create_category(
     db: Session,
     *,
@@ -217,6 +280,7 @@ def _create_category(
     leaf_slug: str,
     full_slug: str,
     used_rating_ids: set,
+    preferred_rating_group_id: Optional[int] = None,
 ) -> Category:
     name_n = _norm_label(name)[:255]
     parent_slug_parts: List[str] = []
@@ -232,8 +296,6 @@ def _create_category(
         c2s = parent_slug_parts[1] if len(parent_slug_parts) > 1 else "cat2"
         ext_base = f"{_AUTO_EXT_PREFIX}cat3__{c1s}__{c2s}__{leaf_slug}"
 
-    from app.services.rating_group_alloc import allocate_rating_group_id
-
     cat = Category(
         external_id=_unique_external_id(db, ext_base),
         parent_id=parent.id if parent else None,
@@ -245,7 +307,11 @@ def _create_category(
         is_active=True,
         # cat1/cat2 index; cat3 noindex (gom cluster)
         seo_index=(level in (1, 2)),
-        rating_group_id=allocate_rating_group_id(db, used_rating_ids) if level == 3 else None,
+        rating_group_id=(
+            _choose_rating_group_id(db, used_rating_ids, preferred_rating_group_id)
+            if level == 3
+            else None
+        ),
     )
     db.add(cat)
     db.flush()
@@ -257,6 +323,8 @@ def ensure_additive_category_triple(
     cat1: str,
     cat2: str,
     cat3: str,
+    *,
+    preferred_rating_group_id: Optional[int] = None,
 ) -> Tuple[Optional[Dict[str, str]], List[str]]:
     """
     Tìm hoặc tạo nhánh cat1/cat2/cat3 (additive only).
@@ -305,7 +373,14 @@ def ensure_additive_category_triple(
         s3 = _slug_key(n3)
         fs3 = f"{(c1.slug or '').strip()}/{(c2.slug or '').strip()}/{s3}"
         c3 = _create_category(
-            db, level=3, name=n3, parent=c2, leaf_slug=s3, full_slug=fs3, used_rating_ids=used_rating_ids
+            db,
+            level=3,
+            name=n3,
+            parent=c2,
+            leaf_slug=s3,
+            full_slug=fs3,
+            used_rating_ids=used_rating_ids,
+            preferred_rating_group_id=preferred_rating_group_id,
         )
         created.append(3)
         try:
@@ -317,26 +392,27 @@ def ensure_additive_category_triple(
             f"taxonomy_auto_create: đã tạo cat3 «{c3.name}» dưới «{c1.name} / {c2.name}» — nhóm đánh giá {c3.rating_group_id}."
         )
         if c3.rating_group_id:
-            try:
-                from app.services.rating_group_seed_reviews import seed_reviews_for_new_group
-
-                seeded = seed_reviews_for_new_group(
-                    db,
-                    int(c3.rating_group_id),
-                    cat1=(c1.name or n1),
-                    cat2=(c2.name or n2),
-                    cat3=(c3.name or n3),
-                )
-                if seeded:
-                    warnings.append(
-                        f"taxonomy_auto_create: đã tạo {seeded} đánh giá cho nhóm {c3.rating_group_id} "
-                        f"(theo «{c3.name}»)."
-                    )
-            except Exception as exc:
-                logger.warning("taxonomy_auto_create: tạo đánh giá nhóm mới thất bại: %s", exc)
-                warnings.append(f"taxonomy_auto_create: chưa tạo được đánh giá cho nhóm {c3.rating_group_id} — {exc}")
+            _seed_group_reviews(
+                db,
+                int(c3.rating_group_id),
+                cat1=(c1.name or n1),
+                cat2=(c2.name or n2),
+                cat3=(c3.name or n3),
+                warnings=warnings,
+                label="taxonomy_auto_create",
+            )
     else:
         n3 = (c3.name or n3).strip()
+        if c3.rating_group_id:
+            _seed_group_reviews(
+                db,
+                int(c3.rating_group_id),
+                cat1=(c1.name or n1),
+                cat2=(c2.name or n2),
+                cat3=n3,
+                warnings=warnings,
+                label="taxonomy_auto_create",
+            )
 
     try:
         db.flush()
