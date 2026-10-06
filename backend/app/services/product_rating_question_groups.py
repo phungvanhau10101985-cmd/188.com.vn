@@ -16,6 +16,8 @@ cho luồng import link — suy luận từ tên hiển thị + taxonomy đầy 
 
 - Không khớp luật từ-khóa/họ hàng → gọi DeepSeek (rồi Gemini nếu cần) để chọn rating_group_id + question_group_id trong whitelist.
 - Nếu AI cũng không gán được → group_rating = RATING_GROUP_ID_UNASSIGNED (888).
+- Danh mục cấp 3 vừa tạo lúc cào có ``_taxonomy_rating_group_id`` → dùng mã đó (không gọi AI).
+  Nhóm câu hỏi vẫn lấy nhóm có sẵn theo tên (88 / 99 / 100).
 """
 from __future__ import annotations
 
@@ -462,25 +464,55 @@ def _ai_fallback_import_groups(
     return ai_r or 0, ai_q, warns
 
 
+def _positive_group_id(raw: Any) -> int:
+    if raw is None or isinstance(raw, bool):
+        return 0
+    try:
+        val = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+    if val in (0, 1000, RATING_GROUP_ID_UNASSIGNED) or val < 0:
+        return 0
+    return val
+
+
 def apply_import_rating_question_groups_to_product_data(
     product_data: dict,
     warnings: Optional[List[str]] = None,
 ) -> None:
     """Gán group_rating + group_question: luật từ-khóa trước, không khớp → DeepSeek/Gemini.
 
-    Nếu SP vừa được bổ sung taxonomy mới (``_taxonomy_auto_created_levels``) → để trống:
-    group_rating = 888, group_question = 0 (không suy luận / không gọi AI).
+    Danh mục tạo lúc cào mang ``_taxonomy_rating_group_id`` (mã cat3, không trùng nhóm cũ):
+    dùng mã đó, không gọi AI. Nhóm câu hỏi vẫn là nhóm có sẵn theo tên (88 nữ / 100 nam / 99 còn lại).
     """
     if not isinstance(product_data, dict):
         return
 
     auto_lv = str(product_data.get("_taxonomy_auto_created_levels") or "").strip()
-    if auto_lv:
+    assigned = _positive_group_id(product_data.get("_taxonomy_rating_group_id"))
+    if auto_lv or assigned:
+        pname = str(product_data.get("name") or "").strip()
+        qid = infer_question_group_id_from_product_name(pname)
+        product_data["group_question"] = qid
+        if assigned:
+            product_data["group_rating"] = assigned
+            if warnings is not None:
+                if auto_lv:
+                    warnings.append(
+                        f"import_groups: danh mục mới cấp [{auto_lv}] — nhóm đánh giá {assigned} "
+                        f"(mã riêng, không trùng nhóm cũ); nhóm câu hỏi {qid} (nhóm có sẵn)."
+                    )
+                else:
+                    warnings.append(
+                        f"import_groups: danh mục đã có nhóm đánh giá {assigned}; "
+                        f"nhóm câu hỏi {qid} (nhóm có sẵn)."
+                    )
+            return
         product_data["group_rating"] = RATING_GROUP_ID_UNASSIGNED
-        product_data["group_question"] = 0
         if warnings is not None:
             warnings.append(
-                f"import_groups: taxonomy vừa tạo cấp [{auto_lv}] — để trống nhóm đánh giá (888) và nhóm câu hỏi (0)."
+                f"import_groups: taxonomy vừa tạo cấp [{auto_lv}] nhưng chưa có mã nhóm đánh giá — "
+                f"để 888; nhóm câu hỏi {qid} (nhóm có sẵn)."
             )
         return
 

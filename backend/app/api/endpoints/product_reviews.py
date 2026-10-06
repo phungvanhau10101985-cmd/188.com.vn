@@ -235,6 +235,18 @@ def admin_list_reviews(
     return {"items": result, "total": total, "skip": skip, "limit": limit}
 
 
+@router.get("/admin/groups-without-reviews")
+def admin_groups_without_reviews(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(require_module_permission("product_reviews")),
+):
+    """Nhóm đánh giá tạo theo danh mục mới, chưa có đánh giá nào mang mã đó."""
+    from app.services.rating_group_alloc import list_rating_groups_without_reviews
+
+    items = list_rating_groups_without_reviews(db)
+    return {"items": items, "total": len(items)}
+
+
 @router.post("/admin/", response_model=ProductReviewResponse)
 def admin_create_review(
     data: ProductReviewCreate,

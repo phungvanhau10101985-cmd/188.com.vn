@@ -435,6 +435,27 @@ class MigrationManager:
             logger.error(f"❌ _sync_table_columns({table_name}) failed: {str(e)}")
             return False
 
+    def migrate_category_rating_group_unique(self) -> bool:
+        """Unique index cho categories.rating_group_id (nhiều NULL vẫn hợp lệ)."""
+        try:
+            inspector = inspect(engine)
+            if "categories" not in inspector.get_table_names():
+                return True
+            columns = {col["name"] for col in inspector.get_columns("categories")}
+            if "rating_group_id" not in columns:
+                return True
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_categories_rating_group_id "
+                        "ON categories (rating_group_id)"
+                    )
+                )
+            return True
+        except Exception as e:
+            logger.warning("  migrate_category_rating_group_unique: %s", e)
+            return False
+
     def migrate_auth_action_challenge_public_ids(self) -> bool:
         """Backfill opaque challenge identifiers for upgrades from early auth hardening builds."""
         try:
@@ -1462,6 +1483,7 @@ class MigrationManager:
         results['hardening_reconcile_readiness'] = self.migrate_hardening_unique_indexes()
         # 8. Bảng categories/products (taxonomy + product metadata)
         results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
+        results['categories_rating_group_unique'] = self.migrate_category_rating_group_unique()
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
         results['product_import_cost_numeric'] = self.migrate_product_import_cost_numeric()
         results['product_deletions_create'] = self._create_table_if_not_exists(

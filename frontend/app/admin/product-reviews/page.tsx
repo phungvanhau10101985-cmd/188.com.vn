@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { adminProductReviewsAPI, type ProductReviewAdmin, type ProductReviewsListResponse } from '@/lib/admin-api';
+import {
+  adminProductReviewsAPI,
+  type ProductReviewAdmin,
+  type ProductReviewsListResponse,
+  type RatingGroupWithoutReviews,
+} from '@/lib/admin-api';
 import { useDebouncedRowSave } from '@/lib/use-debounced-row-save';
 import { pruneRowEditAfterSave } from '@/lib/admin-row-edit-utils';
 import ViewReviewModal from './components/ViewReviewModal';
@@ -26,6 +31,9 @@ export default function AdminProductReviewsPage() {
   const [data, setData] = useState<ProductReviewsListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [searchGroup, setSearchGroup] = useState('');
+  const [pendingGroups, setPendingGroups] = useState<RatingGroupWithoutReviews[] | null>(null);
+  const [pendingError, setPendingError] = useState('');
+  const [pendingLoading, setPendingLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -46,6 +54,20 @@ export default function AdminProductReviewsPage() {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 3000);
   };
+
+  const fetchPendingGroups = useCallback(async () => {
+    setPendingLoading(true);
+    setPendingError('');
+    try {
+      const res = await adminProductReviewsAPI.groupsWithoutReviews();
+      setPendingGroups(res.items || []);
+    } catch {
+      setPendingError('Không tải được danh sách nhóm chưa có đánh giá.');
+      setPendingGroups(null);
+    } finally {
+      setPendingLoading(false);
+    }
+  }, []);
 
   const fetchList = useCallback(async (pageOverride?: number, options?: { silent?: boolean }) => {
     const p = typeof pageOverride === 'number' ? pageOverride : page;
@@ -69,6 +91,10 @@ export default function AdminProductReviewsPage() {
     fetchList();
   }, [fetchList]);
 
+  useEffect(() => {
+    fetchPendingGroups();
+  }, [fetchPendingGroups]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
@@ -84,6 +110,7 @@ export default function AdminProductReviewsPage() {
       const created = (result as { created?: number })?.created ?? 0;
       showToast('ok', `Import xong: ${created} đánh giá`);
       await fetchList();
+      await fetchPendingGroups();
     } catch (err: unknown) {
       showToast('err', (err as Error)?.message || 'Import thất bại');
     } finally {
@@ -103,6 +130,7 @@ export default function AdminProductReviewsPage() {
       });
       showToast('ok', 'Đã xóa');
       await fetchList(undefined, { silent: true });
+      await fetchPendingGroups();
     } catch {
       showToast('err', 'Xóa thất bại');
     }
@@ -124,6 +152,7 @@ export default function AdminProductReviewsPage() {
       showToast('ok', `Đã xóa ${res.deleted} đánh giá`);
       setPage(1);
       await fetchList(1);
+      await fetchPendingGroups();
     } catch {
       showToast('err', 'Xóa hết thất bại');
     } finally {
@@ -205,6 +234,9 @@ export default function AdminProductReviewsPage() {
       });
       setSavedFlashId(r.id);
       setTimeout(() => setSavedFlashId((cur) => (cur === r.id ? null : cur)), 1500);
+      if (payload.group !== (r.group ?? 0)) {
+        void fetchPendingGroups();
+      }
       if (!opts?.silent) showToast('ok', 'Đã lưu');
     } catch {
       showToast('err', 'Lưu thất bại');
@@ -217,7 +249,7 @@ export default function AdminProductReviewsPage() {
         if (latest) void handleSaveRow(latest, { silent: true });
       }
     }
-  }, [buildReviewPayload, reviewRowDirty]);
+  }, [buildReviewPayload, reviewRowDirty, fetchPendingGroups]);
 
   const triggerAutoSave = useCallback((r: ProductReviewAdmin) => {
     if (composingRef.current[r.id]) return;
@@ -307,6 +339,68 @@ export default function AdminProductReviewsPage() {
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           <strong>Logic hiển thị:</strong> Đánh giá từ khách hàng (product_id có) → hiển thị trên sản phẩm đã mua.
           Đánh giá import (product_id trống) → hiển thị trên sản phẩm có nhóm đánh giá (group_rating) trùng với cột Nhóm.
+        </div>
+
+        <div className="mb-4 p-4 bg-white border border-gray-200 rounded-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h2 className="text-sm font-semibold text-gray-900">Nhóm chưa có đánh giá tạo sẵn</h2>
+            <button
+              type="button"
+              onClick={() => fetchPendingGroups()}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              Tải lại
+            </button>
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Mỗi danh mục cấp 3 mới nhận một mã nhóm đánh giá riêng và 100 đánh giá viết theo đúng loại hàng đó.
+            Danh sách dưới đây là nhóm cấp 3 chưa có đánh giá nào. Nhóm câu hỏi vẫn dùng nhóm sẵn (88 nữ, 100 nam, 99 còn lại).
+          </p>
+          {pendingLoading ? (
+            <p className="text-sm text-gray-500">Đang tải nhóm...</p>
+          ) : pendingError ? (
+            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+              {pendingError}{' '}
+              <button type="button" onClick={() => fetchPendingGroups()} className="underline font-medium">
+                Thử lại
+              </button>
+            </div>
+          ) : !pendingGroups?.length ? (
+            <p className="text-sm text-gray-500">Không có nhóm nào thiếu đánh giá tạo sẵn.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-200 text-left text-gray-700">
+                    <th className="py-2 pr-3 font-semibold">Mã nhóm</th>
+                    <th className="py-2 pr-3 font-semibold">Cấp</th>
+                    <th className="py-2 pr-3 font-semibold">Danh mục</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingGroups.map((g) => (
+                    <tr key={`${g.category_id}-${g.rating_group_id}`} className="border-b border-gray-100">
+                      <td className="py-2 pr-3">
+                        <button
+                          type="button"
+                          className="font-medium text-blue-700 hover:underline"
+                          onClick={() => {
+                            setSearchGroup(String(g.rating_group_id));
+                            setPage(1);
+                          }}
+                          title="Lọc danh sách đánh giá theo mã này"
+                        >
+                          {g.rating_group_id}
+                        </button>
+                      </td>
+                      <td className="py-2 pr-3">Cấp {g.level}</td>
+                      <td className="py-2 pr-3">{g.category_path || g.category_name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">

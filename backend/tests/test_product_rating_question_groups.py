@@ -183,7 +183,7 @@ def test_extract_import_group_ids_from_model_text():
     assert rid is None and qid is None
 
 
-def test_apply_import_skips_groups_when_taxonomy_auto_created():
+def test_apply_import_uses_new_rating_group_and_existing_question_group():
     pd = {
         "name": "Sản phẩm ngành mới nữ",
         "category": "Ngành mới Nữ",
@@ -191,11 +191,28 @@ def test_apply_import_skips_groups_when_taxonomy_auto_created():
         "sub_subcategory": "Chi tiết mới",
         "group_rating": 0,
         "_taxonomy_auto_created_levels": "1,2,3",
+        "_taxonomy_rating_group_id": 101,
     }
     with patch("app.services.product_rating_question_groups._ai_fallback_import_groups") as ai_mock:
         warns: list[str] = []
         apply_import_rating_question_groups_to_product_data(pd, warns)
         ai_mock.assert_not_called()
-    assert pd["group_rating"] == 888
-    assert pd["group_question"] == 0
-    assert any("để trống nhóm" in w for w in warns)
+    assert pd["group_rating"] == 101
+    assert pd["group_question"] == 88
+    assert any("nhóm câu hỏi 88" in w for w in warns)
+
+
+def test_apply_import_reuses_category_rating_group_without_new_levels():
+    pd = {
+        "name": "Vòng cổ chó da nam",
+        "category": "Thú cưng",
+        "subcategory": "Phụ kiện chó",
+        "sub_subcategory": "Vòng cổ chó da",
+        "group_rating": 0,
+        "_taxonomy_rating_group_id": "104",
+    }
+    with patch("app.services.product_rating_question_groups._ai_fallback_import_groups") as ai_mock:
+        apply_import_rating_question_groups_to_product_data(pd)
+        ai_mock.assert_not_called()
+    assert pd["group_rating"] == 104
+    assert pd["group_question"] == 100

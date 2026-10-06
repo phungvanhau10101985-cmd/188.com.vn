@@ -216,6 +216,7 @@ def _create_category(
     parent: Optional[Category],
     leaf_slug: str,
     full_slug: str,
+    used_rating_ids: set,
 ) -> Category:
     name_n = _norm_label(name)[:255]
     parent_slug_parts: List[str] = []
@@ -231,6 +232,8 @@ def _create_category(
         c2s = parent_slug_parts[1] if len(parent_slug_parts) > 1 else "cat2"
         ext_base = f"{_AUTO_EXT_PREFIX}cat3__{c1s}__{c2s}__{leaf_slug}"
 
+    from app.services.rating_group_alloc import allocate_rating_group_id
+
     cat = Category(
         external_id=_unique_external_id(db, ext_base),
         parent_id=parent.id if parent else None,
@@ -242,6 +245,7 @@ def _create_category(
         is_active=True,
         # cat1/cat2 index; cat3 noindex (gom cluster)
         seo_index=(level in (1, 2)),
+        rating_group_id=allocate_rating_group_id(db, used_rating_ids) if level == 3 else None,
     )
     db.add(cat)
     db.flush()
@@ -268,11 +272,16 @@ def ensure_additive_category_triple(
 
     n1, n2, n3 = _norm_label(cat1), _norm_label(cat2), _norm_label(cat3)
     created: List[int] = []
+    from app.services.rating_group_alloc import used_rating_group_ids
+
+    used_rating_ids = used_rating_group_ids(db)
 
     c1 = _find_level1(db, n1)
     if c1 is None:
         s1 = _slug_key(n1)
-        c1 = _create_category(db, level=1, name=n1, parent=None, leaf_slug=s1, full_slug=s1)
+        c1 = _create_category(
+            db, level=1, name=n1, parent=None, leaf_slug=s1, full_slug=s1, used_rating_ids=used_rating_ids
+        )
         created.append(1)
         warnings.append(f"taxonomy_auto_create: đã tạo cat1 «{c1.name}».")
     else:
@@ -283,7 +292,9 @@ def ensure_additive_category_triple(
     if c2 is None:
         s2 = _slug_key(n2)
         fs2 = f"{(c1.slug or _slug_key(n1)).strip()}/{s2}"
-        c2 = _create_category(db, level=2, name=n2, parent=c1, leaf_slug=s2, full_slug=fs2)
+        c2 = _create_category(
+            db, level=2, name=n2, parent=c1, leaf_slug=s2, full_slug=fs2, used_rating_ids=used_rating_ids
+        )
         created.append(2)
         warnings.append(f"taxonomy_auto_create: đã tạo cat2 «{c2.name}» dưới «{c1.name}».")
     else:
@@ -293,14 +304,37 @@ def ensure_additive_category_triple(
     if c3 is None:
         s3 = _slug_key(n3)
         fs3 = f"{(c1.slug or '').strip()}/{(c2.slug or '').strip()}/{s3}"
-        c3 = _create_category(db, level=3, name=n3, parent=c2, leaf_slug=s3, full_slug=fs3)
+        c3 = _create_category(
+            db, level=3, name=n3, parent=c2, leaf_slug=s3, full_slug=fs3, used_rating_ids=used_rating_ids
+        )
         created.append(3)
         try:
             _ensure_seo_cluster_for_cat3(db, c3)
         except Exception as exc:
             logger.warning("taxonomy_auto_create: tạo seo_cluster thất bại: %s", exc)
             warnings.append(f"taxonomy_auto_create: cat3 đã tạo nhưng cluster lỗi — {exc}")
-        warnings.append(f"taxonomy_auto_create: đã tạo cat3 «{c3.name}» dưới «{c1.name} / {c2.name}».")
+        warnings.append(
+            f"taxonomy_auto_create: đã tạo cat3 «{c3.name}» dưới «{c1.name} / {c2.name}» — nhóm đánh giá {c3.rating_group_id}."
+        )
+        if c3.rating_group_id:
+            try:
+                from app.services.rating_group_seed_reviews import seed_reviews_for_new_group
+
+                seeded = seed_reviews_for_new_group(
+                    db,
+                    int(c3.rating_group_id),
+                    cat1=(c1.name or n1),
+                    cat2=(c2.name or n2),
+                    cat3=(c3.name or n3),
+                )
+                if seeded:
+                    warnings.append(
+                        f"taxonomy_auto_create: đã tạo {seeded} đánh giá cho nhóm {c3.rating_group_id} "
+                        f"(theo «{c3.name}»)."
+                    )
+            except Exception as exc:
+                logger.warning("taxonomy_auto_create: tạo đánh giá nhóm mới thất bại: %s", exc)
+                warnings.append(f"taxonomy_auto_create: chưa tạo được đánh giá cho nhóm {c3.rating_group_id} — {exc}")
     else:
         n3 = (c3.name or n3).strip()
 
@@ -330,6 +364,8 @@ def ensure_additive_category_triple(
         "created_levels": ",".join(str(x) for x in created),
         "category_id": str(c3.id),
     }
+    if c3.rating_group_id:
+        out["rating_group_id"] = str(int(c3.rating_group_id))
     if not created:
         warnings.append(
             f"taxonomy_auto_create: dùng nhánh có sẵn «{out['cat1']} / {out['cat2']} / {out['cat3']}»."

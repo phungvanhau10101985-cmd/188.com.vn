@@ -397,6 +397,8 @@ def load_active_category_triples(db: Session) -> List[Dict[str, str]]:
                 "full_slug": (c3.full_slug or "").strip(),
             }
         )
+        if c3.rating_group_id:
+            out[-1]["rating_group_id"] = str(int(c3.rating_group_id))
     # Đọc xong thì đóng transaction — DeepSeek/HTTP phía sau có thể rất lâu.
     try:
         db.commit()
@@ -712,13 +714,16 @@ def _try_auto_create_taxonomy_triple(
     warnings.extend(tw)
     if not ensured:
         return None, warnings
-    return {
+    created = {
         "cat1": ensured["cat1"],
         "cat2": ensured["cat2"],
         "cat3": ensured["cat3"],
         "full_slug": ensured.get("full_slug") or "",
         "created_levels": str(ensured.get("created_levels") or ""),
-    }, warnings
+    }
+    if str(ensured.get("rating_group_id") or "").strip():
+        created["rating_group_id"] = str(ensured.get("rating_group_id")).strip()
+    return created, warnings
 
 
 def classify_product_taxonomy_deepseek(
@@ -1559,14 +1564,18 @@ def apply_deepseek_taxonomy_to_product_data(db: Session, product_data: Dict[str,
 
     product_data.pop("taxonomy_import_error", None)
     product_data.pop("_taxonomy_auto_created_levels", None)
+    product_data.pop("_taxonomy_rating_group_id", None)
 
     product_data["category"] = triple["cat1"]
     product_data["subcategory"] = triple["cat2"]
     product_data["sub_subcategory"] = triple["cat3"]
     created_lv = str(triple.get("created_levels") or "").strip()
     if created_lv:
-        # Danh mục vừa bổ sung — để trống nhóm đánh giá/câu hỏi (admin gán sau).
         product_data["_taxonomy_auto_created_levels"] = created_lv
+    rating_gid = str(triple.get("rating_group_id") or "").strip()
+    if rating_gid:
+        # Danh mục tạo lúc cào đã có mã nhóm đánh giá riêng — sản phẩm dùng mã của cat3.
+        product_data["_taxonomy_rating_group_id"] = rating_gid
     fs = (triple.get("full_slug") or "").strip()
     if fs:
         product_data["slug_seo"] = fs

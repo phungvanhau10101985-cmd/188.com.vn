@@ -36,6 +36,8 @@ class Category(Base):
     size_guide_image_url = Column(String(800), nullable=True)
     sort_order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)
+    # Nhóm đánh giá riêng khi tạo danh mục cấp 3 lúc cào/import. NULL = không phải cat3 mới.
+    rating_group_id = Column(Integer, nullable=True, unique=True, index=True)
     seo_index = Column(Boolean, default=True, nullable=False)
     seo_cluster_id = Column(
         Integer,

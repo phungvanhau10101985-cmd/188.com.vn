@@ -4004,7 +4004,21 @@ export interface ProductReviewsListResponse {
   limit: number;
 }
 
+export interface RatingGroupWithoutReviews {
+  rating_group_id: number;
+  level: number;
+  category_id: number;
+  category_name: string;
+  category_path: string;
+  full_slug: string;
+}
+
 export const adminProductReviewsAPI = {
+  groupsWithoutReviews: () =>
+    fetchAdmin<{ items: RatingGroupWithoutReviews[]; total: number }>(
+      '/product-reviews/admin/groups-without-reviews',
+    ),
+
   getList: (params?: { skip?: number; limit?: number; search_group?: string }) => {
     const sp = new URLSearchParams();
     sp.set('skip', String(params?.skip ?? 0));
