@@ -419,6 +419,13 @@ export interface AdminOrderListResponse {
   pagination: AdminOrderListPagination;
 }
 
+export interface DepositPercentStat {
+  percent: number;
+  orders: number;
+  revenue: number;
+  amount: number;
+}
+
 export interface AdminOrderStats {
   total_orders: number;
   total_revenue: number;
@@ -436,6 +443,7 @@ export interface AdminOrderStats {
   deposited_orders?: number;
   deposited_revenue?: number;
   deposited_amount?: number;
+  deposit_percent_breakdown?: DepositPercentStat[];
   period_label?: string | null;
   date_from?: string | null;
   date_to?: string | null;

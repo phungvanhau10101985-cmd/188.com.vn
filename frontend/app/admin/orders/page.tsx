@@ -174,6 +174,55 @@ const EMPTY_REVENUE_FILTER: RevenueFilterState = {
 
 const ADMIN_ORDERS_DEFAULT_PAGE_SIZE = 100;
 
+function formatSharePercent(part: number, whole: number): string {
+  if (whole <= 0) return '—';
+  const value = Math.round((part * 1000) / whole) / 10;
+  return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+function DepositPercentStats({ report }: { report: AdminOrderStats }) {
+  const deposited = report.deposited_orders ?? 0;
+  const total = report.total_orders ?? 0;
+  const rows = [...(report.deposit_percent_breakdown ?? [])].sort((a, b) => {
+    if (a.percent === 0) return 1;
+    if (b.percent === 0) return -1;
+    return a.percent - b.percent;
+  });
+
+  return (
+    <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+        <h3 className="text-sm font-semibold text-gray-900">Thống kê % đặt cọc</h3>
+        <p className="text-sm text-gray-600">
+          Tỷ lệ đơn đã cọc:{' '}
+          <span className="font-semibold text-blue-700">{formatSharePercent(deposited, total)}</span>
+          {total > 0 ? ` (${deposited}/${total} đơn)` : null}
+        </p>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-gray-500">Chưa có đơn đã đặt cọc trong kỳ này.</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {rows.map((row) => (
+            <div key={row.percent} className="rounded-lg border border-blue-100 bg-white p-3">
+              <p className="text-gray-500 text-sm">{row.percent > 0 ? `Cọc ${row.percent}%` : 'Chưa rõ %'}</p>
+              <p className="text-xl font-bold text-blue-700">{row.orders} đơn</p>
+              <p className="text-xs text-gray-500 mt-1">{formatSharePercent(row.orders, deposited)} số đơn đã cọc</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Doanh thu:{' '}
+                <span className="font-medium text-gray-800">{formatVnd(Number(row.revenue))}</span>
+              </p>
+              <p className="text-xs text-gray-600">
+                Tiền cọc: <span className="font-medium text-gray-800">{formatVnd(Number(row.amount))}</span>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function resolveAdminOrderStatusParam(activeTab: string, statusFilter: string): string | undefined {
   const key = statusFilter || activeTab;
   if (!key || key === 'all') return undefined;
@@ -1057,6 +1106,7 @@ export default function AdminOrdersPage() {
                     )}
                   </div>
                 </div>
+                <DepositPercentStats report={revenueReport} />
                 <p className="text-sm text-gray-600 mt-3">
                   Doanh thu và tổng đơn đã trừ đơn đã hủy:{' '}
                   <span className="font-semibold text-gray-800">

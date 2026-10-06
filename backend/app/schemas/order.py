@@ -234,6 +234,14 @@ class AdminOrderDepositConfirmOut(BaseModel):
     order: AdminOrderResponse
     deposit_email: DepositConfirmedEmailOut
 
+class DepositPercentStat(BaseModel):
+    """Một mức % đặt cọc trong kỳ (chỉ đơn đã cọc, đã khử trùng)."""
+    percent: int = 0
+    orders: int = 0
+    revenue: Decimal = Decimal("0")
+    amount: Decimal = Decimal("0")
+
+
 class AdminOrderStats(BaseModel):
     """Order statistics for admin dashboard"""
     total_orders: int
@@ -252,6 +260,7 @@ class AdminOrderStats(BaseModel):
     deposited_orders: int = 0
     deposited_revenue: Decimal = Decimal("0")
     deposited_amount: Decimal = Decimal("0")
+    deposit_percent_breakdown: List[DepositPercentStat] = []
     period_label: Optional[str] = None
     date_from: Optional[str] = None
     date_to: Optional[str] = None

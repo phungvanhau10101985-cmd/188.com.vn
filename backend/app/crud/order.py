@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import or_, func, desc
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import logging
 
 from app.core.config import settings
@@ -839,6 +839,51 @@ def _collected_deposit(order: Order) -> Decimal:
     return Decimal(order.deposit_amount or 0)
 
 
+def deposit_percent_of_order(order: Order) -> int:
+    """% cọc đã chốt trên đơn: ưu tiên cột lưu, rồi loại cọc, rồi suy từ tiền đã thu."""
+    pct = int(getattr(order, "deposit_percentage", None) or 0)
+    if pct >= 100:
+        return 100
+    if 0 < pct < 100:
+        return pct
+    deposit_type = _enum_value(getattr(order, "deposit_type", None))
+    if deposit_type == DepositType.PERCENT_100.value:
+        return 100
+    if deposit_type == DepositType.PERCENT_30.value:
+        return 30
+    paid = _collected_deposit(order)
+    shipping = Decimal(getattr(order, "shipping_fee", 0) or 0)
+    total = Decimal(order.total_amount or 0)
+    goods = total - shipping
+    base = goods if goods > 0 else total
+    if base > 0 and paid > 0:
+        inferred = int((paid * Decimal(100) / base).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        if inferred >= 100:
+            return 100
+        if inferred > 0:
+            return inferred
+    return 0
+
+
+def deposit_percent_breakdown(orders: List[Order]) -> List[Dict[str, Any]]:
+    buckets: Dict[int, Dict[str, Any]] = {}
+    for order in orders:
+        percent = deposit_percent_of_order(order)
+        bucket = buckets.get(percent)
+        if bucket is None:
+            bucket = {
+                "percent": percent,
+                "orders": 0,
+                "revenue": Decimal("0"),
+                "amount": Decimal("0"),
+            }
+            buckets[percent] = bucket
+        bucket["orders"] += 1
+        bucket["revenue"] += Decimal(order.total_amount or 0)
+        bucket["amount"] += _collected_deposit(order)
+    return sorted(buckets.values(), key=lambda row: (row["percent"] == 0, row["percent"]))
+
+
 def get_order_stats(
     db: Session,
     period: str = "today",
@@ -916,6 +961,7 @@ def get_order_stats(
         (_collected_deposit(order) for order in deposited_orders_list),
         Decimal("0"),
     )
+    deposit_by_percent = deposit_percent_breakdown(deposited_orders_list)
 
     return {
         "total_orders": total_orders,
@@ -924,6 +970,7 @@ def get_order_stats(
         "deposited_orders": deposited_orders,
         "deposited_revenue": deposited_revenue,
         "deposited_amount": deposited_amount,
+        "deposit_percent_breakdown": deposit_by_percent,
         "period_label": period_label,
         "date_from": iso_from,
         "date_to": iso_to,

@@ -55,6 +55,8 @@ def test_get_order_stats_deposited_metrics():
             customer_address="DN",
             total_amount=Decimal("2000000"),
             requires_deposit=True,
+            deposit_type=DepositType.PERCENT_30.value,
+            deposit_percentage=30,
             deposit_amount=Decimal("600000"),
             deposit_paid=Decimal("600000"),
             deposit_paid_at=now,
@@ -71,6 +73,8 @@ def test_get_order_stats_deposited_metrics():
             customer_address="HP",
             total_amount=Decimal("1500000"),
             requires_deposit=True,
+            deposit_type=DepositType.PERCENT_100.value,
+            deposit_percentage=100,
             deposit_amount=Decimal("1500000"),
             deposit_paid=Decimal("1500000"),
             deposit_paid_at=now,
@@ -112,6 +116,14 @@ def test_get_order_stats_deposited_metrics():
         assert schema_stats.deposited_amount == Decimal("2100000")
         assert schema_stats.waiting_deposit_orders == 1
         assert schema_stats.cancelled_orders == 1
+        by_percent = {row.percent: row for row in schema_stats.deposit_percent_breakdown}
+        assert set(by_percent) == {30, 100}
+        assert by_percent[30].orders == 1
+        assert by_percent[30].revenue == Decimal("2000000")
+        assert by_percent[30].amount == Decimal("600000")
+        assert by_percent[100].orders == 1
+        assert by_percent[100].revenue == Decimal("1500000")
+        assert by_percent[100].amount == Decimal("1500000")
 
     finally:
         db.close()
@@ -205,6 +217,10 @@ def test_get_order_stats_counts_duplicate_orders_once():
         assert stats.deposited_amount == Decimal("648000")
         assert stats.waiting_deposit_orders == 3
         assert stats.deposit_paid_orders == 1
+        assert len(stats.deposit_percent_breakdown) == 1
+        assert stats.deposit_percent_breakdown[0].percent == 30
+        assert stats.deposit_percent_breakdown[0].orders == 1
+        assert stats.deposit_percent_breakdown[0].amount == Decimal("648000")
 
     finally:
         db.close()
