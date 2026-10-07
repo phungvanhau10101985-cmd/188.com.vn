@@ -37,6 +37,13 @@ def persist_import_job(job_id: str, state: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def import_job_report_path(job_id: str) -> Optional[Path]:
+    """File Excel báo cáo của một job import. None nếu job_id không hợp lệ."""
+    if not _SAFE_JOB_ID.match(job_id or ""):
+        return None
+    return _jobs_root() / f"{job_id}-report.xlsx"
+
+
 def load_import_job(job_id: str) -> Optional[Dict[str, Any]]:
     if not _SAFE_JOB_ID.match(job_id or ""):
         return None

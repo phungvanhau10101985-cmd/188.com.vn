@@ -25,6 +25,9 @@ else:
     engine_kwargs["pool_timeout"] = settings.DATABASE_POOL_TIMEOUT
     # Trả connection về pool sạch sau mỗi request — giảm «idle in transaction» tích tụ.
     engine_kwargs["pool_reset_on_return"] = "rollback"
+    # executemany gộp thành INSERT nhiều dòng (cùng kiểu lô của NanoAI).
+    engine_kwargs["executemany_mode"] = "values_plus_batch"
+    engine_kwargs["executemany_values_page_size"] = 200
     # Giữ TCP sống để giảm lỗi "SSL connection has been closed unexpectedly"
     # khi kết nối idle lâu qua proxy/LB.
     engine_kwargs["connect_args"] = apply_postgres_connect_timeouts(

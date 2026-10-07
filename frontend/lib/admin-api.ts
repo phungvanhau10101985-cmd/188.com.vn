@@ -973,6 +973,8 @@ export interface AdminImportExcelJob {
     skipped?: string[] | null;
   } | null;
   detail?: string | null;
+  /** Có file Excel báo cáo (lý do bỏ qua / lỗi / cảnh báo) để tải. */
+  report_ready?: boolean;
   /** Kèm detail khi lỗi (dòng trong file / traceback rút gọn) */
   errors?: string[] | null;
   warnings?: string[] | null;
@@ -1897,6 +1899,12 @@ export const adminProductAPI = {
     fetchAdmin<AdminImportExcelJob>(
       `/import-export/import/excel/job/${encodeURIComponent(jobId)}/cancel`,
       { method: 'POST', timeoutMs: 30_000 },
+    ),
+
+  downloadImportExcelJobReport: (jobId: string) =>
+    downloadAdminGetXlsx(
+      `/import-export/import/excel/job/${encodeURIComponent(jobId)}/report`,
+      `bao-cao-import-${jobId.slice(0, 8)}.xlsx`,
     ),
 
   startImport1688: (url: string, downloadImages = true, source?: '1688' | 'vipomall' | 'pandamall') =>

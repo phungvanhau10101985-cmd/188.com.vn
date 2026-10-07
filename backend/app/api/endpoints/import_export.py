@@ -29,9 +29,11 @@ from app.core.config import settings
 from app.services.category_seo_analyzer import scan_and_create_mappings
 from app.services.import_excel_job_store import (
     ImportExcelJobCancelled,
+    import_job_report_path,
     load_import_job,
     persist_import_job,
 )
+from app.services.import_excel_report import write_import_excel_job_report
 from app.services.import_excel_job_runtime import (
     force_abort_import_session,
     register_import_session,
@@ -297,6 +299,7 @@ def _run_import_excel_job(
                 warn_lines_out = [str(x) for x in warn_lines[:80] if x is not None and str(x).strip()]
             else:
                 warn_lines_out = []
+            report_ready = _write_import_job_report_safe(job_id, result)
             _import_job_update(
                 job_id,
                 status="error",
@@ -308,6 +311,7 @@ def _run_import_excel_job(
                 errors=err_lines_out if err_lines_out else None,
                 warnings=warn_lines_out if warn_lines_out else None,
                 total_rows=result.get("total_rows"),
+                report_ready=report_ready,
             )
             logger.error(
                 "%s failed job=%s importer_error=%s",
@@ -328,6 +332,8 @@ def _run_import_excel_job(
             "import_time": datetime.now().isoformat(),
             "auto_seo_scan": "running_in_background",
         }
+        report_ready = _write_import_job_report_safe(job_id, result)
+        data["report_ready"] = report_ready
         skipped_lines = result.get("skipped") or []
         skipped_out = []
         if isinstance(skipped_lines, list):
@@ -349,6 +355,7 @@ def _run_import_excel_job(
                 "errors": result.get("errors", [])[:150],
                 "skipped": skipped_out if skipped_out else None,
             },
+            report_ready=report_ready,
         )
         if not result.get("only_warehouse_import"):
             threading.Thread(target=auto_scan_category_seo_safe, daemon=True).start()
@@ -533,6 +540,14 @@ async def import_excel_async(
     )
 
 
+def _write_import_job_report_safe(job_id: str, result: dict) -> bool:
+    try:
+        return bool(write_import_excel_job_report(job_id, result))
+    except Exception:
+        logger.exception("%s report_failed job=%s", IMPORT_EXCEL_LOG_PREFIX, job_id)
+        return False
+
+
 @router.get("/import/excel/job/{job_id}")
 def get_import_excel_job(job_id: str):
     """Trạng thái import async (tiến trình + kết quả khi xong). Đọc từ RAM hoặc file (sau khi restart API)."""
@@ -541,6 +556,22 @@ def get_import_excel_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Không tìm thấy job import.")
     return job
+
+
+@router.get("/import/excel/job/{job_id}/report")
+def download_import_excel_job_report(
+    job_id: str,
+    _: AdminUser = Depends(require_module_permission("products", need="view")),
+):
+    """Tải Excel báo cáo import: lý do bỏ qua từng dòng, lỗi và cảnh báo."""
+    path = import_job_report_path(job_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="Chưa có file báo cáo cho lần import này.")
+    return FileResponse(
+        path=str(path),
+        filename=f"bao-cao-import-{job_id[:8]}.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 @router.post("/import/excel/job/{job_id}/cancel")

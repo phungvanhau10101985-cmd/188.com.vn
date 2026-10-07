@@ -1,6 +1,7 @@
 'use client';
 
 import type { AdminProductExcelImportCtrl } from '@/hooks/useAdminProductExcelImport';
+import { ImportExcelReportDownload } from '@/components/admin/ImportExcelReportDownload';
 
 export function AdminProductExcelImportHiddenInput({ ctrl }: { ctrl: AdminProductExcelImportCtrl }) {
   return (
@@ -108,13 +109,16 @@ export function AdminProductExcelImportStatus({ ctrl }: { ctrl: AdminProductExce
         >
           <div className="flex justify-between gap-2 items-start mb-2">
             <span className="font-semibold">{importDetailPanel.title}</span>
-            <button
-              type="button"
-              onClick={() => setImportDetailPanel(null)}
-              className="text-xs shrink-0 px-2 py-1 rounded border border-slate-400/60 hover:bg-white/80 text-slate-700"
-            >
-              Đóng
-            </button>
+            <span className="inline-flex items-start gap-2">
+              <ImportExcelReportDownload jobId={importDetailPanel.reportJobId} />
+              <button
+                type="button"
+                onClick={() => setImportDetailPanel(null)}
+                className="text-xs shrink-0 px-2 py-1 rounded border border-slate-400/60 hover:bg-white/80 text-slate-700"
+              >
+                Đóng
+              </button>
+            </span>
           </div>
           <pre className="whitespace-pre-wrap break-words max-h-[22rem] overflow-y-auto font-mono text-xs leading-relaxed text-slate-800">
             {importDetailPanel.body}

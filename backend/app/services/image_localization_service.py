@@ -115,6 +115,20 @@ def _get_brand_logo_bgra_template() -> Optional[Any]:
     return logo
 
 
+def _top_right_corner_has_artwork(roi: Any) -> bool:
+    """Góc đã có icon/chữ thì không dán logo đè lên điểm bán hàng."""
+    import cv2
+    import numpy as np
+
+    if roi is None or not hasattr(roi, "size") or roi.size == 0 or roi.ndim != 3:
+        return False
+    gray = cv2.cvtColor(roi[:, :, :3], cv2.COLOR_BGR2GRAY)
+    std = float(np.std(gray))
+    edges = cv2.Canny(gray, 80, 160)
+    edge_ratio = float(np.count_nonzero(edges)) / float(max(1, edges.size))
+    return std >= 14 and edge_ratio >= 0.012
+
+
 def apply_brand_logo_top_right_bgr(image_bgr: Any) -> Any:
     """
     Dán logo lên góc phải phía trên (giống banner mẫu). Chỉ gọi cho ảnh đã xử lý, trước encode/upload.
@@ -157,6 +171,8 @@ def apply_brand_logo_top_right_bgr(image_bgr: Any) -> Any:
     if x1 < 0 or y1 < 0 or y1 + lh > h or x1 + lw > w:
         return image_bgr
     roi = image_bgr[y1 : y1 + lh, x1 : x1 + lw]
+    if _top_right_corner_has_artwork(roi):
+        return image_bgr
     if logo.shape[2] == 4:
         alpha = logo[:, :, 3:4].astype(np.float32) / 255.0
         lbgr = logo[:, :, :3].astype(np.float32)

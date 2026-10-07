@@ -16,11 +16,11 @@ import string
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Set
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.internal_sku_export import InternalSkuExport
 from app.models.product import Product
-from app.models.product_import_draft import ProductImportDraft
 
 INTERNAL_SKU_RE = re.compile(r"^[A-Z][0-9]{4}$")
 _LETTERS = string.ascii_uppercase
@@ -144,13 +144,40 @@ def _extract_internal_skus_from_product_data(pd: Any) -> Set[str]:
 
 
 def internal_sku_codes_in_import_drafts(db: Session, exclude_draft_id: Optional[int] = None) -> Set[str]:
-    """Tất cả mã SKU nội bộ đang ghi trong nháp import (trừ một draft khi đang gán lại cho chính nháp đó)."""
-    q = db.query(ProductImportDraft.product_data).filter(ProductImportDraft.product_data.isnot(None))
-    if exclude_draft_id is not None:
-        q = q.filter(ProductImportDraft.id != exclude_draft_id)
+    """Mã SKU nội bộ trong nháp. Chỉ rút `code` / sku lồng, không kéo cả JSON nháp."""
+    rows = db.execute(
+        text(
+            """
+            select product_data->>'code' as code,
+                   case
+                     when jsonb_typeof((product_data->'product_info')::jsonb) = 'object'
+                       then product_data::jsonb #>> '{product_info,product_info,sku}'
+                     else null
+                   end as nested_sku,
+                   case
+                     when jsonb_typeof((product_data->'product_info')::jsonb) = 'string'
+                       then product_data->>'product_info'
+                     else null
+                   end as info_text
+            from product_import_drafts
+            where product_data is not null
+              and (cast(:exclude_id as int) is null or id <> cast(:exclude_id as int))
+            """
+        ),
+        {"exclude_id": exclude_draft_id},
+    ).all()
     acc: Set[str] = set()
-    for (blob,) in q.all():
-        acc.update(_extract_internal_skus_from_product_data(blob))
+    for code, nested_sku, info_text in rows:
+        if code is not None:
+            c = str(code).strip().upper()
+            if internal_sku_is_valid_format(c):
+                acc.add(c)
+        if nested_sku is not None:
+            c = str(nested_sku).strip().upper()
+            if internal_sku_is_valid_format(c):
+                acc.add(c)
+        if info_text:
+            acc.update(_extract_internal_skus_from_product_data({"product_info": info_text}))
     return acc
 
 
@@ -160,6 +187,8 @@ def internal_sku_conflicts_global_inventory(
     *,
     exclude_product_id: Optional[int] = None,
     exclude_draft_id: Optional[int] = None,
+    draft_codes: Optional[Set[str]] = None,
+    check_drafts: bool = True,
 ) -> bool:
     """
     True nếu mã đúng định dạng và đã có trên SP khác, trong nháp import khác,
@@ -170,8 +199,10 @@ def internal_sku_conflicts_global_inventory(
     c = str(code).strip().upper()
     if _internal_sku_taken_by_other_product(db, c, exclude_product_id):
         return True
-    if c in internal_sku_codes_in_import_drafts(db, exclude_draft_id):
-        return True
+    if check_drafts:
+        codes = draft_codes if draft_codes is not None else internal_sku_codes_in_import_drafts(db, exclude_draft_id)
+        if c in codes:
+            return True
     if c in _customer_sheet_internal_skus_cached():
         return True
     return False
@@ -185,6 +216,7 @@ def _blocked_for_auto_assign_internal_sku(
     exclude_draft_id: Optional[int] = None,
     draft_codes: Optional[Set[str]] = None,
     sheet_codes: Optional[Set[str]] = None,
+    check_drafts: bool = True,
 ) -> bool:
     """Sinh tự động / xuất file: tránh export TTL, SP, nháp và sheet."""
     c = (code or "").strip().upper()
@@ -192,9 +224,10 @@ def _blocked_for_auto_assign_internal_sku(
         return True
     if _internal_sku_taken_by_other_product(db, c, exclude_product_id):
         return True
-    dc = draft_codes if draft_codes is not None else internal_sku_codes_in_import_drafts(db, exclude_draft_id)
-    if c in dc:
-        return True
+    if check_drafts:
+        dc = draft_codes if draft_codes is not None else internal_sku_codes_in_import_drafts(db, exclude_draft_id)
+        if c in dc:
+            return True
     sc = sheet_codes if sheet_codes is not None else _customer_sheet_internal_skus_cached()
     return c in sc
 
@@ -412,6 +445,7 @@ def ensure_unique_internal_product_code(
     exclude_product_id: Optional[int] = None,
     exclude_draft_id: Optional[int] = None,
     batch_reserved: Optional[Set[str]] = None,
+    check_drafts: bool = True,
 ) -> str:
     """
     Trả `code` đúng `[A-Z][0-9]{4}`.
@@ -421,7 +455,7 @@ def ensure_unique_internal_product_code(
     - Ngược lại → sinh ngẫu nhiên; `batch_reserved` được mutate để tránh trùng trong cùng batch.
     """
     reserved = batch_reserved if batch_reserved is not None else set()
-    draft_codes = internal_sku_codes_in_import_drafts(db, exclude_draft_id)
+    draft_codes = internal_sku_codes_in_import_drafts(db, exclude_draft_id) if check_drafts else set()
     sheet_codes = _customer_sheet_internal_skus_cached()
 
     raw = (proposed or "").strip()
@@ -433,6 +467,8 @@ def ensure_unique_internal_product_code(
                 cand,
                 exclude_product_id=exclude_product_id,
                 exclude_draft_id=exclude_draft_id,
+                draft_codes=draft_codes,
+                check_drafts=check_drafts,
             ):
                 reserved.add(cand)
                 return cand
@@ -448,6 +484,7 @@ def ensure_unique_internal_product_code(
             exclude_draft_id=exclude_draft_id,
             draft_codes=draft_codes,
             sheet_codes=sheet_codes,
+            check_drafts=check_drafts,
         ):
             continue
         reserved.add(sku)
@@ -467,6 +504,7 @@ def ensure_unique_internal_product_code(
                 exclude_draft_id=exclude_draft_id,
                 draft_codes=draft_codes,
                 sheet_codes=sheet_codes,
+                check_drafts=check_drafts,
             ):
                 continue
             reserved.add(sku)

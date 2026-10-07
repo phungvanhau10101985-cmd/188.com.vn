@@ -229,6 +229,7 @@ def _ensure_bulk_import_internal_product_code(
         proposed,
         exclude_product_id=exclude_product_id,
         batch_reserved=reserved,
+        check_drafts=False,
     )
 
 
@@ -5438,7 +5439,11 @@ def set_category_seo_body(
     else:
         meta = CategorySeoMeta(category_path=category_path, seo_body=seo_body)
         db.add(meta)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def set_category_seo_description(
@@ -5455,7 +5460,11 @@ def set_category_seo_description(
     else:
         meta = CategorySeoMeta(category_path=category_path, seo_description=text)
         db.add(meta)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 def ensure_category_seo_description(
@@ -6393,6 +6402,11 @@ def _run_category_gemini_seo_loop_for_paths(
                 time.sleep(1.2)
         except Exception as e:
             logger.warning("⚠️ Gemini SEO danh mục lỗi %s/%s/%s: %s", level1, level2, level3, e)
+            # Session sau lỗi ghi SEO phải rollback, nếu không path danh mục kế tiếp cũng fail.
+            try:
+                db.rollback()
+            except Exception:
+                logger.warning("Gemini SEO danh mục: rollback session lỗi", exc_info=True)
     return (n_desc, n_body)
 
 
@@ -6557,6 +6571,25 @@ def bulk_import_products(
     errors = []
     warnings = []
     skipped: List[str] = []
+    skipped_rows: List[Dict] = []
+
+    def _record_skip(
+        idx: int,
+        source_id: str,
+        reason: str,
+        message: str,
+        kept_product_id: str = "",
+    ) -> None:
+        skipped.append(message)
+        skipped_rows.append(
+            {
+                "row": idx + 1,
+                "source_id": str(source_id or "").strip(),
+                "reason": reason,
+                "kept_product_id": str(kept_product_id or "").strip(),
+            }
+        )
+
     warehouse_import_rows = 0
     regular_import_rows = 0
 
@@ -6682,8 +6715,11 @@ def bulk_import_products(
                 except Exception as e:
                     errors.append(f"Dòng {idx + 1} ({product_id}): Không thể xóa khỏi DB — {e}")
                     return "error"
-            skipped.append(
-                f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm kho trong DB — bỏ qua."
+            _record_skip(
+                idx,
+                product_id,
+                "Cột listed = 0 nhưng chưa có sản phẩm kho trong DB.",
+                f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm kho trong DB — bỏ qua.",
             )
             return "skip"
 
@@ -6812,8 +6848,11 @@ def bulk_import_products(
                     errors.append(f"Dòng {idx + 1} ({product_id}): Không thể xóa khỏi DB — {e}")
                     logger.error("❌ Delete-from-excel row %s: %s", idx + 1, e)
             else:
-                skipped.append(
-                    f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm trong DB — bỏ qua."
+                _record_skip(
+                    idx,
+                    product_id,
+                    "Cột listed = 0 nhưng chưa có sản phẩm trong DB.",
+                    f"Dòng {idx + 1} ({product_id}): listed=0 nhưng chưa có sản phẩm trong DB — bỏ qua.",
                 )
 
             if (idx + 1) % batch_size == 0:
@@ -6854,9 +6893,14 @@ def bulk_import_products(
         prefix_label = source_prefix.get("prefix") or product_id
         owner_pid = batch_prefix_owner.get(pk) or db_prefix_owner.get(pk)
         if not owner_pid:
-            exact = db.query(Product).filter(Product.product_id == product_id).first()
-            if exact is not None and exact.product_id:
-                owner_pid = str(exact.product_id).strip()
+            exact = (
+                db.query(Product.product_id)
+                .filter(Product.product_id == product_id)
+                .limit(1)
+                .first()
+            )
+            if exact is not None and exact[0]:
+                owner_pid = str(exact[0]).strip()
         if not owner_pid and slow_conflict_fallback:
             if should_cancel and should_cancel():
                 from app.services.import_excel_job_store import ImportExcelJobCancelled
@@ -6874,9 +6918,13 @@ def bulk_import_products(
             if found_same_prefix is not None and found_same_prefix.product_id:
                 owner_pid = str(found_same_prefix.product_id).strip()
         if owner_pid:
-            skipped.append(
+            _record_skip(
+                idx,
+                str(product_id),
+                "Mã cột A đã có trên web — giữ nguyên sản phẩm cũ, không ghi đè, không tạo mới.",
                 f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã cột A «{prefix_label}» đã có "
-                f"(«{owner_pid}») — giữ nguyên, không ghi đè, không tạo mới."
+                f"(«{owner_pid}») — giữ nguyên, không ghi đè, không tạo mới.",
+                kept_product_id=str(owner_pid),
             )
             if progress_callback and ((idx + 1) % db_tick == 0 or (idx + 1) == n_products):
                 progress_callback("database", idx + 1, n_products)
@@ -6887,15 +6935,22 @@ def bulk_import_products(
         if proposed_raw is not None and str(proposed_raw).strip():
             if internal_sku_is_valid_format(proposed_u):
                 if proposed_u in sku_batch_reserved:
-                    skipped.append(
+                    _record_skip(
+                        idx,
+                        str(product_id),
+                        f"Mã SKU «{proposed_u}» trùng trong cùng file import.",
                         f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
-                        "trùng trong cùng file import."
+                        "trùng trong cùng file import.",
+                        kept_product_id=str(batch_code_owner.get(proposed_u) or ""),
                     )
                     continue
                 if internal_sku_exists_on_other_product(db, proposed_u, exclude_product_id=None):
-                    skipped.append(
+                    _record_skip(
+                        idx,
+                        str(product_id),
+                        f"Mã SKU «{proposed_u}» đã có trên sản phẩm khác trên web.",
                         f"Dòng {idx + 1} ({product_id}): Bỏ qua — mã SKU «{proposed_u}» "
-                        "đã có trên sản phẩm khác trên web."
+                        "đã có trên sản phẩm khác trên web.",
                     )
                     continue
             else:
@@ -6932,8 +6987,13 @@ def bulk_import_products(
 
                 slug_value = product_data.get("slug", "")
                 if slug_value:
-                    existing_slug = db.query(Product).filter(Product.slug == slug_value).first()
-                    if existing_slug and existing_slug.product_id != product_id:
+                    existing_slug = (
+                        db.query(Product.product_id)
+                        .filter(Product.slug == slug_value)
+                        .limit(1)
+                        .first()
+                    )
+                    if existing_slug and existing_slug[0] != product_id:
                         new_slug = generate_consistent_slug(product_data.get("name", ""), product_id)
                         product_data["slug"] = new_slug
                         row_slug_warning = (
@@ -7007,9 +7067,13 @@ def bulk_import_products(
         except _DuplicateColumnASkip as dup:
             if row_reserved_sku:
                 sku_batch_reserved.discard(row_reserved_sku)
-            skipped.append(
+            _record_skip(
+                idx,
+                str(prefix_label),
+                "Mã cột A đã có trên web — giữ nguyên sản phẩm cũ, không ghi đè, không tạo mới.",
                 f"Dòng {idx + 1} ({prefix_label}): Bỏ qua — mã cột A «{prefix_label}» đã có "
-                f"(«{dup.kept_product_id}») — giữ nguyên, không ghi đè, không tạo mới."
+                f"(«{dup.kept_product_id}») — giữ nguyên, không ghi đè, không tạo mới.",
+                kept_product_id=str(dup.kept_product_id),
             )
             if progress_callback and ((idx + 1) % db_tick == 0 or (idx + 1) == n_products):
                 progress_callback("database", idx + 1, n_products)
@@ -7047,6 +7111,7 @@ def bulk_import_products(
             "errors": errors,
             "warnings": warnings,
             "skipped": skipped,
+            "skipped_rows": skipped_rows,
             "skipped_count": len(skipped),
             "total_processed": total_processed,
             "success_rate": f"{success_rate:.1f}%",
@@ -7110,6 +7175,7 @@ def bulk_import_products(
         "errors": errors,
         "warnings": warnings,
         "skipped": skipped,
+        "skipped_rows": skipped_rows,
         "skipped_count": len(skipped),
         "total_processed": total_processed,
         "success_rate": success_rate,

@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from typing import Dict, List, Tuple
-import math
 import re
 import os
 import platform
@@ -160,12 +159,27 @@ class ImageProcessor:
         cv2.rectangle(edge_mask, (x1, y1), (x2, y2), 255, max(2, min(5, ref_pad // 2)))
         return cv2.inpaint(out, edge_mask, 2, cv2.INPAINT_TELEA)
 
+    def _inpaint_text_strokes(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        """Xóa nét chữ trên ảnh sản phẩm, giữ nguyên da/kim loại bên trong bbox OCR."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(bbox, h_img, w_img)
+        if x2 <= x1 or y2 <= y1:
+            return img
+        mask = self._build_text_mask(img[y1:y2, x1:x2])
+        if mask.size == 0 or int(np.count_nonzero(mask)) < 8:
+            return img
+        full_mask = np.zeros((h_img, w_img), dtype=np.uint8)
+        full_mask[y1:y2, x1:x2] = mask
+        return cv2.inpaint(img, full_mask, 3, cv2.INPAINT_TELEA)
+
     def _advanced_inpainting(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
-        """Erase the whole OCR bbox and synthesize a clean background from nearby pixels."""
+        """Xóa chữ trên nền phẳng. Bbox đè lên ảnh sản phẩm thì chỉ xóa nét chữ."""
         h_img, w_img = img.shape[:2]
         x1, y1, x2, y2 = self._expand_bbox_for_inpaint(bbox, h_img, w_img)
         if x2 <= x1 or y2 <= y1:
             return img
+        if self._region_is_product_photo(img, (x1, y1, x2, y2)):
+            return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
         return self._fill_bbox_with_surrounding_background(img, (x1, y1, x2, y2))
 
     def _estimate_text_color(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> Tuple[int, int, int] | None:
@@ -237,67 +251,16 @@ class ImageProcessor:
         return max(3, min(18, self.INTERNAL_PADDING + int(font_size * 0.12)))
 
     def _calc_box_centered(self, text, bbox, img_w, img_h, draw):
-        """Keep translated text near the original bbox; wrap/shrink instead of enlarging."""
-        if not text:
+        """Keep translated text inside the OCR box so it cannot cover product photos."""
+        del text, draw
+        if not bbox or len(bbox) < 4:
             return bbox
-        x1, y1, x2, y2 = map(int, bbox)
-
-        cx = (x1 + x2) // 2
-        cy = (y1 + y2) // 2
-
-        orig_w = max(1, x2 - x1)
-        orig_h = max(1, y2 - y1)
-
-        font_min = self._get_font(self.MIN_FONT_SIZE)
-        if not font_min:
-            return bbox
-
-        text_bbox = draw.textbbox((0, 0), text, font=font_min)
-        text_w = text_bbox[2] - text_bbox[0]
-
-        text_len = len(str(text))
-        width_scale = 1.75 if text_len > 80 else 1.35
-        max_w = min(img_w - 8, max(orig_w + 80, int(orig_w * width_scale), self.MIN_FONT_SIZE * 10))
-        req_w = max(orig_w, min(text_w + self.INTERNAL_PADDING * 2, max_w))
-
-        usable_w = max(10, req_w - self.INTERNAL_PADDING * 2)
-        lines_count = max(1, math.ceil(text_w / usable_w))
-        lh_est = int(self.MIN_FONT_SIZE * max(self.LINE_HEIGHT_RATIO, 1.42))
-        gap_est = self._line_gap(self.MIN_FONT_SIZE)
-        v_budget = self._vertical_padding_budget(self.MIN_FONT_SIZE)
-        needed_h = lines_count * lh_est + max(0, lines_count - 1) * gap_est + v_budget * 2
-        height_scale = 4.5 if text_len > 80 else 2.6
-        max_h = min(img_h - 8, max(orig_h + 90, int(orig_h * height_scale), self.MIN_FONT_SIZE * 6))
-        req_h = max(orig_h, min(needed_h, max_h))
-
-        new_w_half = int(req_w) // 2
-        new_h_half = int(req_h) // 2
-
-        nx1 = cx - new_w_half
-        nx2 = cx + new_w_half
-        ny1 = cy - new_h_half
-        ny2 = cy + new_h_half
-
-        if nx1 < 0:
-            nx2 += 0 - nx1
-            nx1 = 0
-        if nx2 > img_w:
-            nx1 -= nx2 - img_w
-            nx2 = img_w
-
-        if ny1 < 0:
-            ny2 += 0 - ny1
-            ny1 = 0
-        if ny2 > img_h:
-            ny1 -= ny2 - img_h
-            ny2 = img_h
-
-        nx1, ny1 = max(0, nx1), max(0, ny1)
-        return (int(nx1), int(ny1), int(nx2), int(ny2))
+        return self._clip_bbox(tuple(map(int, bbox[:4])), img_h, img_w)
 
     def _binary_search_font(self, text, w, h, draw):
-        low, high = self.MIN_FONT_SIZE, self.MAX_FONT_SIZE
-        best_size, best_lines = self.MIN_FONT_SIZE, [text]
+        # 8px only when the original caption is too short for the usual 14px floor.
+        low, high = 8, self.MAX_FONT_SIZE
+        best_size, best_lines = 8, [text]
         eff_w = max(10, w - self.INTERNAL_PADDING * 2)
         eff_h = max(8, h - self.INTERNAL_PADDING)
 
@@ -343,6 +306,13 @@ class ImageProcessor:
             )
             iy = int(y_cursor - bb0[1])
             ix = int(round(cx - (bb0[0] + bb0[2]) / 2))
+            line_top = iy + bb0[1]
+            line_bottom = iy + bb0[3]
+            if line_bottom > y2 + 2:
+                break
+            if line_top < y1 - 1:
+                y_cursor = line_bottom + gap
+                continue
 
             if style["use_shadow"]:
                 shadow_offset = max(1, min(3, int(round(fs * 0.035))))
@@ -482,9 +452,8 @@ class ImageProcessor:
                 continue
             text = " ".join(g["text"] for g in group if g["text"])
             x1, y1, x2, y2 = union
-            pad_x = max(18, int((x2 - x1) * 0.08))
-            pad_y = max(12, int((y2 - y1) * 0.25))
-            expanded = self._clip_bbox((x1 - pad_x, y1 - pad_y, x2 + pad_x, y2 + pad_y), img_h, img_w)
+            # Chỉ nới vài pixel để xóa nét chữ, không kéo khung vào ảnh sản phẩm bên dưới.
+            expanded = self._clip_bbox((x1 - 4, y1 - 3, x2 + 4, y2 + 3), img_h, img_w)
             merged_blocks.append((text, expanded))
 
         return merged_blocks
@@ -506,8 +475,25 @@ class ImageProcessor:
             groups.append(current)
         return groups
 
+    def _text_rows_have_photo_gap(self, items: List[Dict]) -> bool:
+        """Poster điểm nổi bật có khoảng trống lớn (ảnh sản phẩm) giữa các dải chữ.
+
+        Bảng size thì các hàng sát nhau. Khoảng cách hàng >= 150px là ảnh nằm giữa,
+        không phải một ô của bảng.
+        """
+        if len(items) < 4:
+            return False
+        row_groups = self._cluster_edges([float(it["y1"]) for it in items], 18)
+        if len(row_groups) < 2:
+            return False
+        centers = sorted(sum(group) / len(group) for group in row_groups)
+        gaps = [centers[i + 1] - centers[i] for i in range(len(centers) - 1)]
+        return bool(gaps) and max(gaps) >= 150
+
     def _looks_like_table(self, items: List[Dict]) -> bool:
         if len(items) < 6:
+            return False
+        if self._text_rows_have_photo_gap(items):
             return False
         columns = [g for g in self._cluster_edges([it["x1"] for it in items], 28) if len(g) >= 3]
         rows = self._cluster_edges([it["y1"] for it in items], 14)
@@ -611,11 +597,11 @@ class ImageProcessor:
         return out
 
     def _expand_table_cells(self, items: List[Dict], obstacles: List[Dict], image_width: int) -> List[Dict]:
+        del image_width
         pool = items + obstacles
-        right_edge = min(image_width - 6, max(it["x2"] for it in pool))
-        content_bottom = max(it["y2"] for it in pool) + 72
         expanded = []
         for item in items:
+            src_bbox = (item["x1"], item["y1"], item["x2"], item["y2"])
             contained = []
             area_item = max(1, (item["x2"] - item["x1"]) * (item["y2"] - item["y1"]))
             for other in pool:
@@ -631,36 +617,44 @@ class ImageProcessor:
                 if inside and area_other < area_item * 0.5:
                     contained.append(other)
             if len(contained) >= 2:
-                expanded.append({**item, "text": "", "erase_only": True})
+                expanded.append({**item, "text": "", "erase_only": True, "src_bbox": src_bbox})
                 continue
+            line_h = max(12, item["y2"] - item["y1"])
             center_y = (item["y1"] + item["y2"]) / 2
+            max_h_gap = max(72, int((item["x2"] - item["x1"]) * 1.4))
+            max_v_gap = max(36, int(line_h * 1.6))
             to_the_right = sorted(
                 (
                     other for other in pool
                     if other is not item
                     and other["x1"] >= item["x2"] - 4
-                    and abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(item["y2"] - item["y1"], other["y2"] - other["y1"], 18)
+                    and other["x1"] - item["x2"] <= max_h_gap
+                    and abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(line_h, other["y2"] - other["y1"], 18)
                 ),
                 key=lambda it: it["x1"],
             )
             right = to_the_right[0] if to_the_right else None
             below_all = sorted(
-                (other for other in pool if other is not item and other["y1"] >= item["y2"] - 2),
+                (
+                    other for other in pool
+                    if other is not item
+                    and other["y1"] >= item["y2"] - 2
+                    and other["y1"] - item["y2"] <= max_v_gap
+                    and min(item["x2"], other["x2"]) - max(item["x1"], other["x1"]) > 4
+                ),
                 key=lambda it: (it["y1"], it["x1"]),
             )
             below = below_all[0] if below_all else None
-            x2 = right["x1"] - 8 if right else right_edge
+            x2 = right["x1"] - 8 if right else item["x2"]
             if right and self._is_compact_label(item) and self._is_compact_label(right):
                 gap = right["x1"] - item["x2"]
                 if gap > 36:
                     x2 = min(x2, item["x2"] + gap // 2)
             y2 = below["y1"] - 4 if below else item["y2"]
-            if not below and (item["x2"] - item["x1"]) >= image_width * 0.45:
-                y2 = max(y2, min(content_bottom, item["y1"] + max(item["y2"] - item["y1"], 64)))
             if not below and to_the_right:
                 beside = [
                     other for other in to_the_right
-                    if abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(item["y2"] - item["y1"], other["y2"] - other["y1"], 14)
+                    if abs(((other["y1"] + other["y2"]) / 2) - center_y) <= max(line_h, other["y2"] - other["y1"], 14)
                 ]
                 if beside:
                     y2 = max(y2, max(other["y2"] for other in beside))
@@ -681,6 +675,7 @@ class ImageProcessor:
                 y2 = min(y2, below["y1"] - 2)
             expanded.append({
                 **item,
+                "src_bbox": src_bbox,
                 "x1": item["x1"],
                 "y1": item["y1"],
                 "x2": max(item["x1"] + 1, int(x2)),
@@ -810,22 +805,75 @@ class ImageProcessor:
             clipped.append(out.strip() or line[:1])
         return font, clipped or [""], pad
 
+    def _region_is_product_photo(self, img: np.ndarray, bbox) -> bool:
+        """Vùng da/kim loại có màu và dải xám giữa — khác nền trắng đen của bảng size."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return False
+        roi = img[y1:y2, x1:x2]
+        b, g, r = cv2.split(roi)
+        color_spread = float(np.mean(np.abs(r.astype(np.int16) - g.astype(np.int16))))
+        color_spread += float(np.mean(np.abs(g.astype(np.int16) - b.astype(np.int16))))
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        std = float(np.std(gray))
+        if color_spread > 12 and std > 16:
+            return True
+        midtones = float(np.mean((gray > 40) & (gray < 215)))
+        return std > 26 and midtones > 0.4
+
+    def _box_remainder(self, outer, inner) -> List[Tuple[int, int, int, int]]:
+        ox1, oy1, ox2, oy2 = map(int, outer)
+        ix1, iy1, ix2, iy2 = map(int, inner)
+        ix1, iy1 = max(ox1, ix1), max(oy1, iy1)
+        ix2, iy2 = min(ox2, ix2), min(oy2, iy2)
+        if ix2 <= ix1 or iy2 <= iy1:
+            return [(ox1, oy1, ox2, oy2)]
+        parts = []
+        if oy1 < iy1:
+            parts.append((ox1, oy1, ox2, iy1))
+        if iy2 < oy2:
+            parts.append((ox1, iy2, ox2, oy2))
+        if ox1 < ix1:
+            parts.append((ox1, iy1, ix1, iy2))
+        if ix2 < ox2:
+            parts.append((ix2, iy1, ox2, iy2))
+        return parts
+
+    def _table_expansion_covers_photo(self, img: np.ndarray, blocks: List[Dict]) -> bool:
+        for item in blocks:
+            src = item.get("src_bbox")
+            box = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
+            regions = self._box_remainder(box, src) if src else [tuple(map(int, box))]
+            if any(self._region_is_product_photo(img, part) for part in regions):
+                return True
+        return False
+
     def _draw_table_blocks(self, image_data: np.ndarray, blocks: List[Dict]) -> np.ndarray:
         img = image_data.copy()
         h_img, w_img = img.shape[:2]
         ordered = sorted(blocks, key=lambda it: ((it["x2"] - it["x1"]) * (it["y2"] - it["y1"])), reverse=True)
+        safe_boxes = {}
         for item in ordered:
             erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
+            src = item.get("src_bbox")
+            if src and any(self._region_is_product_photo(img, part) for part in self._box_remainder(erase, src)):
+                erase = src
             x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, erase)), h_img, w_img)
-            if x2 <= x1 or y2 <= y1:
+            if x2 <= x1 or y2 <= y1 or self._region_is_product_photo(img, (x1, y1, x2, y2)):
+                safe_boxes[id(item)] = None
                 continue
             img[y1:y2, x1:x2] = (255, 255, 255)
+            safe_boxes[id(item)] = (x1, y1, x2, y2)
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         for item in blocks:
             text = str(item.get("text") or "").strip()
             if not text or item.get("erase_only"):
                 continue
-            x1, y1, x2, y2 = self._clip_bbox((item["x1"], item["y1"], item["x2"], item["y2"]), h_img, w_img)
+            saved = safe_boxes.get(id(item))
+            if not saved:
+                continue
+            x1, y1, x2, y2 = saved
             w, h = x2 - x1, y2 - y1
             if w < 2 or h < 2:
                 continue
@@ -900,6 +948,9 @@ class ImageProcessor:
     def process_image_with_text(self, image_data: np.ndarray, processed_blocks: List, ignore_blocks: List) -> np.ndarray:
         img_h, img_w = image_data.shape[:2]
         table_blocks = self._layout_table_blocks(processed_blocks, ignore_blocks, img_w, img_h)
+        if table_blocks is not None and self._table_expansion_covers_photo(image_data, table_blocks):
+            print("  [TABLE] bỏ — ô chữ đè lên ảnh sản phẩm")
+            table_blocks = None
         if table_blocks is not None:
             print(f"  [TABLE] vẽ {len(table_blocks)} ô trong khung, không gộp đè")
             return self.add_smart_watermark(self._draw_table_blocks(image_data, table_blocks), [])
@@ -925,13 +976,16 @@ class ImageProcessor:
             if item["is_ignore"]:
                 continue
             erase_bbox = tuple(map(int, item["bbox"]))
+            if self._region_is_product_photo(clean_img, erase_bbox):
+                item["skip_photo"] = True
+                continue
             clean_img = self._advanced_inpainting(clean_img, erase_bbox)
 
         pil_img = Image.fromarray(cv2.cvtColor(clean_img, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(pil_img)
 
         for item in sorted_blocks:
-            if item["is_ignore"] or not str(item.get("text", "")).strip():
+            if item["is_ignore"] or item.get("skip_photo") or not str(item.get("text", "")).strip():
                 continue
 
             final_bbox = self._calc_box_centered(
@@ -960,7 +1014,12 @@ class ImageProcessor:
                 style["stroke_color"] = (0, 0, 0)
                 style["use_shadow"] = True
 
-            self._draw_text_centered(draw, lines, final_bbox, font, style)
+            if w < 2 or h < 2:
+                continue
+            # Vẽ trên crop để chữ dài không tràn sang cột bên cạnh hoặc lên ảnh.
+            crop = pil_img.crop(final_bbox)
+            self._draw_text_centered(ImageDraw.Draw(crop), lines, (0, 0, w, h), font, style)
+            pil_img.paste(crop, (final_bbox[0], final_bbox[1]))
 
         # Chuyển lại OpenCV
         final_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)

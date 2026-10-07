@@ -30,9 +30,11 @@ import { bulkDeleteAdminProducts } from '@/lib/admin-product-delete';
 import { getApiBaseUrl, getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase, ngrokFetchHeaders } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
+import { ImportExcelReportDownload } from '@/components/admin/ImportExcelReportDownload';
 import {
   ADMIN_PRODUCT_EXCEL_IMPORT_JOB_STORAGE_KEY,
   formatImportExcelJobOutcome,
+  type ImportExcelJobDetailPanel,
 } from '@/lib/import-excel-job-outcome';
 
 const PAGE_SIZE = 100;
@@ -642,11 +644,7 @@ export default function AdminProductsPage() {
   const [importCancelBusy, setImportCancelBusy] = useState(false);
   const activeImportJobIdRef = useRef<string | null>(null);
   /** Chi tiết lỗi/cảnh báo sau import (giữ đến khi import lại hoặc đóng) */
-  const [importDetailPanel, setImportDetailPanel] = useState<{
-    variant: 'err' | 'warn' | 'ok';
-    title: string;
-    body: string;
-  } | null>(null);
+  const [importDetailPanel, setImportDetailPanel] = useState<ImportExcelJobDetailPanel | null>(null);
   const [importScraperCookieText, setImportScraperCookieText] = useState('');
   const [importScraperCookieSettings, setImportScraperCookieSettings] = useState<AdminImport1688CookieSettings | null>(null);
   const [taxonomyAutoCreate, setTaxonomyAutoCreate] = useState<boolean | null>(null);
@@ -4949,13 +4947,16 @@ export default function AdminProductsPage() {
             >
               <div className="flex justify-between gap-2 items-start mb-2">
                 <span className="font-semibold">{importDetailPanel.title}</span>
-                <button
-                  type="button"
-                  onClick={() => setImportDetailPanel(null)}
-                  className="text-xs shrink-0 px-2 py-1 rounded border border-gray-400/60 hover:bg-white/80 text-gray-700"
-                >
-                  Đóng
-                </button>
+                <span className="inline-flex items-start gap-2">
+                  <ImportExcelReportDownload jobId={importDetailPanel.reportJobId} />
+                  <button
+                    type="button"
+                    onClick={() => setImportDetailPanel(null)}
+                    className="text-xs shrink-0 px-2 py-1 rounded border border-gray-400/60 hover:bg-white/80 text-gray-700"
+                  >
+                    Đóng
+                  </button>
+                </span>
               </div>
               <pre className="whitespace-pre-wrap break-words max-h-[22rem] overflow-y-auto font-mono text-xs leading-relaxed text-gray-800">
                 {importDetailPanel.body}

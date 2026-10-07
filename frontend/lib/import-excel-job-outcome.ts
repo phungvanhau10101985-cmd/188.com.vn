@@ -7,7 +7,13 @@ export type ImportExcelJobDetailPanel = {
   variant: 'err' | 'warn' | 'ok';
   title: string;
   body: string;
+  /** Job có file Excel — nút tải báo cáo (cột «Lý do bỏ qua»). */
+  reportJobId?: string | null;
 };
+
+function reportJobIdOf(job: AdminImportExcelJob): string | null {
+  return job.report_ready && job.job_id ? job.job_id : null;
+}
 
 /** Nội dung panel + toast sau khi poll job import Excel sản phẩm xong. */
 export function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
@@ -24,7 +30,12 @@ export function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
     }
     parts.push('', 'Các dòng đã commit trước khi hủy vẫn giữ trên DB.');
     return {
-      panel: { variant: 'warn', title: 'Import đã hủy', body: parts.join('\n') },
+      panel: {
+        variant: 'warn',
+        title: 'Import đã hủy',
+        body: parts.join('\n'),
+        reportJobId: reportJobIdOf(job),
+      },
       toast: { type: 'err', msg: 'Đã hủy import Excel.' },
     };
   }
@@ -42,8 +53,16 @@ export function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
       parts.push('', 'Cảnh báo đi kèm:');
       for (const w of job.warnings.slice(0, 50)) parts.push(typeof w === 'string' ? w : String(w));
     }
+    if (job.report_ready) {
+      parts.push('', 'Tải báo cáo Excel để xem đủ lý do lỗi và cảnh báo.');
+    }
     return {
-      panel: { variant: 'err', title: 'Import thất bại', body: parts.join('\n') },
+      panel: {
+        variant: 'err',
+        title: 'Import thất bại',
+        body: parts.join('\n'),
+        reportJobId: reportJobIdOf(job),
+      },
       toast: { type: 'err', msg: 'Import lỗi — xem chi tiết phía dưới ô Import.' },
     };
   }
@@ -68,6 +87,9 @@ export function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
   }
 
   const body: string[] = [headline];
+  if (job.report_ready) {
+    body.push('', 'Tải báo cáo Excel để xem lý do bỏ qua của từng dòng (cột «Lý do bỏ qua»).');
+  }
   if (skippedCount > 0) {
     body.push('', `Bỏ qua — trùng ID nguồn hoặc SKU (${skippedCount}):`);
     if (skipped.length) {
@@ -104,6 +126,7 @@ export function formatImportExcelJobOutcome(job: AdminImportExcelJob): {
           ? 'Import xong (có dòng bỏ qua)'
           : 'Import xong (cảnh báo)',
       body: body.join('\n'),
+      reportJobId: reportJobIdOf(job),
     },
     toast: { type: 'ok', msg: toastMsg },
   };
