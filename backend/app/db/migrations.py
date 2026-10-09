@@ -970,12 +970,17 @@ class MigrationManager:
             return True
 
     def migrate_product_search_cache_permanent(self) -> bool:
-        """Cache JSON tìm kiếm vĩnh viễn: expires_at NULL + backfill norm_q từ JSON."""
+        """Cache JSON tìm kiếm vĩnh viễn: expires_at NULL + backfill norm_q từ JSON.
+
+        Không kéo cả response_json vào RAM. Bảng này có thể vài GB; một fetchall
+        làm process Python ~10GB và bị OOM killer giữa deploy.
+        """
         try:
             inspector = inspect(engine)
             if "product_search_cache" not in inspector.get_table_names():
                 return True
             from app.crud import product_search_cache as psc_crud
+            import gc
 
             with engine.connect() as conn:
                 if IS_POSTGRESQL:
@@ -985,29 +990,64 @@ class MigrationManager:
                             "ALTER COLUMN expires_at DROP NOT NULL"
                         )
                     )
-                conn.execute(
-                    text("UPDATE product_search_cache SET expires_at = NULL WHERE expires_at IS NOT NULL")
-                )
+                pending_expiry = conn.execute(
+                    text(
+                        "SELECT 1 FROM product_search_cache "
+                        "WHERE expires_at IS NOT NULL LIMIT 1"
+                    )
+                ).fetchone()
+                if pending_expiry:
+                    conn.execute(
+                        text(
+                            "UPDATE product_search_cache SET expires_at = NULL "
+                            "WHERE expires_at IS NOT NULL"
+                        )
+                    )
                 conn.commit()
 
             from app.db.session import SessionLocal
 
             db = SessionLocal()
             try:
-                rows = db.execute(text("SELECT cache_key, response_json, norm_q FROM product_search_cache")).fetchall()
-                for cache_key, response_json, norm_q in rows:
-                    if (norm_q or "").strip():
-                        continue
-                    hint = psc_crud.hint_from_cached_json(response_json or "")
-                    if hint:
+                batch_size = 10
+                last_key = ""
+                updated_total = 0
+                while True:
+                    rows = db.execute(
+                        text(
+                            "SELECT cache_key, response_json FROM product_search_cache "
+                            "WHERE (norm_q IS NULL OR btrim(norm_q) = '') "
+                            "AND cache_key > :last "
+                            "ORDER BY cache_key "
+                            "LIMIT :lim"
+                        ),
+                        {"last": last_key, "lim": batch_size},
+                    ).fetchall()
+                    if not rows:
+                        break
+                    for cache_key, response_json in rows:
+                        last_key = cache_key
+                        hint = psc_crud.hint_from_cached_json(response_json or "")
+                        if not hint:
+                            continue
                         db.execute(
-                            text("UPDATE product_search_cache SET norm_q = :nq WHERE cache_key = :ck"),
+                            text(
+                                "UPDATE product_search_cache SET norm_q = :nq "
+                                "WHERE cache_key = :ck"
+                            ),
                             {"nq": hint[:500], "ck": cache_key},
                         )
-                db.commit()
+                        updated_total += 1
+                    db.commit()
+                    db.expire_all()
+                    del rows
+                    gc.collect()
             finally:
                 db.close()
-            logger.info("✅ product_search_cache: permanent cache + norm_q backfill")
+            logger.info(
+                "✅ product_search_cache: permanent cache + norm_q backfill (%s rows)",
+                updated_total,
+            )
             return True
         except Exception as e:
             logger.warning("migrate_product_search_cache_permanent: %s", e)
