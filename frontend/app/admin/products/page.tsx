@@ -4048,8 +4048,7 @@ export default function AdminProductsPage() {
                         <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
                           OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>{' '}
-                          chữ trên ảnh. Không gọi Gemini/GPT sinh/chỉnh cả khung (ổn với ảnh dài / split). Không cần key
-                          Gemini/OpenAI cho nhánh này.
+                          chữ trên ảnh, kể cả ảnh kích thước và giặt tẩy. Không gọi GPT.
                         </span>
                       </span>
                     </label>
@@ -4072,10 +4071,7 @@ export default function AdminProductsPage() {
                           <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          Model sinh/sửa ảnh trên server (mặc định{' '}
-                          {geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}). Bảng size &amp; giặt tẩy → dịch API, không xóa. Cần{' '}
-                          <code className="text-[11px]">GEMINI_API_KEY</code> và{' '}
-                          <code className="text-[11px]">IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true</code>.
+                          Ảnh thường được chỉ định AI dùng model này. Ảnh kích thước và giặt tẩy không đi Gemini — dùng GPT Image.
                         </span>
                       </span>
                     </label>
@@ -4098,9 +4094,9 @@ export default function AdminProductsPage() {
                           <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          API <code className="text-[11px]">/v1/images/edits</code>, mặc định model{' '}
-                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'} (có thể đổi{' '}
-                          <code className="text-[11px]">IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL</code>).
+                          Ảnh kích thước và giặt tẩy dùng model này, mặc định{' '}
+                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}, chất lượng high. Sau GPT, hệ thống
+                          kiểm tra lại chủ yếu là mực loang, tối đa 2 lần GPT. Chữ Trung còn sót thì DeepSeek đọc và vẽ lại. Vẫn loang thì job dừng và gửi email cho admin.
                         </span>
                       </span>
                     </label>

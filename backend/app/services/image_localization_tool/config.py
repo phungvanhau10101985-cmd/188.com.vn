@@ -50,7 +50,8 @@ GEMINI_MAX_WORKERS = 3  # Số worker threads cho xử lý song song
 # ==================== IMAGE PROCESSING CONFIG ====================
 MAX_IMAGE_SIZE = (2000, 2000)
 MIN_IMAGE_SIZE = 500
-MIN_IMAGE_WIDTH = 500
+# Loại thumbnail: rộng <= 350px. Ảnh 400px vẫn OCR / dịch / vẽ.
+MIN_IMAGE_WIDTH = 350
 MAX_IMAGE_WIDTH = 5000
 MERGE_SPACING = 10
 BACKGROUND_COLOR = (255, 255, 255)

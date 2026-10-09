@@ -4,6 +4,7 @@ import re
 import unicodedata
 import requests
 import time
+from dataclasses import dataclass
 from typing import List, Tuple, Dict, Optional, Any
 import hashlib
 import json
@@ -16,6 +17,17 @@ try:
 except Exception:  # standalone tool path / tests without app package
     deepseek_chat_completions = None
     deepseek_message_text = None
+
+@dataclass
+class SizeLaundryFlags:
+    is_size: bool = False
+    is_laundry: bool = False
+    comprehensive: bool = False
+
+    @property
+    def is_size_or_laundry(self) -> bool:
+        return self.is_size or self.is_laundry
+
 
 class TextTranslator:
     def __init__(self):
@@ -276,7 +288,7 @@ class TextTranslator:
 "{text}"
 YÊU CẦU:
 1. CHỈ trả về kết quả tiếng Việt. KHÔNG lặp lại prompt.
-2. Giữ nguyên số liệu (45kg, 5cm...).
+2. Giữ nguyên số đo cm và số đã ghi kg. Nếu có 斤 thì đổi sang kg (1斤 = 0,5kg).
 3. Dịch cả tiếng Anh lẫn tiếng Trung nếu có.
 4. Không giải thích thêm."""
 
@@ -321,25 +333,131 @@ YÊU CẦU:
         self.translation_cache[text_hash] = translated
         return translated 
     
+    def _jin_to_kg_label(self, raw_number: str) -> str:
+        value = float(str(raw_number).replace(",", "."))
+        kg = value / 2.0
+        if abs(kg - round(kg)) < 1e-9:
+            return f"{int(round(kg))}kg"
+        return f"{kg:.1f}kg"
+
+    def _is_bare_chinese_weight_header(self, text: str) -> bool:
+        compact = re.sub(r"\s+", "", str(text or ""))
+        if re.search(r"kg|公斤|千克", compact, re.IGNORECASE):
+            return False
+        return bool(re.fullmatch(r"(体重|重量|净重|淨重|毛重)", compact))
+
+    def chinese_weight_replacements(self, items: List[Tuple[str, tuple]]) -> Dict[int, str]:
+        """斤 và số trần dưới cột 体重/重量 (không ghi kg) đổi sang kg. 1斤 = 0,5kg."""
+        headers = []
+        for idx, (text, bbox) in enumerate(items):
+            if not self._is_bare_chinese_weight_header(text) or not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = [float(v) for v in list(bbox)[:4]]
+            headers.append((x1, y1, x2, y2))
+        out: Dict[int, str] = {}
+        for idx, (text, bbox) in enumerate(items):
+            raw = str(text or "").strip()
+            if "斤" in raw:
+                converted = self.process_jin_weight_text(raw)
+                if converted != raw:
+                    stripped = self.remove_chinese_characters(converted).strip()
+                    out[idx] = stripped or converted
+                continue
+            if not headers or not bbox or len(bbox) < 4:
+                continue
+            if not re.fullmatch(r"\d+(?:[\.,]\d+)?", raw):
+                continue
+            x1, y1, x2, _y2 = [float(v) for v in list(bbox)[:4]]
+            cx = (x1 + x2) / 2
+            best_gap = None
+            for hx1, hy1, hx2, hy2 in headers:
+                pad = max(8.0, (hx2 - hx1) * 0.35)
+                if cx < hx1 - pad or cx > hx2 + pad or y1 + 2 < hy1:
+                    continue
+                gap = y1 - hy2
+                if gap < -4:
+                    continue
+                if best_gap is None or gap < best_gap:
+                    best_gap = gap
+            if best_gap is None:
+                continue
+            out[idx] = self._jin_to_kg_label(raw)
+        return out
+
+    def review_localized_size_laundry(self, source_ocr: List[Any], output_ocr: List[Any]) -> List[str]:
+        """Lỗi còn lại sau GPT: chữ Trung, 斤, thiếu cm/kg, hoặc cân nặng chưa đổi sang kg."""
+        source_items = self._normalize_ocr_items(source_ocr)
+        output_items = self._normalize_ocr_items(output_ocr)
+        source_text = "\n".join(text for text, _bbox in source_items)
+        output_text = "\n".join(text for text, _bbox in output_items)
+        if source_text.strip() and not output_text.strip():
+            return ["không đọc được chữ trên ảnh GPT"]
+        problems: List[str] = []
+        hanzi = self.chinese_regex.findall(output_text)
+        if hanzi:
+            problems.append(f"còn {len(hanzi)} chữ Trung")
+        if "斤" in output_text:
+            problems.append("còn đơn vị 斤")
+        compact = output_text.replace(" ", "").replace(",", ".")
+
+        def missing_number(raw: str) -> bool:
+            norm = str(raw).replace(",", ".")
+            if norm.endswith(".0"):
+                norm = norm[:-2]
+            if not norm:
+                return False
+            return re.search(rf"(?<!\d){re.escape(norm)}(?!\d)", compact) is None
+
+        missing_cm = []
+        for match in re.finditer(r"(\d+(?:[\.,]\d+)?)\s*(?:cm|厘米)", source_text, flags=re.IGNORECASE):
+            token = match.group(1)
+            if missing_number(token):
+                missing_cm.append(token.replace(",", "."))
+        if missing_cm:
+            problems.append("thiếu số đo cm: " + ", ".join(dict.fromkeys(missing_cm)))
+        missing_kg = []
+        for match in re.finditer(r"(\d+(?:[\.,]\d+)?)\s*(?:kg|公斤|千克)", source_text, flags=re.IGNORECASE):
+            token = match.group(1)
+            if missing_number(token):
+                missing_kg.append(token.replace(",", "."))
+        if missing_kg:
+            problems.append("thiếu số kg: " + ", ".join(dict.fromkeys(missing_kg)))
+        missing_converted = []
+        for label in self.chinese_weight_replacements(source_items).values():
+            for token in re.findall(r"\d+(?:[\.,]\d+)?", label):
+                if missing_number(token):
+                    missing_converted.append(token.replace(",", "."))
+        if missing_converted:
+            problems.append("chưa đổi cân nặng sang kg: " + ", ".join(dict.fromkeys(missing_converted)))
+        return problems
+
     def process_jin_weight_text(self, text: str) -> str:
         if not text or '斤' not in text: return text
         original_text = text
         result = text
         patterns = [
-            r'(\d+)\s*[-~–—至到]\s*(\d+)\s*斤', r'(\d+)\s*斤',
-            r'(\d+)\s*[~≈∼∽]\s*(\d+)\s*斤', r'(\d+)\s*[至到]\s*(\d+)\s*斤',
-            r'(\d+)\s*斤\s*[-~–—至到]\s*(\d+)\s*斤', r'(\d+)\s*[左右大约約约]\s*斤',
-            r'(\d+)\s*斤\s*[左右大约約约]',
+            r'(\d+(?:[\.,]\d+)?)\s*[-~–—至到]\s*(\d+(?:[\.,]\d+)?)\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*[~≈∼∽]\s*(\d+(?:[\.,]\d+)?)\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*[至到]\s*(\d+(?:[\.,]\d+)?)\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*斤\s*[-~–—至到]\s*(\d+(?:[\.,]\d+)?)\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*[左右大约約约]\s*斤',
+            r'(\d+(?:[\.,]\d+)?)\s*斤\s*[左右大约約约]',
         ]
         for pattern in patterns:
-            matches = re.finditer(pattern, result)
+            matches = list(re.finditer(pattern, result))
             for match in matches:
                 full_match = match.group(0)
-                numbers = [int(num) for num in re.findall(r'\d+', full_match)]
-                if not numbers: continue
-                converted_numbers = [str(round(num / 2)) for num in numbers]
-                if len(numbers) == 2: replacement = f"{converted_numbers[0]}-{converted_numbers[1]}kg"
-                else: replacement = f"{converted_numbers[0]}kg"
+                if full_match not in result:
+                    continue
+                numbers = re.findall(r'\d+(?:[\.,]\d+)?', full_match)
+                if not numbers:
+                    continue
+                converted_numbers = [self._jin_to_kg_label(num).removesuffix("kg") for num in numbers]
+                if len(numbers) == 2:
+                    replacement = f"{converted_numbers[0]}-{converted_numbers[1]}kg"
+                else:
+                    replacement = f"{converted_numbers[0]}kg"
                 result = result.replace(full_match, replacement)
         
         if '斤' in result and not any(char.isdigit() for char in result):
@@ -367,10 +485,22 @@ YÊU CẦU:
         return normalized_items
 
     def has_size_or_laundry_context(self, ocr_results: List[Any]) -> bool:
+        return self.size_laundry_flags(ocr_results).is_size_or_laundry
+
+    def size_laundry_flags(self, ocr_results: List[Any]) -> SizeLaundryFlags:
+        """Size, giặt tẩy, và poster đủ cả bảng size (>=3 cỡ + nhãn số đo) lẫn hướng dẫn giặt."""
         items = self._normalize_ocr_items(ocr_results)
         if not items:
-            return False
-        return self._has_size_table_context(items) or self._has_laundry_care_context(items)
+            return SizeLaundryFlags()
+        is_size = self._has_size_table_context(items)
+        is_laundry = self._has_laundry_care_context(items)
+        comprehensive = False
+        if is_size and is_laundry:
+            texts = [str(text or "") for text, _ in items if str(text or "").strip()]
+            size_token_count = sum(1 for text in texts if self._is_size_token_text(text))
+            size_label_count = sum(1 for text in texts if self._is_size_dimension_label(text))
+            comprehensive = size_token_count >= 3 and size_label_count >= 1
+        return SizeLaundryFlags(is_size, is_laundry, comprehensive)
     
     def classify_and_process_blocks(
         self,
@@ -398,6 +528,7 @@ YÊU CẦU:
             print("    [FACTORY INTRO] delete image")
             return None
 
+        weight_replacements = self.chinese_weight_replacements(normalized_items)
         size_table_context = self._has_size_table_context(normalized_items)
         if size_table_context:
             print("    [SIZE TABLE] vẽ local — không xóa ảnh")
@@ -406,7 +537,12 @@ YÊU CẦU:
         # Tham số cũ: bảng size / giặt không còn xóa ảnh dù caller truyền True.
         _ = delete_size_and_laundry
 
-        for text, bbox in normalized_items:
+        for idx, (text, bbox) in enumerate(normalized_items):
+            if idx in weight_replacements:
+                converted = weight_replacements[idx]
+                print(f"    ⚖️ [QUY ĐỔI] '{text}' ➡️ '{converted}'")
+                processed_blocks.append((converted, bbox))
+                continue
             if self._is_standalone_cm_measurement(text.strip()):
                 print(f"    [CM] group with processed text: '{text.strip()}'")
                 processed_blocks.append((text.strip(), tuple(bbox)))

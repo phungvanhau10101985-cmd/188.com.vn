@@ -298,6 +298,9 @@ def _serialize_products_for_api(
     for product in raw_products:
         try:
             d = Product.model_validate(product).model_dump()
+            from app.services.product_image_visibility import apply_library_cover_to_payload
+
+            apply_library_cover_to_payload(d)
             # Dòng kho thanh lý: giá sale kho riêng — không chồng lịch Sale site (6/6, …).
             if not getattr(product, "is_warehouse_clearance", False):
                 sale_calendar_svc.enrich_product_payload_with_site_sale(d, sale_state)
@@ -342,6 +345,9 @@ def _product_to_response(
             standalone_wh = True
 
     d = Product.model_validate(row).model_dump()
+    from app.services.product_image_visibility import apply_library_cover_to_payload
+
+    apply_library_cover_to_payload(d)
     if standalone_wh:
         wh_clearance_svc.enrich_standalone_warehouse_product(db, d, db_product)
         d["slug"] = crud.product.generate_consistent_slug(

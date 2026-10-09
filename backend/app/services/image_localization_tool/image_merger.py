@@ -216,7 +216,7 @@ class ImageMerger:
                         continue
                     
                     # Check kích thước vật lý
-                    if w < self.min_image_width:
+                    if w <= self.min_image_width:
                         logger.warning(f"      🗑️ Ảnh tải về quá nhỏ ({w}px) -> XÓA")
                         self.small_images_found.add(url)
                         return None 

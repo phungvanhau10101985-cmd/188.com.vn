@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from app.services.product_image_visibility import (
     colors_valid_for_import,
     delete_product_if_no_variant_or_images,
+    pick_library_representative_url,
     product_data_has_storefront_image,
     product_should_remove_after_localization,
+    repair_main_image_from_library,
     is_plausible_product_image_url,
     _PLACEHOLDER_HOST_RE,
     _PLACEHOLDER_HOST_SQL_VALUES,
@@ -56,6 +58,23 @@ def test_product_data_has_storefront_image():
             )
         }
     ) is True
+
+
+def test_library_cover_uses_first_image_then_second():
+    first = "https://cdn.example/library-1.jpg"
+    second = "https://cdn.example/library-2.jpg"
+    assert pick_library_representative_url([first, second]) == first
+    assert pick_library_representative_url(["", second, "https://cdn.example/library-3.jpg"]) == second
+    assert pick_library_representative_url(["https://188.com.vn", second]) == second
+    assert pick_library_representative_url(["https://188.com.vn/", ""]) is None
+
+    missing = SimpleNamespace(main_image=None, images=[first, second])
+    assert repair_main_image_from_library(missing) is True
+    assert missing.main_image == first
+
+    already = SimpleNamespace(main_image=second, images=[first])
+    assert repair_main_image_from_library(already) is False
+    assert already.main_image == second
 
 
 def test_placeholder_host_sql_does_not_match_cdn_media():

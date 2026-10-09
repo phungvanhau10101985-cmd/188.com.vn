@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
-import { getOptimizedImage } from '@/lib/image-utils';
+import { getOptimizedImage, representativeProductImage } from '@/lib/image-utils';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import ProductCardClearanceMeta from '@/components/ProductCardClearanceMeta';
@@ -25,6 +25,31 @@ interface ViewedItem {
 
 function formatVnd(n: number) {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
+}
+
+function ViewedCardImage({
+  product,
+  priority,
+}: {
+  product: { main_image?: string; images?: string[] };
+  priority: boolean;
+}) {
+  const [skip, setSkip] = useState<string | null>(null);
+  const raw = representativeProductImage(product, skip);
+  const imageUrl = getOptimizedImage(raw, { fallbackStrategy: 'local' });
+  return (
+    <Image
+      src={imageUrl}
+      alt=""
+      fill
+      priority={priority}
+      sizes="(max-width: 767px) 46vw, (min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+      className="object-cover"
+      onError={() => {
+        if (raw) setSkip(raw);
+      }}
+    />
+  );
 }
 
 export default function DaXemPage() {
@@ -129,22 +154,13 @@ export default function DaXemPage() {
               const price = cardProduct.price ?? 0;
               const pathSeg = productPathSlugFromApi(cardProduct.slug, String(item.product_id));
               const href = `/products/${pathSeg}`;
-              const imageUrl = getOptimizedImage(cardProduct.main_image, { fallbackStrategy: 'local' });
-
               return (
                 <article
                   key={item.id}
                   className="overflow-hidden rounded-lg border border-gray-100 bg-white shadow-sm transition-shadow hover:shadow-md md:rounded-xl md:shadow"
                 >
                   <Link href={href} className="relative block aspect-square bg-gray-100" aria-label={`Xem ${name}`}>
-                    <Image
-                      src={imageUrl}
-                      alt=""
-                      fill
-                      priority={index === 0}
-                      sizes="(max-width: 767px) 46vw, (min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
-                      className="object-cover"
-                    />
+                    <ViewedCardImage product={cardProduct} priority={index === 0} />
                   </Link>
                   <div className="flex flex-col p-2.5 sm:p-3 md:p-4">
                     <Link href={href} className="min-h-0 flex-1">

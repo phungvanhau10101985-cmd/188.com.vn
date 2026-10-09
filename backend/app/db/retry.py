@@ -104,6 +104,9 @@ def preload_product_for_offline_use(product: Any) -> None:
         product.main_image,
         product.product_info,
         product.image_localization_status,
+        product.shop_name_chinese,
+        product.category_id,
+        product.subcategory,
     )
 
 

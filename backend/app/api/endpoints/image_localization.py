@@ -918,9 +918,43 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     }
                 )
                 if is_image_localization_fatal_dependency_error(exc):
+                    review_failed = "gpt_image_failed" in err_tail.lower() or "gemini_review_failed" in err_tail.lower()
+                    gemini_failed = "gemini_review_failed" in err_tail.lower()
+                    if review_failed:
+                        try:
+                            from app.services.ops_health_alert import notify_ops_health_alert
+
+                            notify_ops_health_alert(
+                                "image_localization_gpt",
+                                "Bản địa hóa ảnh dừng vì Gemini đọc ảnh lỗi"
+                                if gemini_failed
+                                else "Bản địa hóa ảnh dừng vì GPT Image lỗi",
+                                detail=err_tail,
+                                action=(
+                                    "Job bản địa hóa đã dừng, không xử lý sản phẩm tiếp theo. "
+                                    "Kiểm tra GEMINI_API_KEY nếu lỗi đọc ảnh, hoặc OPENAI_API_KEY nếu lỗi GPT Image."
+                                ),
+                                force=True,
+                            )
+                        except Exception:
+                            logger.exception("Không gửi được email admin khi hậu kiểm ảnh lỗi")
                     _mark_processed_product(processed_ids, processed_set, product_id)
                     current, percent = _job_progress(
                         done=done, failed=failed, skipped=skipped, total=total
+                    )
+                    stop_message = (
+                        "Dừng bản địa hóa ảnh vì hậu kiểm Gemini lỗi. Đã gửi email cho admin: "
+                        f"{err_tail}"
+                        if gemini_failed
+                        else (
+                            "Dừng bản địa hóa ảnh vì GPT Image lỗi. Đã gửi email cho admin: "
+                            f"{err_tail}"
+                            if review_failed
+                            else (
+                                "Dừng bản địa hóa ảnh vì OCR/DeepSeek lỗi bắt buộc "
+                                f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
+                            )
+                        )
                     )
                     _job_update(
                         job_id,
@@ -932,10 +966,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         skipped=skipped,
                         processed_product_ids=processed_ids,
                         percent=percent,
-                        message=(
-                            "Dừng bản địa hóa ảnh vì OCR/DeepSeek lỗi bắt buộc "
-                            f"(hết quota/tiền, thiếu key hoặc billing lỗi): {err_tail}"
-                        ),
+                        message=stop_message,
                         finished_at=datetime.now(timezone.utc).isoformat(),
                         recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                         current_product_id=None,

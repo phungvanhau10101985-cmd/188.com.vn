@@ -1,4 +1,12 @@
 import type { Product } from '@/types/api';
+import { representativeProductImage } from '@/lib/image-utils';
+
+function coverFromProduct(product: {
+  main_image?: string | null;
+  images?: readonly (string | null | undefined)[] | null;
+}): string | undefined {
+  return representativeProductImage(product);
+}
 
 /** Snapshot `product_data` (đã xem / yêu thích) → Product cho thẻ lưới. */
 export function snapshotProductDataAsProduct(
@@ -14,7 +22,11 @@ export function snapshotProductDataAsProduct(
     slug: String(d.slug ?? productId),
     price: Number(d.price ?? 0),
     created_at: String(d.created_at ?? new Date(0).toISOString()),
-    main_image: typeof d.main_image === 'string' ? d.main_image : undefined,
+    main_image: coverFromProduct({
+      main_image: typeof d.main_image === 'string' ? d.main_image : undefined,
+      images: Array.isArray(d.images) ? (d.images as string[]) : undefined,
+    }),
+    images: Array.isArray(d.images) ? (d.images as string[]) : undefined,
     brand_name: typeof d.brand_name === 'string' ? d.brand_name : undefined,
     warehouse_variants: Array.isArray(d.warehouse_variants) ? (d.warehouse_variants as Product['warehouse_variants']) : undefined,
     warehouse_clearance: d.warehouse_clearance as Product['warehouse_clearance'],
@@ -25,8 +37,12 @@ export function snapshotProductDataAsProduct(
 }
 
 export function snapshotNeedsProductRefresh(data: Record<string, unknown>): boolean {
+  const cover = coverFromProduct({
+    main_image: typeof data.main_image === 'string' ? data.main_image : undefined,
+    images: Array.isArray(data.images) ? (data.images as string[]) : undefined,
+  });
   const missingBasics =
-    !data.name || data.price == null || data.price === undefined || !data.main_image;
+    !data.name || data.price == null || data.price === undefined || !cover;
   const neverEnrichedClearance =
     data.warehouse_clearance === undefined && data.warehouse_variants === undefined;
   return missingBasics || neverEnrichedClearance;
@@ -52,7 +68,8 @@ export function mergeProductSnapshotFromApi(
     product_id: product.product_id,
     name: product.name,
     price: product.price,
-    main_image: product.main_image,
+    main_image: coverFromProduct(product) || product.main_image,
+    images: product.images ?? data.images,
     brand_name: product.brand_name ?? data.brand_name,
     slug: product.slug ?? data.slug,
     warehouse_variants: product.warehouse_variants,

@@ -308,6 +308,31 @@ const isValidUrl = (url: string): boolean => {
   }
 };
 
+/**
+ * Ảnh đại diện khi main_image trống: ảnh thư viện thứ 1, không có thì ảnh thứ 2.
+ * `skip` bỏ URL vừa lỗi tải để thử ảnh thư viện còn lại.
+ */
+export function representativeProductImage(
+  product: {
+    main_image?: string | null;
+    images?: readonly (string | null | undefined)[] | null;
+  },
+  skip?: string | null,
+): string | undefined {
+  const blocked = (skip || '').trim();
+  const main = (product.main_image || '').trim();
+  const images = Array.isArray(product.images) ? product.images : [];
+  const slot = (index: number) => (typeof images[index] === 'string' ? images[index].trim() : '');
+
+  const pick = (url: string) =>
+    Boolean(url) && url !== blocked && hasValidProductImageUrl(url);
+
+  if (pick(main)) return main;
+  if (pick(slot(0))) return slot(0);
+  if (pick(slot(1))) return slot(1);
+  return undefined;
+}
+
 /** Ảnh đại diện SP đủ điều kiện hiển thị trên lưới (không placeholder / domain trống). */
 export function hasValidProductImageUrl(url: string | undefined | null): boolean {
   const raw = (url || '').trim();

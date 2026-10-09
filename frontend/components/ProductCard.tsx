@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { memo, useMemo, useState } from 'react';
 import { Product } from '@/types/api';
 import { formatPrice, getDiscountPercentage, truncateText } from '@/lib/utils';
-import { LISTING_CARD_IMAGE, getOptimizedImage, hasValidProductImageUrl } from '@/lib/image-utils';
+import { LISTING_CARD_IMAGE, getOptimizedImage, hasValidProductImageUrl, representativeProductImage } from '@/lib/image-utils';
 import CdnFillImage from '@/components/CdnFillImage';
 import { hasVideoLink } from '@/lib/video-utils';
 import { productPathSlugFromApi, productPdpHref } from '@/lib/product-path-slug';
@@ -240,6 +240,7 @@ export default function ProductCard({
 }: ProductCardProps) {
   const [imageError, setImageError] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [rejectedCover, setRejectedCover] = useState<string | null>(null);
   
   const canOrder = canOrderAnyVariant(product);
   const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, catalogListPrice, showsClearance } =
@@ -252,7 +253,9 @@ export default function ProductCard({
   
   // Sử dụng image utils với kích thước tối ưu — ảnh màu thanh lý thay ảnh đại diện khi có kho sale
   const cardImageSource =
-    clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+    clearanceHero?.imageUrl ||
+    warehouseStandaloneSaleImage(product) ||
+    representativeProductImage(product, rejectedCover);
   if (!hasValidProductImageUrl(cardImageSource) || !cardImageSource) {
     return null;
   }
@@ -264,6 +267,12 @@ export default function ProductCard({
   });
 
   const handleImageError = () => {
+    const next = representativeProductImage(product, cardImageSource);
+    if (next && next !== cardImageSource) {
+      setRejectedCover(cardImageSource);
+      setImageLoading(true);
+      return;
+    }
     setImageError(true);
     setImageLoading(false);
   };
@@ -483,12 +492,15 @@ const SimpleProductCardComponent = ({
   priority?: boolean;
 }) => {
   const [imageError, setImageError] = useState(false);
+  const [rejectedCover, setRejectedCover] = useState<string | null>(null);
   const { pricing, displayPrice, birthdayDiscount, birthdayBadgeActive, catalogSiteSale, catalogListPrice, showsClearance } =
     useCatalogProductPricing(product);
   const clearanceHero = useMemo(() => getClearanceCardHero(product), [product]);
   const fullyOutOfStock = isFullyOutOfStock(product);
   const cardImageSource =
-    clearanceHero?.imageUrl || warehouseStandaloneSaleImage(product) || product.main_image;
+    clearanceHero?.imageUrl ||
+    warehouseStandaloneSaleImage(product) ||
+    representativeProductImage(product, rejectedCover);
   if (!hasValidProductImageUrl(cardImageSource) || !cardImageSource) {
     return null;
   }
@@ -502,6 +514,11 @@ const SimpleProductCardComponent = ({
   };
 
   const handleImageError = () => {
+    const next = representativeProductImage(product, cardImageSource);
+    if (next && next !== cardImageSource) {
+      setRejectedCover(cardImageSource);
+      return;
+    }
     setImageError(true);
   };
 

@@ -86,6 +86,58 @@ def test_size_chart_still_uses_table_cells():
     assert int(out[28:44, 20:90].min()) < 40
 
 
+def test_photo_gap_chart_draws_labels_in_place():
+    img = np.full((900, 400, 3), 255, np.uint8)
+    img[30:180, 20:150] = _leather(150, 130, 9)
+    photo = img[30:180, 20:150].copy()
+    blocks = []
+    for i, label in enumerate(("Chieu cao", "Can nang", "Vong nguc", "Vong eo", "Kieu dang", "Mau sac")):
+        y = 40 + i * 22
+        blocks.append((label, (170, y, 250, y + 16)))
+    for row in range(4):
+        y = 420 + row * 36
+        for col in range(4):
+            x = 20 + col * 90
+            blocks.append((f"C{col}{row}", (x, y, x + 50, y + 18)))
+
+    out = _processor().process_image_with_text(img, blocks, [])
+
+    delta = np.abs(out[30:180, 20:150].astype(np.int16) - photo.astype(np.int16)).mean()
+    assert delta < 8, f"anh mau bi de chu delta={delta:.1f}"
+    assert int(out[300, 200].min()) > 240
+    assert int(out[46:54, 176:240].min()) < 40
+    assert int(out[426:440, 24:64].min()) < 40
+
+
+def test_text_on_cream_paper_is_redrawn_and_photo_stays():
+    import cv2
+
+    img = np.full((420, 320, 3), (236, 244, 248), np.uint8)
+    cv2.putText(img, "Tieu de san pham", (18, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 20, 20), 2, cv2.LINE_AA)
+    cv2.putText(img, "Dong mo ta thu nhat rat dai", (16, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (20, 20, 20), 1, cv2.LINE_AA)
+    cv2.putText(img, "Dong mo ta thu hai cung dai", (16, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (20, 20, 20), 1, cv2.LINE_AA)
+    img[240:400, 20:300] = _leather(160, 280, 11)
+    photo = img[240:400, 20:300].copy()
+    proc = _processor()
+    assert proc._region_is_color_photo(img, (16, 36, 250, 70)) is False
+    assert proc._region_is_color_photo(img, (16, 86, 280, 132)) is False
+    assert proc._region_is_color_photo(img, (20, 240, 300, 400)) is True
+
+    out = proc.process_image_with_text(
+        img,
+        [
+            ("Tui kep nach det thoi trang", (18, 36, 230, 68)),
+            ("Day la dong mo ta dai hon hop OCR", (16, 86, 250, 108)),
+            ("Va dong mo ta tiep theo van la chu", (16, 110, 270, 132)),
+        ],
+        [],
+    )
+    delta = np.abs(out[240:400, 20:300].astype(np.int16) - photo.astype(np.int16)).mean()
+    assert delta < 8, f"anh san pham bi de chu delta={delta:.1f}"
+    assert int(out[40:66, 22:220].min()) < 40
+    assert not np.array_equal(out[36:132, 16:280], img[36:132, 16:280])
+
+
 def test_photo_bbox_is_not_filled_white():
     photo = _leather(160, 220, 7)
     img = np.full((200, 260, 3), 255, np.uint8)

@@ -1891,6 +1891,12 @@ class MigrationManager:
         )
         results['taxonomy_settings_seed'] = self._seed_taxonomy_settings_singleton()
 
+        from app.models.shop_size_laundry_poster import ShopCat2SizeLaundryPoster
+
+        results['shop_cat2_size_laundry_posters_create'] = self._create_table_if_not_exists(
+            "shop_cat2_size_laundry_posters", ShopCat2SizeLaundryPoster
+        )
+
         return results
 
     def migrate_sale_calendar_flash_sale_enabled(self) -> bool:

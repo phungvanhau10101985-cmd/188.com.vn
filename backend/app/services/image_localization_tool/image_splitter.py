@@ -346,7 +346,8 @@ class ImageSplitter:
                             'part_index': part['part_index'],
                             'total_parts': part['total_parts'],
                             'source_columns': source_cols,
-                            'y_offset': part['y_offset']
+                            'y_offset': part['y_offset'],
+                            'original_path': original_path,
                         }
                         
                 except Exception as e:

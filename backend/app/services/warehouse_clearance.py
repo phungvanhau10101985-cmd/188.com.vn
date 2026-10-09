@@ -715,6 +715,11 @@ def enrich_snapshot_product_data_batch(
                 base["price"] = row.price
             if not base.get("main_image") and getattr(row, "main_image", None):
                 base["main_image"] = row.main_image
+            from app.services.product_image_visibility import apply_library_cover_to_payload
+
+            if isinstance(row.images, list) and not base.get("images"):
+                base["images"] = row.images
+            apply_library_cover_to_payload(base)
             if not base.get("brand_name") and getattr(row, "brand_name", None):
                 base["brand_name"] = row.brand_name
         pairs.append((row, base))

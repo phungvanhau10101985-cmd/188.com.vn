@@ -85,12 +85,33 @@ def _iter_image_candidates(product: Product) -> Iterable[str]:
     )
 
 
+def pick_library_representative_url(images: Any) -> Optional[str]:
+    """Ảnh đại diện từ thư viện: ảnh thứ 1, không có thì ảnh thứ 2."""
+    if not isinstance(images, list):
+        return None
+    for item in images[:2]:
+        if is_plausible_product_image_url(item):
+            return _norm_url(item)
+    return None
+
+
 def resolve_product_display_image_url(product: Product) -> Optional[str]:
     """Ảnh đại diện thực tế dùng cho thẻ SP / PDP."""
     for url in _iter_image_candidates(product):
         if is_plausible_product_image_url(url):
             return url
     return None
+
+
+def apply_library_cover_to_payload(payload: Any) -> None:
+    """Điền main_image trên dict API khi ảnh đại diện trống — thư viện[0], rồi thư viện[1]."""
+    if not isinstance(payload, dict):
+        return
+    if is_plausible_product_image_url(payload.get("main_image")):
+        return
+    url = pick_library_representative_url(payload.get("images"))
+    if url:
+        payload["main_image"] = url
 
 
 def product_has_storefront_image(product: Product) -> bool:
@@ -208,8 +229,22 @@ def apply_storefront_image_filter(query, *, enabled: bool = True):
     return query.filter(storefront_image_sql_filter())
 
 
+def repair_main_image_from_library(product: Product) -> bool:
+    """Gán main_image từ ảnh thư viện thứ 1, hoặc thứ 2 nếu ảnh đầu không có."""
+    current = _norm_url(getattr(product, "main_image", None))
+    if is_plausible_product_image_url(current):
+        return False
+    url = pick_library_representative_url(getattr(product, "images", None))
+    if not url:
+        return False
+    product.main_image = url
+    return True
+
+
 def repair_main_image_from_candidates(product: Product) -> bool:
-    """Gán main_image từ images/gallery/colors nếu đang trống hoặc không hợp lệ."""
+    """Gán main_image từ thư viện (ảnh 1 rồi ảnh 2), sau đó gallery/colors nếu thư viện trống."""
+    if repair_main_image_from_library(product):
+        return True
     url = resolve_product_display_image_url(product)
     if not url:
         return False

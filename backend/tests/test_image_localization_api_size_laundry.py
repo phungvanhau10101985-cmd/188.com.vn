@@ -29,6 +29,17 @@ LAUNDRY_OCR = [
 ]
 
 
+def test_comprehensive_poster_needs_size_and_laundry():
+    tr = _translator()
+    flags = tr.size_laundry_flags(SIZE_OCR + LAUNDRY_OCR)
+    assert flags.is_size is True
+    assert flags.is_laundry is True
+    assert flags.comprehensive is True
+    assert tr.size_laundry_flags(SIZE_OCR).comprehensive is False
+    assert tr.size_laundry_flags(LAUNDRY_OCR).is_laundry is True
+    assert tr.size_laundry_flags(LAUNDRY_OCR).comprehensive is False
+
+
 def test_size_table_drawn_on_local_path():
     tr = _translator()
     with patch.object(tr, "call_deepseek_for_translation_single", return_value="Ngực"):
@@ -130,3 +141,50 @@ def test_classifier_does_not_delete_product_photo_for_label_domain():
     ]
     result = clf.classify_image(ocr, [], "https://example.com/valve.jpg")
     assert result.get("type") != "delete"
+
+
+def test_chinese_jin_weight_converts_to_kg_and_spares_cm_column():
+    tr = _translator()
+    assert tr.process_jin_weight_text("94斤") == "47kg"
+    assert tr.process_jin_weight_text("95斤") == "47.5kg"
+    assert tr.process_jin_weight_text("90-100斤") == "45-50kg"
+    items = [
+        ("体重", (200, 10, 250, 30)),
+        ("98", (205, 40, 240, 58)),
+        ("胸围", (40, 10, 90, 30)),
+        ("84", (45, 40, 80, 58)),
+        ("体重/47kg", (20, 80, 140, 100)),
+    ]
+    replaced = tr.chinese_weight_replacements(items)
+    assert replaced[1] == "49kg"
+    assert 3 not in replaced
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Cân nặng"):
+        processed, _ignored = tr.classify_and_process_blocks(
+            [{"text": text, "bbox": list(bbox)} for text, bbox in items],
+            delete_size_and_laundry=False,
+        )
+    drawn = {text for text, _bbox in processed}
+    assert "49kg" in drawn
+    assert "84" not in drawn
+
+
+def test_gpt_size_laundry_review_rejects_chinese_and_accepts_kg():
+    tr = _translator()
+    source = [
+        {"text": "身高/165cm", "bbox": [10, 10, 120, 30]},
+        {"text": "体重/47kg", "bbox": [130, 10, 220, 30]},
+        {"text": "体重", "bbox": [200, 40, 250, 58]},
+        {"text": "98", "bbox": [205, 70, 240, 88]},
+    ]
+    bad = [{"text": "Chiều cao/165cm 体重 98", "bbox": [10, 10, 200, 40]}]
+    problems = tr.review_localized_size_laundry(source, bad)
+    assert any("chữ Trung" in item for item in problems)
+    assert any("49" in item for item in problems)
+
+    good = [
+        {"text": "Chiều cao/165cm", "bbox": [10, 10, 160, 30]},
+        {"text": "Cân nặng/47kg", "bbox": [170, 10, 280, 30]},
+        {"text": "Cân nặng (kg)", "bbox": [200, 40, 280, 58]},
+        {"text": "49kg", "bbox": [205, 70, 250, 88]},
+    ]
+    assert tr.review_localized_size_laundry(source, good) == []

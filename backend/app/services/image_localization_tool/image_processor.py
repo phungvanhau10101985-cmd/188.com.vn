@@ -573,10 +573,14 @@ class ImageProcessor:
                 prev_w = last["x2"] - last["x1"]
                 next_w = other["x2"] - other["x1"]
                 gap = other["y1"] - last["y2"]
-                if (
+                both_wide = prev_w >= image_width * 0.42 and next_w >= image_width * 0.42
+                shorter_wrap = (
                     prev_w >= image_width * 0.42
                     and next_w >= image_width * 0.28
                     and next_w < prev_w - 8
+                )
+                if (
+                    (both_wide or shorter_wrap)
                     and abs(last["x1"] - other["x1"]) <= 16
                     and -2 <= gap <= 16
                 ):
@@ -805,20 +809,46 @@ class ImageProcessor:
             clipped.append(out.strip() or line[:1])
         return font, clipped or [""], pad
 
-    def _region_is_product_photo(self, img: np.ndarray, bbox) -> bool:
-        """Vùng da/kim loại có màu và dải xám giữa — khác nền trắng đen của bảng size."""
+    def _region_is_color_photo(self, img: np.ndarray, bbox) -> bool:
+        """Ảnh màu (da, áo, sản phẩm). Thanh xám và nền trắng không tính."""
         h_img, w_img = img.shape[:2]
         x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
         if x2 - x1 < 8 or y2 - y1 < 8:
             return False
         roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        if self._is_text_on_flat_paper(gray):
+            return False
         b, g, r = cv2.split(roi)
         color_spread = float(np.mean(np.abs(r.astype(np.int16) - g.astype(np.int16))))
         color_spread += float(np.mean(np.abs(g.astype(np.int16) - b.astype(np.int16))))
+        return color_spread > 12 and float(np.std(gray)) > 16
+
+    def _is_text_on_flat_paper(self, gray: np.ndarray) -> bool:
+        """Chữ đen trên nền kem/trắng phẳng. Nét chữ làm lệch màu nhưng không phải ảnh sản phẩm."""
+        paper = gray >= 200
+        if float(np.mean(paper)) < 0.45 or int(np.count_nonzero(paper)) < 20:
+            return False
+        if float(np.std(gray[paper])) >= 18:
+            return False
+        ink = (gray < 175).astype(np.uint8)
+        count, _labels, stats, _cent = cv2.connectedComponentsWithStats(ink, connectivity=8)
+        if count <= 1:
+            return True
+        largest = float(stats[1:, cv2.CC_STAT_AREA].max()) / float(max(1, ink.size))
+        return largest < 0.12
+
+    def _region_is_product_photo(self, img: np.ndarray, bbox) -> bool:
+        """Vùng da/kim loại có màu và dải xám giữa — khác nền trắng đen của bảng size."""
+        if self._region_is_color_photo(img, bbox):
+            return True
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return False
+        roi = img[y1:y2, x1:x2]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         std = float(np.std(gray))
-        if color_spread > 12 and std > 16:
-            return True
         midtones = float(np.mean((gray > 40) & (gray < 215)))
         return std > 26 and midtones > 0.4
 
@@ -849,22 +879,119 @@ class ImageProcessor:
                 return True
         return False
 
-    def _draw_table_blocks(self, image_data: np.ndarray, blocks: List[Dict]) -> np.ndarray:
+    def _layout_in_situ_blocks(
+        self,
+        processed_blocks: List,
+        ignore_blocks: List,
+        img_w: int,
+        img_h: int,
+    ) -> List[Dict] | None:
+        """Giữ mỗi dòng trong hộp OCR, chỉ nới tới chữ bên cạnh. Không gộp cả trang."""
+        items = []
+        obstacles = []
+        for text, bbox in processed_blocks or []:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            items.append({"text": str(text or "").strip(), "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        for text, bbox in ignore_blocks or []:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            obstacles.append({"text": str(text or "").strip(), "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        if not items:
+            return None
+        items, obstacles = self._attach_trailing_measurements(items, obstacles)
+        items = self._merge_stacked_paragraphs(items, img_w)
+        pool = items + obstacles
+        placed = []
+        for item in items:
+            if not str(item.get("text") or "").strip():
+                continue
+            src = (item["x1"], item["y1"], item["x2"], item["y2"])
+            line_h = max(8, item["y2"] - item["y1"])
+            center_y = (item["y1"] + item["y2"]) / 2
+            same_row_limit = max(line_h, 12) * 0.85
+            rights = sorted(
+                (
+                    other
+                    for other in pool
+                    if other is not item
+                    and other["x1"] >= item["x2"] - 2
+                    and abs(((other["y1"] + other["y2"]) / 2) - center_y) <= same_row_limit
+                ),
+                key=lambda it: it["x1"],
+            )
+            right = rights[0] if rights else None
+            belows = sorted(
+                (
+                    other
+                    for other in pool
+                    if other is not item
+                    and other["y1"] >= item["y2"] - 2
+                    and min(item["x2"], other["x2"]) - max(item["x1"], other["x1"]) > 2
+                ),
+                key=lambda it: it["y1"],
+            )
+            below = belows[0] if belows else None
+            width = max(1, item["x2"] - item["x1"])
+            if right:
+                gap = right["x1"] - item["x2"]
+                x2 = item["x2"] + min(40, max(0, gap - 3)) if gap > 72 else max(item["x2"], right["x1"] - 3)
+            else:
+                extra = max(56, int(width * 2.6))
+                x2 = min(img_w - 6, item["x2"] + extra)
+            if below:
+                room = below["y1"] - 2 - item["y2"]
+                y2 = item["y2"] + min(max(0, room), max(line_h, 18))
+            else:
+                y2 = min(img_h - 2, item["y2"] + max(4, int(line_h * 0.6)))
+            placed.append({
+                **item,
+                "src_bbox": src,
+                "x1": item["x1"],
+                "y1": item["y1"],
+                "x2": max(item["x2"], int(x2)),
+                "y2": max(item["y2"], int(y2)),
+            })
+        return placed or None
+
+    def _draw_table_blocks(
+        self,
+        image_data: np.ndarray,
+        blocks: List[Dict],
+        *,
+        protect_color_only: bool = False,
+    ) -> np.ndarray:
         img = image_data.copy()
         h_img, w_img = img.shape[:2]
+        is_protected = self._region_is_color_photo if protect_color_only else self._region_is_product_photo
         ordered = sorted(blocks, key=lambda it: ((it["x2"] - it["x1"]) * (it["y2"] - it["y1"])), reverse=True)
         safe_boxes = {}
         for item in ordered:
             erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
             src = item.get("src_bbox")
-            if src and any(self._region_is_product_photo(img, part) for part in self._box_remainder(erase, src)):
+            if src and any(is_protected(img, part) for part in self._box_remainder(erase, src)):
                 erase = src
             x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, erase)), h_img, w_img)
-            if x2 <= x1 or y2 <= y1 or self._region_is_product_photo(img, (x1, y1, x2, y2)):
+            if x2 <= x1 or y2 <= y1 or is_protected(img, (x1, y1, x2, y2)):
                 safe_boxes[id(item)] = None
                 continue
-            img[y1:y2, x1:x2] = (255, 255, 255)
-            safe_boxes[id(item)] = (x1, y1, x2, y2)
+            keep_bg = False
+            if protect_color_only:
+                patch = img[y1:y2, x1:x2]
+                if patch.size:
+                    gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+                    keep_bg = float(np.mean(gray > 235)) < 0.55
+            if keep_bg:
+                img = self._inpaint_text_strokes(img, (x1, y1, x2, y2))
+            else:
+                img[y1:y2, x1:x2] = (255, 255, 255)
+            safe_boxes[id(item)] = (x1, y1, x2, y2, keep_bg)
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         for item in blocks:
             text = str(item.get("text") or "").strip()
@@ -873,14 +1000,14 @@ class ImageProcessor:
             saved = safe_boxes.get(id(item))
             if not saved:
                 continue
-            x1, y1, x2, y2 = saved
+            x1, y1, x2, y2, keep_bg = saved
             w, h = x2 - x1, y2 - y1
             if w < 2 or h < 2:
                 continue
             font, lines, pad = self._fit_cell_lines(text, w, h)
             if not font:
                 continue
-            cell = Image.new("RGB", (w, h), (255, 255, 255))
+            cell = pil.crop((x1, y1, x2, y2)) if keep_bg else Image.new("RGB", (w, h), (255, 255, 255))
             draw = ImageDraw.Draw(cell)
             y_cursor = 1
             for line in lines:
@@ -954,6 +1081,19 @@ class ImageProcessor:
         if table_blocks is not None:
             print(f"  [TABLE] vẽ {len(table_blocks)} ô trong khung, không gộp đè")
             return self.add_smart_watermark(self._draw_table_blocks(image_data, table_blocks), [])
+        in_situ = self._layout_in_situ_blocks(processed_blocks, ignore_blocks, img_w, img_h)
+        if in_situ:
+            for item in in_situ:
+                src = item.get("src_bbox")
+                box = (item["x1"], item["y1"], item["x2"], item["y2"])
+                if src and self._region_is_color_photo(image_data, box):
+                    item["x1"], item["y1"], item["x2"], item["y2"] = src
+                    item.pop("erase", None)
+            print(f"  [IN SITU] vẽ {len(in_situ)} khối đúng hộp OCR")
+            return self.add_smart_watermark(
+                self._draw_table_blocks(image_data, in_situ, protect_color_only=True),
+                [],
+            )
         processed_blocks = self._merge_dense_processed_blocks(processed_blocks, img_w, img_h)
 
         all_blocks = []
