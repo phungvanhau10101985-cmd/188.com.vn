@@ -195,6 +195,318 @@ class ImageProcessor:
         b, g, r = np.median(pixels, axis=0)
         return (int(r), int(g), int(b))
 
+    def _phone_min_font_size(self, img_w: int) -> int:
+        """Cỡ chữ tối thiểu khi ảnh hiện full ngang điện thoại (~390px, ~14px CSS)."""
+        scaled = int(round(max(1, int(img_w)) * 14 / 390))
+        return max(self.MIN_FONT_SIZE, min(64, scaled))
+
+    def _luminance(self, rgb: Tuple[int, int, int]) -> float:
+        return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+    def _snap_ink_rgb(self, rgb: Tuple[int, int, int], bg_rgb: Tuple[int, int, int] | None = None) -> Tuple[int, int, int]:
+        """Giữ màu nét gốc: chữ sáng trên nền tối thành trắng, chữ tối trên nền sáng thành đen."""
+        r, g, b = (int(rgb[0]), int(rgb[1]), int(rgb[2]))
+        lum = self._luminance((r, g, b))
+        if bg_rgb is not None:
+            bg_lum = self._luminance(bg_rgb)
+            if lum - bg_lum >= 35 and lum >= 150:
+                return (255, 255, 255)
+            if bg_lum - lum >= 35 and lum <= 120:
+                return (0, 0, 0)
+        if lum >= 186:
+            return (255, 255, 255)
+        if lum <= 70:
+            return (0, 0, 0)
+        return (r, g, b)
+
+    def _background_bgr(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 <= x1 or y2 <= y1:
+            return (255, 255, 255)
+        roi = img[y1:y2, x1:x2]
+        mask = self._build_text_mask(roi)
+        pixels = roi[mask == 0] if mask.size and int(np.count_nonzero(mask)) else roi.reshape(-1, roi.shape[-1])
+        if getattr(pixels, "size", 0) < 3:
+            pixels = roi.reshape(-1, roi.shape[-1])
+        med = np.median(pixels, axis=0)
+        return (int(med[0]), int(med[1]), int(med[2]))
+
+    def _median_bgr(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 <= x1 or y2 <= y1:
+            return (255, 255, 255)
+        roi = img[y1:y2, x1:x2]
+        if roi.size == 0:
+            return (255, 255, 255)
+        med = np.median(roi.reshape(-1, roi.shape[-1]), axis=0)
+        return (int(med[0]), int(med[1]), int(med[2]))
+
+    def _resolve_ink_rgb(self, img_bgr: np.ndarray, bbox: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+        sampled = self._estimate_text_color(img_bgr, bbox)
+        bg_bgr = self._background_bgr(img_bgr, bbox)
+        bg_rgb = (bg_bgr[2], bg_bgr[1], bg_bgr[0])
+        h_img, w_img = img_bgr.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        roi = img_bgr[y1:y2, x1:x2] if x2 > x1 and y2 > y1 else None
+        if roi is not None and roi.size:
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            if self._is_text_on_flat_paper(gray):
+                if sampled is not None and (max(sampled) - min(sampled)) >= 45:
+                    return self._snap_ink_rgb(sampled, bg_rgb)
+                return (0, 0, 0)
+        if sampled is not None:
+            snapped = self._snap_ink_rgb(sampled, bg_rgb)
+            if abs(self._luminance(snapped) - self._luminance(bg_rgb)) >= 50:
+                return snapped
+        return self._get_text_style(bg_rgb)["text_color"]
+
+    def _row_slot_bounds(
+        self,
+        src: Tuple[int, int, int, int],
+        others: List[Tuple[int, int, int, int]],
+        img_w: int,
+    ) -> Tuple[int, int]:
+        """Khoảng ngang còn trống trên cùng hàng, không đè chữ bên cạnh."""
+        x1, y1, x2, y2 = src
+        cy = (y1 + y2) / 2
+        reach = max(12, y2 - y1)
+        prev_right = None
+        next_left = None
+        for ox1, oy1, ox2, oy2 in others:
+            same_band = abs(((oy1 + oy2) / 2) - cy) <= max(reach, oy2 - oy1) * 1.6
+            overlaps_y = min(y2, oy2) - max(y1, oy1) > 0
+            if not same_band and not overlaps_y:
+                continue
+            if ox2 <= x1 + 2 and (prev_right is None or ox2 > prev_right):
+                prev_right = ox2
+            elif ox1 >= x2 - 2 and (next_left is None or ox1 < next_left):
+                next_left = ox1
+        if prev_right is None and next_left is None:
+            return 2, img_w - 2
+        right = ((x2 + next_left) // 2) if next_left is not None else img_w - 2
+        left = ((prev_right + x1) // 2) if prev_right is not None else 2
+        if prev_right is None:
+            left = max(2, x1 - max(8, right - x2))
+        if next_left is None:
+            right = min(img_w - 2, x2 + max(8, x1 - left))
+        if right - left < 8:
+            return x1, max(x1 + 8, x2)
+        return left, right
+
+    def _inset_white_card(self, img: np.ndarray, src: Tuple[int, int, int, int]):
+        """Thẻ trắng nằm giữa ảnh (không phải nền trắng full)."""
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        h_img, w_img = gray.shape[:2]
+        sx1, sy1, sx2, sy2 = (int(src[0]), int(src[1]), int(src[2]), int(src[3]))
+        cx = max(0, min(w_img - 1, (sx1 + sx2) // 2))
+        probes = list(range(max(0, sy1 - 8), min(h_img - 1, sy2 + 40)))
+        best = None
+        for y in probes:
+            mask = (gray[y] > 210).astype(np.uint8).reshape(1, -1)
+            gap = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 1))
+            closed = cv2.morphologyEx(mask * 255, cv2.MORPH_CLOSE, gap).ravel()
+            if int(closed[cx]) == 0:
+                continue
+            left = cx
+            while left > 0 and int(closed[left - 1]) > 0:
+                left -= 1
+            right = cx
+            while right < w_img - 1 and int(closed[right + 1]) > 0:
+                right += 1
+            span = right - left
+            if span < w_img * 0.28 or span > w_img * 0.92:
+                continue
+            if best is None or span > best[0]:
+                best = (span, left, right, y)
+        if best is None:
+            return None
+        _span, left, right, y = best
+
+        def row_ok(yy: int) -> bool:
+            seg = gray[yy, left:right + 1]
+            return float(np.mean(seg > 200)) > 0.45
+
+        y1, y2 = y, y
+        while y1 > 0 and row_ok(y1 - 1):
+            y1 -= 1
+        while y2 < h_img - 1 and row_ok(y2 + 1):
+            y2 += 1
+        if y2 - y1 < 20:
+            return None
+        return left, y1, right + 1, y2 + 1
+
+    def _apply_inset_caption_cards(self, img: np.ndarray, blocks: List[Dict], phone_min: int) -> None:
+        """Các nhãn cùng hàng trên một thẻ trắng dùng chung một dải, không cắt chữ."""
+        h_img, w_img = img.shape[:2]
+        pending = [item for item in blocks if item.get("_paper") and item.get("_draw") and item.get("src_bbox")]
+        used = set()
+        for item in pending:
+            if id(item) in used:
+                continue
+            src = tuple(map(int, item["src_bbox"]))
+            cy = (src[1] + src[3]) / 2
+            reach = max(12, src[3] - src[1])
+            row = [item]
+            for other in pending:
+                if other is item or id(other) in used:
+                    continue
+                ob = tuple(map(int, other["src_bbox"]))
+                ocy = (ob[1] + ob[3]) / 2
+                if abs(ocy - cy) <= max(reach, ob[3] - ob[1]) * 1.8:
+                    row.append(other)
+            if len(row) < 2:
+                continue
+            card = self._inset_white_card(img, src)
+            if card is None:
+                continue
+            for part in row:
+                used.add(id(part))
+            card_x1, card_y1, card_x2, card_y2 = card
+            row.sort(key=lambda it: int(it["src_bbox"][0]))
+            n = len(row)
+            col_w = max(8, (card_x2 - card_x1) // n)
+            fitted = []
+            tallest = 0
+            for part in row:
+                text = str(part.get("text") or "").strip()
+                font, lines, pad = self._fit_cell_lines(
+                    text,
+                    col_w - 8,
+                    phone_min * 6,
+                    min_size=phone_min,
+                    max_size=phone_min,
+                )
+                if not font:
+                    fitted.append(None)
+                    continue
+                _need_w, need_h = self._line_block_size(font, lines, pad)
+                tallest = max(tallest, need_h)
+                fitted.append((font, lines, pad))
+            if tallest < 8:
+                continue
+            y1 = max(card_y1, min(int(it["src_bbox"][1]) for it in row) - 2)
+            y2 = min(h_img - 2, y1 + tallest + 8)
+            img[y1:y2, card_x1:card_x2] = (255, 255, 255)
+            for index, part in enumerate(row):
+                pack = fitted[index]
+                if not pack:
+                    continue
+                font, lines, pad = pack
+                x1 = card_x1 + index * col_w
+                x2 = card_x2 if index == n - 1 else card_x1 + (index + 1) * col_w
+                part["ink_rgb"] = (0, 0, 0)
+                part["_align"] = "top-center"
+                part["_draw"] = (font, lines, pad, (x1, y1 + 4, x2, y2))
+
+    def _repaint_bbox_to_background(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        """Xóa nét chữ trong hộp OCR bằng màu nền ngay ngoài hộp."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return img
+        pad = 4
+        ox1, oy1 = max(0, x1 - pad), max(0, y1 - pad)
+        ox2, oy2 = min(w_img, x2 + pad), min(h_img, y2 + pad)
+        outer = img[oy1:oy2, ox1:ox2]
+        ring = np.ones(outer.shape[:2], dtype=bool)
+        ring[(y1 - oy1):(y2 - oy1), (x1 - ox1):(x2 - ox1)] = False
+        samples = outer[ring]
+        if samples.size < 9:
+            return img
+        bg = np.median(samples, axis=0)
+        inner = img[y1:y2, x1:x2].copy()
+        diff = np.max(np.abs(inner.astype(np.int16) - bg.astype(np.int16)), axis=2)
+        mask = (diff > 28).astype(np.uint8) * 255
+        mask = cv2.dilate(mask, np.ones((3, 3), np.uint8), iterations=1)
+        inner[mask > 0] = bg
+        out = img.copy()
+        out[y1:y2, x1:x2] = inner
+        return out
+
+    def _erase_strokes_with_local_color(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        """Xóa nét chữ bằng màu nền quanh nét, tránh vệt loang của inpaint trên da."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(bbox, h_img, w_img)
+        if x2 <= x1 or y2 <= y1:
+            return img
+        roi = img[y1:y2, x1:x2]
+        mask = self._build_text_mask(roi)
+        if mask.size == 0 or int(np.count_nonzero(mask)) < 8:
+            return img
+        bg_pixels = roi[mask == 0]
+        if bg_pixels.size < 9:
+            return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
+        fill = np.median(bg_pixels, axis=0).astype(np.uint8)
+        out = img.copy()
+        painted = out[y1:y2, x1:x2]
+        painted[mask > 0] = fill
+        out[y1:y2, x1:x2] = painted
+        return out
+
+    def _rects_intersect(self, a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> bool:
+        return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+    def _expand_draw_box(
+        self,
+        img: np.ndarray,
+        box: Tuple[int, int, int, int],
+        need_w: int,
+        need_h: int,
+        blockers: List[Tuple[int, int, int, int]],
+    ) -> Tuple[int, int, int, int]:
+        """Nới ô chữ trên cùng nền (thẻ trắng, lớp phủ) để vừa cỡ tối thiểu, không đè ô khác."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, box)), h_img, w_img)
+        ref = self._background_bgr(img, (x1, y1, x2, y2))
+
+        def strip_ok(rect: Tuple[int, int, int, int]) -> bool:
+            sx1, sy1, sx2, sy2 = rect
+            if sx2 - sx1 < 1 or sy2 - sy1 < 1:
+                return False
+            if sx1 < 0 or sy1 < 0 or sx2 > w_img or sy2 > h_img:
+                return False
+            for blocker in blockers:
+                if self._rects_intersect(rect, blocker):
+                    return False
+            med = self._median_bgr(img, rect)
+            return max(abs(med[i] - ref[i]) for i in range(3)) <= 36
+
+        def grow(axis: str, sign: int) -> None:
+            nonlocal x1, y1, x2, y2
+            for _ in range(80):
+                if axis == "x" and (x2 - x1) >= need_w:
+                    return
+                if axis == "y" and (y2 - y1) >= need_h:
+                    return
+                if axis == "x" and sign > 0:
+                    trial = (x2, y1, min(w_img, x2 + 4), y2)
+                    if not strip_ok(trial):
+                        return
+                    x2 = trial[2]
+                elif axis == "x" and sign < 0:
+                    trial = (max(0, x1 - 4), y1, x1, y2)
+                    if not strip_ok(trial):
+                        return
+                    x1 = trial[0]
+                elif axis == "y" and sign > 0:
+                    trial = (x1, y2, x2, min(h_img, y2 + 4))
+                    if not strip_ok(trial):
+                        return
+                    y2 = trial[3]
+                else:
+                    trial = (x1, max(0, y1 - 4), x2, y1)
+                    if not strip_ok(trial):
+                        return
+                    y1 = trial[1]
+
+        grow("y", 1)
+        grow("y", -1)
+        grow("x", 1)
+        grow("x", -1)
+        return x1, y1, x2, y2
+
     def _get_text_style(self, bg_color: Tuple[int, int, int]) -> Dict:
         bg_lum = 0.299 * bg_color[0] + 0.587 * bg_color[1] + 0.114 * bg_color[2]
         if bg_lum > 140:
@@ -743,12 +1055,33 @@ class ImageProcessor:
             return None
         return self._expand_table_cells(items, obstacles, img_w)
 
-    def _fit_cell_lines(self, text: str, width: int, height: int):
+    def _line_block_size(self, font, lines: List[str], pad: int) -> Tuple[int, int]:
+        probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+        gap = self._line_gap(getattr(font, "size", self.MIN_FONT_SIZE) or self.MIN_FONT_SIZE)
+        width = 1
+        height = 0
+        for i, line in enumerate(lines or [""]):
+            bb = probe.textbbox((0, 0), line or " ", font=font)
+            width = max(width, bb[2] - bb[0])
+            height += bb[3] - bb[1]
+            if i:
+                height += gap
+        return width + pad * 2, max(height, 1) + 2
+
+    def _fit_cell_lines(
+        self,
+        text: str,
+        width: int,
+        height: int,
+        min_size: int | None = None,
+        max_size: int | None = None,
+    ):
         text = re.sub(r"[˙•]+\s*$", "", str(text or "").strip())
         text = re.sub(r"(IP65)(?=[A-Za-z])", r"\1\n", text)
         text = re.sub(r"\s*:\s*", ": ", text)
         text = re.sub(r"\s*,\s*", ", ", text)
-        pad = 4 if width >= 80 else 1
+        floor = max(6, int(min_size if min_size is not None else self.MIN_FONT_SIZE))
+        pad = 2 if width >= 80 else 1
         inner_w = max(8, width - pad * 2)
         inner_h = max(8, height - 2)
         probe = ImageDraw.Draw(Image.new("RGB", (max(width, 8), max(height, 8))))
@@ -757,57 +1090,44 @@ class ImageProcessor:
             box = probe.textbbox((0, 0), line, font=font)
             return box[2] - box[0]
 
-        def wrap_words(value: str, max_chars: int) -> List[str]:
-            lines = []
-            for part in value.split("\n"):
-                words = [w for w in part.split() if w]
-                current = ""
-                for word in words:
-                    candidate = f"{current} {word}".strip()
-                    if not current or len(candidate) <= max_chars:
-                        current = candidate
-                    else:
-                        lines.append(current)
-                        current = word
-                if current:
-                    lines.append(current)
-            return lines or [""]
+        def wrap_pixels(font, value: str) -> List[str]:
+            lines: List[str] = []
+            for part in str(value or "").split("\n"):
+                part = part.strip()
+                if not part:
+                    continue
+                lines.extend(self._wrap_text(part, font, inner_w, probe, stroke_width=0))
+            return lines or [str(value or "")]
 
-        parts = [line.strip() for line in text.split("\n") if line.strip()]
-        single = len(parts) <= 1
-        body = text if single else text
-        if single:
-            for size in range(min(14, inner_h), 5, -1):
-                font = self._get_font(size)
-                if font and width_of(font, body) <= inner_w + 1:
-                    return font, [body], pad
-        for size in range(min(13, inner_h), 5, -1):
+        def block_fits(font, lines: List[str]) -> bool:
+            if not font or not lines:
+                return False
+            gap = self._line_gap(getattr(font, "size", floor) or floor)
+            total_h = 0
+            for i, line in enumerate(lines):
+                if width_of(font, line) > inner_w + 1:
+                    return False
+                bb = probe.textbbox((0, 0), line, font=font)
+                total_h += bb[3] - bb[1]
+                if i:
+                    total_h += gap
+            return total_h <= inner_h + 1
+
+        body = text
+        hi_cap = int(max_size or self.MAX_FONT_SIZE)
+        hi = min(self.MAX_FONT_SIZE, hi_cap, max(floor, inner_h))
+        for size in range(hi, floor - 1, -1):
             font = self._get_font(size)
             if not font:
                 continue
-            max_chars = max(1, int(inner_w / max(1, size * 0.56)))
-            lines = parts if len(parts) > 1 else wrap_words(body, max_chars)
-            line_h = max(size, round(size * 1.12))
-            widest = max(width_of(font, line) for line in lines)
-            if widest <= inner_w + 1 and len(lines) * line_h <= inner_h + 1:
+            if "\n" not in body and block_fits(font, [body]):
+                return font, [body], pad
+            lines = wrap_pixels(font, body)
+            if block_fits(font, lines):
                 return font, lines, pad
-        font = self._get_font(6)
-        max_chars = max(1, int(inner_w / (6 * 0.56)))
-        wrapped = parts if len(parts) > 1 else wrap_words(body, max_chars)
-        line_h = round(6 * 1.12)
-        max_lines = max(1, inner_h // line_h)
-        clipped = []
-        for line in wrapped[:max_lines]:
-            if not font or width_of(font, line) <= inner_w + 1:
-                clipped.append(line)
-                continue
-            out = ""
-            for ch in line:
-                if width_of(font, out + ch) > inner_w:
-                    break
-                out += ch
-            clipped.append(out.strip() or line[:1])
-        return font, clipped or [""], pad
+        font = self._get_font(floor) or self._get_font(self.MIN_FONT_SIZE)
+        lines = wrap_pixels(font, body) if font else [body]
+        return font, lines, pad
 
     def _region_is_color_photo(self, img: np.ndarray, bbox) -> bool:
         """Ảnh màu (da, áo, sản phẩm). Thanh xám và nền trắng không tính."""
@@ -960,6 +1280,48 @@ class ImageProcessor:
             })
         return placed or None
 
+    def _draw_lines_in_cell(
+        self,
+        cell: Image.Image,
+        lines: List[str],
+        font,
+        fill: Tuple[int, int, int],
+        pad: int,
+        *,
+        align: str = "center",
+        anchor: Tuple[int, int, int, int] | None = None,
+    ) -> None:
+        draw = ImageDraw.Draw(cell)
+        w, h = cell.size
+        ax, ay, aw, ah = anchor or (0, 0, w, h)
+        gap = self._line_gap(getattr(font, "size", self.MIN_FONT_SIZE) or self.MIN_FONT_SIZE)
+        sizes = []
+        total_h = 0
+        max_w = 1
+        for i, line in enumerate(lines):
+            bb = draw.textbbox((0, 0), line, font=font)
+            sizes.append(bb)
+            max_w = max(max_w, bb[2] - bb[0])
+            total_h += bb[3] - bb[1]
+            if i:
+                total_h += gap
+        if align == "top":
+            y = ay + 1
+        elif align == "top-center":
+            y = ay
+        else:
+            y = ay + max(0, (ah - total_h) // 2)
+        for line, bb in zip(lines, sizes):
+            lw = bb[2] - bb[0]
+            if align == "top":
+                x = ax + pad
+            else:
+                x = ax + max(0, (aw - lw) // 2)
+            draw.text((x - bb[0], y - bb[1]), line, font=font, fill=fill)
+            y += (bb[3] - bb[1]) + gap
+            if align == "top" and y >= ay + ah:
+                break
+
     def _draw_table_blocks(
         self,
         image_data: np.ndarray,
@@ -969,29 +1331,85 @@ class ImageProcessor:
     ) -> np.ndarray:
         img = image_data.copy()
         h_img, w_img = img.shape[:2]
+        phone_min = self._phone_min_font_size(w_img)
         is_protected = self._region_is_color_photo if protect_color_only else self._region_is_product_photo
         ordered = sorted(blocks, key=lambda it: ((it["x2"] - it["x1"]) * (it["y2"] - it["y1"])), reverse=True)
         safe_boxes = {}
         for item in ordered:
-            erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
-            src = item.get("src_bbox")
-            if src and any(is_protected(img, part) for part in self._box_remainder(erase, src)):
-                erase = src
+            src = item.get("src_bbox") or (item["x1"], item["y1"], item["x2"], item["y2"])
+            item["ink_rgb"] = self._resolve_ink_rgb(image_data, tuple(map(int, src)))
+            if protect_color_only:
+                erase = tuple(map(int, src))
+            else:
+                erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
+                if src and any(is_protected(img, part) for part in self._box_remainder(erase, src)):
+                    erase = src
             x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, erase)), h_img, w_img)
             if x2 <= x1 or y2 <= y1 or is_protected(img, (x1, y1, x2, y2)):
                 safe_boxes[id(item)] = None
                 continue
             keep_bg = False
             if protect_color_only:
-                patch = img[y1:y2, x1:x2]
-                if patch.size:
-                    gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
-                    keep_bg = float(np.mean(gray > 235)) < 0.55
-            if keep_bg:
-                img = self._inpaint_text_strokes(img, (x1, y1, x2, y2))
+                img = self._repaint_bbox_to_background(img, (x1, y1, x2, y2))
+                bg_bgr = self._background_bgr(image_data, (x1, y1, x2, y2))
+                outside = self._median_bgr(image_data, (
+                    max(0, x1 - 6), max(0, y1 - 6), min(w_img, x2 + 6), min(h_img, y2 + 6),
+                ))
+                paper_bgr = bg_bgr if self._luminance((bg_bgr[2], bg_bgr[1], bg_bgr[0])) > self._luminance((outside[2], outside[1], outside[0])) else outside
+                item["_paper"] = self._luminance((paper_bgr[2], paper_bgr[1], paper_bgr[0])) >= 185
+                item["_paper_bgr"] = paper_bgr if item["_paper"] else None
             else:
+                keep_bg = False
                 img[y1:y2, x1:x2] = (255, 255, 255)
             safe_boxes[id(item)] = (x1, y1, x2, y2, keep_bg)
+        if protect_color_only:
+            sources = [
+                tuple(map(int, item.get("src_bbox") or (item["x1"], item["y1"], item["x2"], item["y2"])))
+                for item in blocks
+                if safe_boxes.get(id(item))
+            ]
+            for item in blocks:
+                saved = safe_boxes.get(id(item))
+                if not saved:
+                    continue
+                text = str(item.get("text") or "").strip()
+                src = tuple(map(int, item.get("src_bbox") or (item["x1"], item["y1"], item["x2"], item["y2"])))
+                sx1, sy1, sx2, sy2 = src
+                src_h = max(2, sy2 - sy1)
+                left, right = self._row_slot_bounds(src, [box for box in sources if box != src], w_img)
+                slot_w = max(8, right - left)
+                glyph_h = max(phone_min, src_h - 2)
+                font, lines, pad = self._fit_cell_lines(
+                    text,
+                    slot_w,
+                    max(src_h + 4, phone_min * 4),
+                    min_size=phone_min,
+                    max_size=glyph_h,
+                )
+                if not font:
+                    continue
+                need_w, need_h = self._line_block_size(font, lines, pad)
+                need_w = min(need_w, slot_w)
+                cx = (sx1 + sx2) // 2
+                cy = (sy1 + sy2) // 2
+                x1 = int(cx - need_w / 2)
+                x1 = min(max(left, x1), max(left, right - need_w))
+                if item.get("_paper") and need_h > src_h + 2:
+                    y1 = sy1
+                else:
+                    y1 = int(cy - need_h / 2)
+                x1 = max(0, min(x1, w_img - need_w))
+                y1 = max(0, min(y1, h_img - 2))
+                x2 = min(w_img, x1 + need_w)
+                y2 = min(h_img, y1 + need_h)
+                item["_draw"] = (font, lines, pad, (x1, y1, x2, y2))
+                item["_align"] = "top-center" if item.get("_paper") else "center"
+            self._apply_inset_caption_cards(img, blocks, phone_min)
+            for item in blocks:
+                if item.get("_paper") and item.get("_draw") and item.get("_paper_bgr") is not None:
+                    _font, _lines, _pad, (px1, py1, px2, py2) = item["_draw"]
+                    if img[py1:py2, px1:px2].size and float(np.mean(img[py1:py2, px1:px2] > 230)) < 0.8:
+                        img[py1:py2, px1:px2] = (255, 255, 255)
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         for item in blocks:
             text = str(item.get("text") or "").strip()
@@ -1000,22 +1418,38 @@ class ImageProcessor:
             saved = safe_boxes.get(id(item))
             if not saved:
                 continue
-            x1, y1, x2, y2, keep_bg = saved
+            ox1, oy1, ox2, oy2, keep_bg = saved
+            x1, y1, x2, y2 = ox1, oy1, ox2, oy2
+            prepared = item.get("_draw") if protect_color_only else None
+            anchor = None
+            if prepared:
+                font, lines, pad, (x1, y1, x2, y2) = prepared
+                anchor = (0, 0, max(1, x2 - x1), max(1, y2 - y1))
+            else:
+                w, h = x2 - x1, y2 - y1
+                if w < 2 or h < 2:
+                    continue
+                font, lines, pad = self._fit_cell_lines(text, w, h, min_size=6, max_size=14)
+            if not font:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox((x1, y1, x2, y2), h_img, w_img)
             w, h = x2 - x1, y2 - y1
             if w < 2 or h < 2:
                 continue
-            font, lines, pad = self._fit_cell_lines(text, w, h)
-            if not font:
-                continue
-            cell = pil.crop((x1, y1, x2, y2)) if keep_bg else Image.new("RGB", (w, h), (255, 255, 255))
-            draw = ImageDraw.Draw(cell)
-            y_cursor = 1
-            for line in lines:
-                draw.text((pad, y_cursor), line, font=font, fill=(0, 0, 0))
-                box = draw.textbbox((pad, y_cursor), line, font=font)
-                y_cursor = box[3] + 1
-                if y_cursor >= h:
-                    break
+            fill = item.get("ink_rgb") or (0, 0, 0)
+            if keep_bg or prepared:
+                cell = pil.crop((x1, y1, x2, y2))
+            else:
+                cell = Image.new("RGB", (w, h), (255, 255, 255))
+            self._draw_lines_in_cell(
+                cell,
+                lines,
+                font,
+                fill,
+                pad,
+                align=item.get("_align") or ("center" if protect_color_only else "top"),
+                anchor=anchor,
+            )
             pil.paste(cell, (x1, y1))
         return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 

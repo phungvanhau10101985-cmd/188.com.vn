@@ -138,6 +138,32 @@ def test_text_on_cream_paper_is_redrawn_and_photo_stays():
     assert not np.array_equal(out[36:132, 16:280], img[36:132, 16:280])
 
 
+def test_in_situ_keeps_original_ink_and_phone_min_size():
+    import cv2
+
+    img = np.full((1024, 768, 3), 255, np.uint8)
+    leather = _leather(280, 520, 4)
+    img[360:640, 120:640] = leather
+    cv2.putText(img, "CAO CAP", (180, 470), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.putText(img, "MEM", (150, 860), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (20, 20, 20), 2, cv2.LINE_AA)
+    proc = _processor()
+    assert proc._phone_min_font_size(768) >= 27
+    out = proc.process_image_with_text(
+        img,
+        [
+            ("Da bo that cao cap", (170, 430, 520, 490)),
+            ("Mem mai tinh te", (140, 820, 280, 880)),
+        ],
+        [],
+    )
+    title = out[430:520, 170:520]
+    assert int(title.max()) > 220, "chu trang goc bi ve thanh chu toi"
+    label = out[820:900, 140:300]
+    assert int(label.min()) < 40, "chu den goc bi ve thanh chu trang"
+    ink_rows = np.where(title.max(axis=2) > 220)[0]
+    assert ink_rows.size and int(ink_rows.max() - ink_rows.min()) >= 20
+
+
 def test_photo_bbox_is_not_filled_white():
     photo = _leather(160, 220, 7)
     img = np.full((200, 260, 3), 255, np.uint8)
