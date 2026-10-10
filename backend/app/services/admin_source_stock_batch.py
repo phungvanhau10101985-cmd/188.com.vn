@@ -1,6 +1,6 @@
 """
-Kiểm tra tồn kho nguồn (admin batch): Playwright **CSSBuy** (bấm «I accept the risks», đọc Add to Cart)
-rồi fallback **Vipomall** khi CSSBuy lỗi kỹ thuật (không phải Cloudflare/CAPTCHA).
+Kiểm tra tồn kho nguồn (admin batch): Vipomall trước.
+Chỉ khi Vipomall bị Cloudflare/CAPTCHA mới sang PandaMall, rồi mới sang CSSBuy.
 
 Chỉ khi không đọc được PDP (thiếu tín hiệu SP / ``no_data``, lỗi fetch…) mới xếp hết và có thể
 cập nhật ``available = 0``. Nếu vẫn thấy màu–size hay ma trận SKU → coi là đọc được offer,
@@ -793,6 +793,11 @@ def _cssbuy_row_shows_variant_matrix(row0: Dict[str, Any]) -> bool:
     return walk(row0, 0, [0])
 
 
+def _scan_is_security_blocked(scan: Dict[str, Any]) -> bool:
+    """Chỉ Cloudflare/CAPTCHA mới được chuyển nền kế tiếp."""
+    return str(scan.get("raw_status") or "").strip().lower() == "blocked"
+
+
 def _attempt_has_usable_catalog_read(scan: Dict[str, Any]) -> bool:
     if scan.get("classified_out_of_stock") is True:
         return True
@@ -1049,17 +1054,15 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    # Cascade: CSSBuy → Vipomall → PandaMall. CF/captcha trên một nền → thử nền tiếp.
+    # Vipomall trước. Chỉ Cloudflare/CAPTCHA mới sang PandaMall, rồi CSSBuy.
     _ = alternate_sequence_index
-    primary = "cssbuy"
+    primary = "vipomall"
     first = _gather_platform_scan_attempt(db, seed_url=url, platform=primary)
-
     extras_common: Dict[str, Any] = {
         "alternate_sequence_index": int(alternate_sequence_index),
         "alternate_primary_domain": primary,
     }
-
-    if _attempt_has_usable_catalog_read(first):
+    if not _scan_is_security_blocked(first):
         return _finalize_scan_commit_and_serialise(
             db,
             computed=first,
@@ -1067,13 +1070,13 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    second = _gather_platform_scan_attempt(db, seed_url=url, platform="vipomall")
-    if _attempt_has_usable_catalog_read(second):
+    second = _gather_platform_scan_attempt(db, seed_url=url, platform="pandamall")
+    if not _scan_is_security_blocked(second):
         merged_extras = dict(extras_common)
         merged_extras.update(
             {
                 "alternate_fallback_used": True,
-                "vipomall_fallback_used": True,
+                "pandamall_fallback_used": True,
                 "alternate_failed_domain": primary,
             }
         )
@@ -1084,14 +1087,14 @@ def run_admin_source_url_scan(
             anchor_product_db_id=anchor_product_db_id or None,
         )
 
-    third = _gather_platform_scan_attempt(db, seed_url=url, platform="pandamall")
-    if _attempt_has_usable_catalog_read(third):
+    third = _gather_platform_scan_attempt(db, seed_url=url, platform="cssbuy")
+    if not _scan_is_security_blocked(third):
         merged_extras = dict(extras_common)
         merged_extras.update(
             {
                 "alternate_fallback_used": True,
-                "pandamall_fallback_used": True,
-                "alternate_failed_domain": "cssbuy+vipomall",
+                "cssbuy_fallback_used": True,
+                "alternate_failed_domain": "vipomall+pandamall",
             }
         )
         return _finalize_scan_commit_and_serialise(
@@ -1102,7 +1105,7 @@ def run_admin_source_url_scan(
         )
 
     scans = [first, second, third]
-    labels = ["CSSBUY", "VIPOMALL", "PANDAMALL"]
+    labels = ["VIPOMALL", "PANDAMALL", "CSSBUY"]
     all_blocked = all(str(s.get("raw_status") or "").strip().lower() == "blocked" for s in scans)
     chunks = []
     for lab, s in zip(labels, scans):
@@ -1114,19 +1117,47 @@ def run_admin_source_url_scan(
     ).strip()
     if all_blocked:
         mega_detail = (
-            "CSSBuy, Vipomall và PandaMall đều bị Cloudflare/CAPTCHA — dừng.\n\n" + "\n\n".join(chunks)
+            "Vipomall, PandaMall và CSSBuy đều bị Cloudflare/CAPTCHA — dừng, đã báo admin.\n\n"
+            + "\n\n".join(chunks)
         )
         raw_st = "blocked"
+        try:
+            from app.services.source_stock_block_alert import maybe_notify_admin_all_platforms_blocked
+
+            seed_name = ""
+            seed_id = None
+            for scan in scans:
+                for row in list(scan.get("matched_orm") or []):
+                    seed_id = int(getattr(row, "id", 0) or 0) or seed_id
+                    seed_name = (getattr(row, "name", None) or seed_name or "")
+                    break
+                if seed_id:
+                    break
+            from app.services.source_stock_checker import (
+                clear_source_stock_in_memory_queue,
+                set_source_stock_worker_paused,
+            )
+
+            set_source_stock_worker_paused(db, True)
+            clear_source_stock_in_memory_queue()
+            maybe_notify_admin_all_platforms_blocked(
+                product_id=seed_id,
+                product_name=seed_name,
+                link=canon,
+                detail=mega_detail,
+            )
+        except Exception:
+            logger.exception("source stock block alert failed")
     else:
         mega_detail = (
-            "CSSBuy, Vipomall và PandaMall đều không đưa ra kết luận in_stock/out_of_stock rõ.\n\n"
+            "Vipomall, PandaMall và CSSBuy đều không đưa ra kết luận in_stock/out_of_stock rõ.\n\n"
             + "\n\n".join(chunks)
         )
         raw_st = "dual_fetch_error"
     attempts = [
-        {"domain": "cssbuy", "raw_status": first.get("raw_status"), "detail": first.get("detail")},
-        {"domain": "vipomall", "raw_status": second.get("raw_status"), "detail": second.get("detail")},
-        {"domain": "pandamall", "raw_status": third.get("raw_status"), "detail": third.get("detail")},
+        {"domain": "vipomall", "raw_status": first.get("raw_status"), "detail": first.get("detail")},
+        {"domain": "pandamall", "raw_status": second.get("raw_status"), "detail": second.get("detail")},
+        {"domain": "cssbuy", "raw_status": third.get("raw_status"), "detail": third.get("detail")},
     ]
     merged_warns = list(
         (first.get("warnings") or []) + (second.get("warnings") or []) + (third.get("warnings") or [])
@@ -1135,7 +1166,7 @@ def run_admin_source_url_scan(
         db,
         computed={
             "canonical_url": canon,
-            "domain": "cssbuy+vipomall+pandamall",
+            "domain": "vipomall+pandamall+cssbuy",
             "raw_status": raw_st,
             "classified_out_of_stock": False,
             "detail": mega_detail,

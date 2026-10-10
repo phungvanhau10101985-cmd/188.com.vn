@@ -4,7 +4,8 @@
 Import catalog: GET trang ``item-*.html`` + POST ``/web/item`` (CSRF cookie).
 
 Kiểm tra tồn nguồn: Playwright mở PDP SPA ``/shop/goodsDetail?type=&id=``, bấm
-«I accept the risks», rồi đọc nút «Add to Cart» / «Buy now» (tải được nút → còn hàng, kể cả disabled).
+«I accept the risks», rồi bấm «Add to Cart». Có nút chưa đủ để coi còn hàng —
+nhãn / toast sau cú bấm (Out of stock, 下架, hết hàng, …) mới là hết hàng.
 
 URL chuẩn:
   • 1688 offer → ``item-1688-{offerId}.html`` hoặc ``/shop/goodsDetail?type=1688&id={offerId}``
@@ -186,9 +187,109 @@ def cssbuy_html_suggests_security_block(html: str, *, title: str = "", url: str 
     return any(n in blob for n in _CSSBUY_SECURITY_BLOCK_NEEDLES)
 
 
-def classify_cssbuy_add_to_cart_cta(*, found: bool, disabled: bool = False, looks_like_pdp: bool = False) -> str:
-    """Tải được nút Add to Cart / Buy now → còn hàng, kể cả disabled."""
+_CSSBUY_OOS_NOTICE_RES = (
+    re.compile(r"\bout of stock\b", re.I),
+    re.compile(r"\bsold\s*out\b", re.I),
+    re.compile(r"\bno longer (?:available|for sale)\b", re.I),
+    re.compile(r"\b(?:has been removed|been taken down|has been discontinued|item removed|product removed)\b", re.I),
+    re.compile(r"\boff the shelf\b", re.I),
+    re.compile(r"\b(?:item|product|goods)\b[^.\n]{0,48}\b(?:does not exist|do not exist|unavailable|not available)\b", re.I),
+    re.compile(r"\b(?:cannot|can't) be purchased\b", re.I),
+    re.compile(r"下架|缺货|无货|售罄|库存不足|宝贝不存在|商品不存在|已售完"),
+    re.compile(r"hết hàng|het hang|ngừng bán|ngung ban|tạm hết|tam het|ngừng kinh doanh|ngung kinh doanh", re.I),
+    re.compile(r"không tìm thấy thông tin sản phẩm", re.I),
+)
+
+
+def visible_text_out_of_stock_notice(text: str) -> Optional[str]:
+    """Câu ngắn trong vùng giá / hộp thông báo. Không dùng cho cả chân trang hay mô tả."""
+    blob = re.sub(r"\s+", " ", (text or "").replace("\u00a0", " ")).strip()
+    if not blob:
+        return None
+    for pat in _CSSBUY_OOS_NOTICE_RES:
+        match = pat.search(blob)
+        if match:
+            return re.sub(r"\s+", " ", match.group(0)).strip()[:180]
+    return None
+
+
+_STOCK_ZONE_JS = r"""() => {
+  const textOf = (el) => ((el && (el.innerText || el.textContent)) || "").replace(/\s+/g, " ").trim();
+  const bits = [];
+  const pushShort = (el) => {
+    const t = textOf(el);
+    if (t && t.length <= 120) bits.push(t);
+  };
+  document.querySelectorAll(
+    ".el-message,.el-message-box,.el-notification,.ant-message,.ant-message-notice,.toast,[role='alert'],.swal2-popup"
+  ).forEach(pushShort);
+  const zone = document.querySelector(
+    ".shop_right, .shop_info, .product-price, .main-price, .group-btn, .list-btn, .product-type-content"
+  );
+  if (zone) zone.querySelectorAll("span, p, div, button, label").forEach(pushShort);
+  const risksOpen = Array.from(document.querySelectorAll("button, div, span, p")).some((el) => {
+    return /^i accept the risks$/i.test(textOf(el)) && el.offsetParent !== null;
+  });
+  const productImage = Array.from(document.querySelectorAll("img")).some((img) =>
+    /alicdn|cbu01|ibank/i.test(img.currentSrc || img.src || "")
+  );
+  const titleEl = document.querySelector("h1, .product-name, .product-title, .goods-name, .goods_name");
+  const title = textOf(titleEl).slice(0, 180);
+  const main = document.querySelector("main") || document.body;
+  const missingProduct = /không tìm thấy thông tin sản phẩm/i.test(textOf(main).slice(0, 2500));
+  return { zoneText: bits.join("\n").slice(0, 4000), risksOpen, productImage, title, missingProduct };
+}"""
+
+
+def read_page_stock_zone(page: Any) -> Dict[str, Any]:
+    """Vùng giá, nút mua và toast. Không gồm chân trang."""
+    try:
+        data = page.evaluate(_STOCK_ZONE_JS)
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return {"zoneText": "", "risksOpen": False, "productImage": False, "title": "", "missingProduct": False}
+    return {
+        "zoneText": str(data.get("zoneText") or ""),
+        "risksOpen": bool(data.get("risksOpen")),
+        "productImage": bool(data.get("productImage")),
+        "title": str(data.get("title") or ""),
+        "missingProduct": bool(data.get("missingProduct")),
+    }
+
+
+def notice_from_stock_zone(zone: Dict[str, Any]) -> Optional[str]:
+    if zone.get("missingProduct"):
+        return "Không tìm thấy thông tin sản phẩm"
+    return visible_text_out_of_stock_notice(str(zone.get("zoneText") or ""))
+
+
+def product_zone_looks_loaded(zone: Dict[str, Any]) -> bool:
+    """Ảnh nguồn hoặc tên sản phẩm đã hiện — trang không còn là vỏ trống."""
+    if zone.get("risksOpen"):
+        return False
+    if zone.get("productImage"):
+        return True
+    title = re.sub(r"\s+", " ", str(zone.get("title") or "")).strip()
+    if len(title) < 8:
+        return False
+    generic = title.lower()
+    if generic.startswith("cssbuy") or "panda" in generic or generic.startswith("vipo"):
+        return False
+    return True
+
+
+def classify_cssbuy_add_to_cart_cta(
+    *,
+    found: bool,
+    disabled: bool = False,
+    looks_like_pdp: bool = False,
+    out_of_stock_notice: str = "",
+) -> str:
+    """Có nút giỏ chưa đủ. Nhãn hết hàng sau cú bấm thắng hơn nút; không có nút → hết hàng."""
     _ = (disabled, looks_like_pdp)
+    if (out_of_stock_notice or "").strip():
+        return "out_of_stock"
     return "in_stock" if found else "out_of_stock"
 
 
@@ -424,6 +525,86 @@ def _click_cssbuy_accept_risks(page: Any) -> bool:
         return False
 
 
+def poll_page_out_of_stock_notice(page: Any, *, rounds: int = 4, pause_ms: int = 700) -> Optional[str]:
+    """Đọc vùng giá / toast vài nhịp — nhãn hết hàng có thể hiện trễ sau cú bấm giỏ."""
+    notice = notice_from_stock_zone(read_page_stock_zone(page))
+    if notice:
+        return notice
+    for _ in range(max(1, rounds)):
+        try:
+            page.wait_for_timeout(pause_ms)
+        except Exception:
+            return notice
+        notice = notice_from_stock_zone(read_page_stock_zone(page))
+        if notice:
+            return notice
+    return None
+
+
+def _cssbuy_page_visible_text(page: Any) -> str:
+    try:
+        text = page.evaluate("() => (document.body && document.body.innerText) || ''")
+    except Exception:
+        return ""
+    return text if isinstance(text, str) else ""
+
+
+def _dismiss_cssbuy_human_verification(page: Any) -> bool:
+    """Đóng modal «Please complete the human verification first» nếu nó che nút giỏ."""
+    try:
+        closed = page.evaluate(
+            """() => {
+              const nodes = Array.from(document.querySelectorAll("div,button,span,i"));
+              const box = nodes.find((el) =>
+                /please complete the human verification first/i.test((el.innerText || "") + "")
+              );
+              if (!box) return false;
+              const scope = box.parentElement || document;
+              const closer = Array.from(scope.querySelectorAll("div,button,span,i")).find((el) => {
+                const t = ((el.innerText || "") + "").trim();
+                const c = String(el.className || "");
+                return t === "×" || t === "x" || /close|el-dialog__close|icon-close/i.test(c);
+              });
+              if (!closer) return false;
+              closer.click();
+              return true;
+            }"""
+        )
+        return bool(closed)
+    except Exception:
+        return False
+
+
+def _click_cssbuy_add_to_cart(page: Any) -> str:
+    try:
+        loc = page.locator(".ty_button_btn6").first
+        if loc.count() == 0:
+            loc = page.get_by_text("Add to Cart", exact=False).first
+        loc.click(timeout=8_000, force=True)
+        return "clicked"
+    except Exception as exc:
+        return f"fail: {exc}"[:240]
+
+
+def _probe_cssbuy_cart_click(page: Any) -> Tuple[Optional[str], str, bool]:
+    """
+    Bấm Add to Cart rồi đọc nhãn/toast. Không bấm Buy now.
+
+    Trả (notice, click_note, verification_blocked). verification_blocked khi cú bấm
+    không tới nút và modal «human verification» vẫn che trang — không kết luận còn hàng.
+    """
+    _dismiss_cssbuy_human_verification(page)
+    page.wait_for_timeout(400)
+    already = notice_from_stock_zone(read_page_stock_zone(page))
+    if already:
+        return already, "already-visible", False
+    click_note = _click_cssbuy_add_to_cart(page)
+    notice = poll_page_out_of_stock_notice(page)
+    text = _cssbuy_page_visible_text(page)
+    verification_blocked = (not notice) and click_note.startswith("fail:") and ("human verification" in text.lower())
+    return notice, click_note, verification_blocked
+
+
 def _evaluate_cssbuy_pdp_stock_sync(item_page_url: str) -> CssbuyPdpStockProbe:
     pdp = cssbuy_playwright_pdp_url(item_page_url)
     if not pdp:
@@ -549,22 +730,69 @@ def _evaluate_cssbuy_pdp_stock_sync(item_page_url: str) -> CssbuyPdpStockProbe:
                     )
                 found = bool(snap.get("addToCartFound"))
                 looks = bool(snap.get("looksLikePdp"))
-                st = classify_cssbuy_add_to_cart_cta(found=found)
+                notice: Optional[str] = None
+                click_note = ""
+                if found:
+                    notice, click_note, verification_blocked = _probe_cssbuy_cart_click(page)
+                    if notice:
+                        pass
+                    elif verification_blocked:
+                        return CssbuyPdpStockProbe(
+                            status="blocked",
+                            error=(
+                                "CSSBuy: modal «human verification» che nút giỏ, bấm không tới — "
+                                "các nền khác vẫn được đọc."
+                            )[:1000],
+                            clicked_accept_risks=clicked,
+                            add_to_cart_found=True,
+                        )
+                    elif click_note.startswith("fail"):
+                        return CssbuyPdpStockProbe(
+                            status="error",
+                            error="CSSBuy: thấy nút giỏ nhưng bấm không tới — chưa kết luận còn hàng."[:1000],
+                            clicked_accept_risks=clicked,
+                            add_to_cart_found=True,
+                        )
+                else:
+                    zone = read_page_stock_zone(page)
+                    if zone.get("risksOpen"):
+                        return CssbuyPdpStockProbe(
+                            status="error",
+                            error="CSSBuy: modal «I accept the risks» còn mở — trang chưa đọc được, chưa kết luận hết hàng.",
+                            clicked_accept_risks=clicked,
+                            add_to_cart_found=False,
+                        )
+                    notice = notice_from_stock_zone(zone)
+                    if not notice and not product_zone_looks_loaded(zone):
+                        return CssbuyPdpStockProbe(
+                            status="error",
+                            error="CSSBuy: chưa hiện giá, tên hoặc ảnh sản phẩm — chưa kết luận hết hàng.",
+                            clicked_accept_risks=clicked,
+                            add_to_cart_found=False,
+                        )
+                st = classify_cssbuy_add_to_cart_cta(found=found, out_of_stock_notice=notice or "")
                 if st == "in_stock":
                     return CssbuyPdpStockProbe(
                         status="in_stock",
                         clicked_accept_risks=clicked,
                         add_to_cart_found=True,
                     )
-                if not looks:
-                    err = "CSSBuy: không mở được trang sản phẩm sau modal — coi hết hàng."
+                if notice:
+                    err = f"CSSBuy: vùng giá/thông báo báo hết hàng («{notice}»)."
+                elif looks or product_zone_looks_loaded(read_page_stock_zone(page)):
+                    err = "CSSBuy: trang sản phẩm đã hiện nhưng không thấy nút «Add to Cart» / «Buy now» — coi hết hàng."
                 else:
-                    err = "CSSBuy: không thấy nút «Add to Cart» / «Buy now» — coi hết hàng."
+                    return CssbuyPdpStockProbe(
+                        status="error",
+                        error="CSSBuy: chưa hiện giá, tên hoặc ảnh sản phẩm — chưa kết luận hết hàng.",
+                        clicked_accept_risks=clicked,
+                        add_to_cart_found=False,
+                    )
                 return CssbuyPdpStockProbe(
                     status="out_of_stock",
                     error=err[:1000],
                     clicked_accept_risks=clicked,
-                    add_to_cart_found=False,
+                    add_to_cart_found=found,
                 )
             finally:
                 for cleanup in (page.close, context.close, browser.close):
@@ -596,8 +824,9 @@ def _evaluate_cssbuy_pdp_stock_sync(item_page_url: str) -> CssbuyPdpStockProbe:
 
 def evaluate_cssbuy_pdp_stock(item_page_url: str) -> CssbuyPdpStockProbe:
     """
-    Playwright: mở goodsDetail, bấm «I accept the risks», đọc Add to Cart / Buy now.
-    Tải được nút → in_stock (kể cả disabled). blocked = Cloudflare/captcha (fallback nền khác).
+    Playwright: mở goodsDetail, bấm «I accept the risks», rồi bấm «Add to Cart».
+    Nhãn hết hàng sau cú bấm → out_of_stock dù nút vẫn còn. Không bấm được vì modal
+    human verification → blocked (fallback nền khác). Không thấy nút → out_of_stock.
     """
     from app.services.import_playwright_dispatch import run_import_playwright_sync
 

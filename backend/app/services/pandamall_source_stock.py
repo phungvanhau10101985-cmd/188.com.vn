@@ -1,4 +1,4 @@
-"""Kiểm tra tồn nguồn PandaMall: nút «Thêm vào giỏ» / «Mua ngay» (kể cả disabled)."""
+"""Kiểm tra tồn nguồn PandaMall: bấm «Thêm vào giỏ»; nhãn hết hàng sau cú bấm thắng hơn nút."""
 from __future__ import annotations
 
 import logging
@@ -44,15 +44,13 @@ _PANDAMALL_PDP_PROBE_JS = """() => {
 
 
 def pandamall_html_shows_cart_or_buy_cta(html: str) -> bool:
-    """Nút PandaMall: .btn-addcart «Thêm vào giỏ» hoặc .btn-buynow «Mua ngay» — disabled vẫn tính."""
+    """Nút mua của PDP: .btn-addcart / .btn-buynow. Chữ «Thêm vào giỏ» ở ô tìm kiếm không tính."""
     low = (html or "").lower()
     if not low.strip():
         return False
     if "btn-addcart" in low or "btn-buynow" in low:
         return True
-    if "thêm vào giỏ" in low or "them vao gio" in low:
-        return True
-    if "group-btn" in low and ("mua ngay" in low or "giỏ" in low):
+    if "group-btn" in low and ("thêm vào giỏ" in low or "mua ngay" in low or "them vao gio" in low):
         return True
     return False
 
@@ -156,11 +154,52 @@ def _evaluate_pandamall_pdp_stock_sync(page_url: str) -> Tuple[str, Optional[str
                         else "PandaMall yêu cầu đăng nhập — chưa có tài khoản (pandamall-account.json)."
                     )
                     return ("error", msg, "pandamall")
-                if (isinstance(snap, dict) and snap.get("ctaFound")) or pandamall_html_shows_cart_or_buy_cta(html1):
-                    return "in_stock", None, "pandamall"
+                from app.services.import_cssbuy_client import (
+                    notice_from_stock_zone,
+                    poll_page_out_of_stock_notice,
+                    product_zone_looks_loaded,
+                    read_page_stock_zone,
+                )
+
+                cta_found = bool(isinstance(snap, dict) and snap.get("ctaFound"))
+                zone = read_page_stock_zone(page)
+                notice = notice_from_stock_zone(zone)
+                if notice:
+                    return (
+                        "out_of_stock",
+                        f"PandaMall: vùng giá/thông báo báo hết hàng («{notice}»).",
+                        "pandamall",
+                    )
+                if cta_found:
+                    clicked = False
+                    try:
+                        page.locator(".btn-addcart, .group-btn .btn-addcart").first.click(timeout=8_000, force=True)
+                        clicked = True
+                    except Exception:
+                        clicked = False
+                    notice = poll_page_out_of_stock_notice(page)
+                    if notice:
+                        return (
+                            "out_of_stock",
+                            f"PandaMall: bấm giỏ báo hết hàng («{notice}»).",
+                            "pandamall",
+                        )
+                    if clicked:
+                        return "in_stock", None, "pandamall"
+                    return (
+                        "error",
+                        "PandaMall: thấy nút giỏ nhưng bấm không tới — chưa kết luận còn hàng.",
+                        "pandamall",
+                    )
+                if product_zone_looks_loaded(zone):
+                    return (
+                        "out_of_stock",
+                        "PandaMall: trang sản phẩm đã hiện nhưng không thấy nút «Thêm vào giỏ» / «Mua ngay» — coi hết hàng.",
+                        "pandamall",
+                    )
                 return (
-                    "out_of_stock",
-                    "PandaMall: không thấy nút «Thêm vào giỏ» / «Mua ngay» — coi hết hàng.",
+                    "error",
+                    "PandaMall: chưa hiện giá, tên hoặc ảnh sản phẩm — chưa kết luận hết hàng.",
                     "pandamall",
                 )
             finally:
@@ -182,7 +221,7 @@ def _evaluate_pandamall_pdp_stock_sync(page_url: str) -> Tuple[str, Optional[str
 
 
 def evaluate_pandamall_source_stock(raw_url: str) -> Tuple[str, Optional[str], str]:
-    """Playwright: .btn-addcart / .btn-buynow tải được → còn hàng, kể cả disabled."""
+    """Playwright: bấm «Thêm vào giỏ»; nhãn hết hàng sau cú bấm → hết hàng. Không thấy nút → hết hàng."""
     try:
         page_url, _plat = resolve_pandamall_import_url((raw_url or "").strip())
     except ImportPandamallError as exc:

@@ -414,6 +414,13 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
     finally:
         dbx.close()
 
+    if paused and last_completed and (last_completed.get("source_stock_status") or "") == "blocked":
+        idle = "paused_all_platforms_blocked"
+        reason_vi = (
+            "Vipomall, PandaMall và CSSBuy đều bị Cloudflare — worker đã dừng và đã gửi email admin. "
+            "Bật lại khi hết chặn."
+        )
+
     next_primary = upcoming_candidates[0] if upcoming_candidates else None
 
     return {
@@ -456,8 +463,8 @@ def _result_is_conclusive_stock(r: SourceStockCheckResult) -> bool:
 
 
 def _result_should_fallback_next_platform(r: SourceStockCheckResult) -> bool:
-    """Cloudflare/CAPTCHA (blocked) hoặc lỗi kỹ thuật → thử nền tiếp theo."""
-    return (r.status or "").strip().lower() in {"blocked", "error", "skipped"}
+    """Chỉ Cloudflare/CAPTCHA (blocked) mới chuyển nền. Hết hàng, còn hàng, lỗi kỹ thuật thì dừng."""
+    return (r.status or "").strip().lower() == "blocked"
 
 
 def _utcnow() -> datetime:
@@ -672,7 +679,7 @@ def _merge_all_platforms_blocked_or_error(
         return SourceStockCheckResult(
             status="blocked",
             error=(
-                "CSSBuy, Vipomall và PandaMall đều bị Cloudflare/CAPTCHA — dừng."
+                "Vipomall, PandaMall và CSSBuy đều bị Cloudflare/CAPTCHA — dừng."
             )[:1000],
             checked_via="cssbuy+vipomall+pandamall",
         )
@@ -696,27 +703,26 @@ def _evaluate_stock_primary_cssbuy_with_vipomall_fallback(
     raw_url: str, *, fallback_product_id: Optional[str] = None
 ) -> SourceStockCheckResult:
     """
-    CSSBuy → Vipomall → PandaMall.
-    in_stock/out_of_stock (đã đọc được nút hoặc PDP không có nút) thì dừng.
-    Cloudflare/CAPTCHA/lỗi kỹ thuật → nền tiếp theo. Cả ba blocked → dừng.
+    Vipomall trước. Chỉ khi bị Cloudflare/CAPTCHA mới sang PandaMall, rồi mới sang CSSBuy.
+    Hết hàng hoặc còn hàng thì dừng, không mở nền sau.
     """
-    css = _evaluate_stock_via_cssbuy(raw_url)
-    if _result_is_conclusive_stock(css):
-        return css
     vm = _evaluate_stock_via_vipomall(raw_url, fallback_product_id=fallback_product_id)
-    if _result_is_conclusive_stock(vm):
+    if not _result_should_fallback_next_platform(vm):
         return vm
     panda = _evaluate_stock_via_pandamall(raw_url)
-    if _result_is_conclusive_stock(panda):
+    if not _result_should_fallback_next_platform(panda):
         return panda
+    css = _evaluate_stock_via_cssbuy(raw_url)
+    if not _result_should_fallback_next_platform(css):
+        return css
     return _merge_all_platforms_blocked_or_error(css, vm, panda)
 
 
 
 def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
     """
-    Admin thử giống worker: CSSBuy → Vipomall → PandaMall. Không ghi DB.
-    Cloudflare/CAPTCHA trên một nền → thử nền tiếp. Cả ba blocked → dừng.
+    Admin thử giống worker: Vipomall trước. Chỉ khi Cloudflare/CAPTCHA mới sang PandaMall, rồi CSSBuy.
+    Không ghi DB.
     """
     stripped = (raw_url or "").strip()
     canon = (normalize_product_import_url(stripped) or stripped).strip()
@@ -767,34 +773,34 @@ def admin_preview_source_stock_by_url(raw_url: str) -> Dict[str, Any]:
             "merged": _bubble(err_r),
         }
 
-    css = _evaluate_stock_via_cssbuy(canon)
-    if _result_is_conclusive_stock(css):
-        return {
-            "ok": True,
-            "canonical_input": canon,
-            "link_eligible": True,
-            "coercion": coercion,
-            "cssbuy": _bubble(css),
-            "vipomall": _bubble(skipped),
-            "pandamall": _bubble(skipped),
-            "merged": _bubble(css),
-        }
-
     vm = _evaluate_stock_via_vipomall(canon)
-    if _result_is_conclusive_stock(vm):
+    if not _result_should_fallback_next_platform(vm):
         return {
             "ok": True,
             "canonical_input": canon,
             "link_eligible": True,
             "coercion": coercion,
-            "cssbuy": _bubble(css),
+            "cssbuy": _bubble(skipped),
             "vipomall": _bubble(vm),
             "pandamall": _bubble(skipped),
             "merged": _bubble(vm),
         }
 
     panda = _evaluate_stock_via_pandamall(canon)
-    merged = panda if _result_is_conclusive_stock(panda) else _merge_all_platforms_blocked_or_error(css, vm, panda)
+    if not _result_should_fallback_next_platform(panda):
+        return {
+            "ok": True,
+            "canonical_input": canon,
+            "link_eligible": True,
+            "coercion": coercion,
+            "cssbuy": _bubble(skipped),
+            "vipomall": _bubble(vm),
+            "pandamall": _bubble(panda),
+            "merged": _bubble(panda),
+        }
+
+    css = _evaluate_stock_via_cssbuy(canon)
+    merged = css if not _result_should_fallback_next_platform(css) else _merge_all_platforms_blocked_or_error(css, vm, panda)
     return {
         "ok": True,
         "canonical_input": canon,
@@ -978,6 +984,21 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
         elif result.status == "in_stock" and (product.available or 0) <= 0 and previous_status == "out_of_stock":
             product.available = 500
         db2.commit()
+        if result.status == "blocked":
+            from app.services.source_stock_block_alert import maybe_notify_admin_all_platforms_blocked
+
+            set_source_stock_worker_paused(db2, True)
+            clear_source_stock_in_memory_queue()
+            logger.warning(
+                "source stock worker paused: Vipomall, PandaMall và CSSBuy đều bị chặn product_id=%s",
+                product_id,
+            )
+            maybe_notify_admin_all_platforms_blocked(
+                product_id=product_id,
+                product_name=product.name or "",
+                link=product.link_default or link_default,
+                detail=result.error or "",
+            )
         if result.status in {"error", "unknown", "blocked"}:
             logger.warning(
                 "source stock check issue: product_id=%s status=%s error=%s",
@@ -1056,7 +1077,7 @@ def _maybe_reclaim_stale_in_progress() -> None:
 def _worker_loop() -> None:
     logger.info(
         "source stock checker started: interval=%ss stale=%sm "
-        "(cssbuy → vipomall → pandamall; CF/captcha fallback; all blocked=stop)",
+        "(vipomall → pandamall → cssbuy; chỉ CF mới chuyển nền; cả 3 chặn thì dừng worker)",
         settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS,
         settings.SOURCE_STOCK_CHECK_STALE_MINUTES,
     )

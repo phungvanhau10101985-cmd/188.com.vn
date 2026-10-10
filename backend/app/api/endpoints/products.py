@@ -134,7 +134,7 @@ class AdminSourceStockBatchBody(BaseModel):
     domain: Literal["cssbuy", "vipomall"] = "cssbuy"
     dual_alternate_fallback: bool = Field(
         False,
-        description="Cascade CSSBuy → Vipomall khi dual_alternate_fallback (sequence_index chỉ ghi báo cáo).",
+        description="Cascade Vipomall → PandaMall → CSSBuy khi bị Cloudflare (sequence_index chỉ ghi báo cáo).",
     )
     alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
@@ -154,7 +154,7 @@ class AdminSourceStockScanNextDbBody(BaseModel):
     )
     dual_alternate_fallback: bool = Field(
         False,
-        description="Cascade CSSBuy → Vipomall trong một lần kiểm tra.",
+        description="Cascade Vipomall → PandaMall → CSSBuy trong một lần kiểm tra.",
     )
     alternate_sequence_index: int = Field(0, ge=0, le=900_000_000)
 
@@ -2068,8 +2068,8 @@ def admin_source_stock_force_worker_recheck_route(
     _: AdminUser = Depends(require_module_permission("products")),
 ):
     """
-    Xếp lại PDP worker: CSSBuy (/web/item) trước; Vipomall khi CSS blocked/error (chặn/CAPTCHA…);
-    kết quả in_stock / out_of_stock cập nhật sau khi worker chạy.
+    Xếp lại PDP worker: Vipomall trước; PandaMall rồi CSSBuy chỉ khi nền trước bị Cloudflare/CAPTCHA.
+    Kết quả in_stock / out_of_stock cập nhật sau khi worker chạy.
     """
     out = admin_force_worker_source_stock_recheck(db, db_id=int(body.db_id))
     if not out.get("ok"):
@@ -2086,7 +2086,7 @@ def admin_source_stock_preview_url_route(
     body: AdminSourceStockPreviewUrlBody,
     _: AdminUser = Depends(require_module_permission("products")),
 ):
-    """Thử PDP theo một link giống worker (CSSBuy; Vipomall fallback khi chặn); không sửa bảng products — có thể chậm (~1–3 phút)."""
+    """Thử PDP theo một link giống worker (Vipomall; PandaMall/CSSBuy chỉ khi Cloudflare chặn); không sửa bảng products."""
     try:
         return admin_preview_source_stock_by_url(str(body.url or "").strip())
     except Exception as exc:

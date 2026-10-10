@@ -55,7 +55,7 @@ type ReportSampleTablePagination = {
   onPageChange: (nextPage: number) => void;
 };
 
-/** Nguồn trong thống kê queue / báo cáo (CSSBuy mặc định). Worker: CSSBuy → Vipomall → PandaMall. Cloudflare/CAPTCHA trên một nền thì fallback; cả ba bị chặn mới dừng. Nút giỏ/mua tải được = còn hàng (kể cả disabled). */
+/** Nguồn trong thống kê queue / báo cáo. Worker: Vipomall → PandaMall → CSSBuy. Chỉ Cloudflare/CAPTCHA mới chuyển nền. */
 type SourceStockDomain = 'cssbuy' | 'vipomall';
 
 function SpinnerIcon({ className }: { className?: string }) {
@@ -1403,9 +1403,10 @@ export default function AdminSourceStockCheckPage() {
               từng SP và ghi vào DB. Env chính:{' '}
               <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_ENABLED</code> (mặc định <strong>bật</strong>; đặt
               false và khởi động lại backend để tắt), cùng <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_*</code>{' '}
-              (interval, stale…). Thứ tự <strong>CSSBuy → Vipomall → PandaMall</strong>. Tải được nút thêm giỏ / mua (kể cả
-              disabled) → <strong>in_stock</strong>. Cloudflare / CAPTCHA trên một nền thì <strong>fallback</strong> nền
-              tiếp; cả ba đều bị chặn mới <code className="text-[10px] px-1 bg-gray-50 rounded border">blocked</code> và dừng. Tab này chỉ là dashboard admin.
+              (interval, stale…). Thứ tự <strong>Vipomall → PandaMall → CSSBuy</strong>. Hết hàng hoặc còn hàng thì dừng.
+              Chỉ khi nền đang đọc bị Cloudflare / CAPTCHA mới chuyển nền sau. Cả ba bị chặn thì worker{' '}
+              <strong>dừng hẳn</strong>, ghi <code className="text-[10px] px-1 bg-gray-50 rounded border">blocked</code>{' '}
+              và gửi email admin. Bật lại bằng nút tiếp tục trên trang này. Tab này chỉ là dashboard admin.
             </p>
           </div>
         </div>
@@ -1422,8 +1423,8 @@ export default function AdminSourceStockCheckPage() {
           <div className="px-3 pb-3 pt-0 space-y-3 text-[13px] leading-relaxed text-gray-700 border-t border-gray-200">
             <p>
               Worker máy chủ (khi <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_ENABLED</code>{' '}
-              bật — mặc định vậy) lần lượt CSSBuy → Vipomall → PandaMall. Mỗi nền đọc nút thêm giỏ / mua (tải được nút
-              → còn hàng, kể cả disabled). Cloudflare/CAPTCHA trên một nền thì fallback nền tiếp; cả ba bị chặn mới dừng.
+              bật — mặc định vậy) chạy Vipomall trước, bị Cloudflare/CAPTCHA mới sang PandaMall, rồi mới sang CSSBuy.
+              Hết hàng hoặc còn hàng thì dừng, không mở nền sau. Cả ba bị chặn mới dừng hẳn.
               Vòng chỉ xử lý một SP, nghỉ theo{' '}
               <code className="text-[11px] bg-white px-1 rounded border border-gray-200">SOURCE_STOCK_CHECK_INTERVAL_SECONDS</code>. Không
               cần mở tab admin để duy trì luồng. Khi phản hồi báo chặn / rủi ro (
@@ -1497,8 +1498,8 @@ export default function AdminSourceStockCheckPage() {
             <span className="text-xs font-medium text-gray-500">Luồng</span>
             <p className="text-sm font-semibold text-gray-900">Theo DB (queue)</p>
             <p className="text-[11px] text-gray-500 max-w-[19rem] leading-snug">
-              Worker máy chủ (<strong>mặc định bật</strong>): CSSBuy → Vipomall → PandaMall. Cloudflare/CAPTCHA thì
-              fallback; cả ba bị chặn mới dừng. Tải được nút giỏ/mua = còn hàng (kể cả disabled).
+              Worker máy chủ (<strong>mặc định bật</strong>): Vipomall → PandaMall → CSSBuy. Chỉ Cloudflare/CAPTCHA
+              mới chuyển nền; cả ba bị chặn mới dừng.
             </p>
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-[12rem] max-w-md">
@@ -1518,7 +1519,7 @@ export default function AdminSourceStockCheckPage() {
               <option value="vipomall">vipomall.vn — gương 1688</option>
             </select>
             <p className="text-[11px] text-gray-500 mt-1 leading-snug">
-              Mặc định CSSBuy. Worker: CSSBuy → Vipomall → PandaMall; Cloudflare/CAPTCHA fallback; cả ba bị chặn mới dừng.
+              Bộ lọc báo cáo. Worker kiểm tra: Vipomall → PandaMall → CSSBuy; chỉ Cloudflare/CAPTCHA mới chuyển nền.
             </p>
           </div>
         </div>
@@ -1637,7 +1638,7 @@ export default function AdminSourceStockCheckPage() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <p className="text-xs font-semibold text-indigo-950 uppercase tracking-wide">
-                Worker PDP · CSSBuy → Vipomall → PandaMall
+                Worker PDP · Vipomall → PandaMall → CSSBuy
               </p>
               {workerState ? (
                 <>

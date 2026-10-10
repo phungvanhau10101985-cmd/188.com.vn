@@ -2,7 +2,7 @@
 Fallback kiểm tra tồn nguồn qua PDP Vipomall (gương 1688).
 
 Chỉ áp dụng khi đã suy ra được offerId 1688 (link offer/abb-*/CSSBuy item-1688 hoặc mã A{offer}; vẫn hỗ trợ mã legacy A{offer}a188…).
-Tiêu chí: có nút / chữ «Thêm giỏ hàng» trong HTML tải về → còn hàng; không thấy → hết hàng nguồn.
+Có nút «Thêm giỏ hàng» thì bấm và đọc nhãn hết hàng. Không thấy nút, hoặc bấm xong trang báo hết hàng → hết hàng nguồn.
 """
 
 from __future__ import annotations
@@ -187,9 +187,13 @@ def vipomall_html_shows_add_to_cart_cta(html: str) -> bool:
     if not raw.strip():
         return False
     low = raw.lower()
-    if "thêm giỏ hàng" in low or "them gio hang" in low:
-        return True
-    if "th&ecirc;m giỏ h&agrave;ng" in low:
+    has_label = (
+        "thêm giỏ hàng" in low
+        or "them gio hang" in low
+        or "th&ecirc;m giỏ h&agrave;ng" in low
+    )
+    has_control = "button" in low or "spn-color" in low or "cart_detail.svg" in low
+    if has_label and has_control:
         return True
     if "cart_detail.svg" in low and ("button" in low or "giỏ hàng" in low or "spn-color" in low):
         return True
@@ -290,11 +294,60 @@ def _evaluate_vipomall_pdp_stock_sync(page_url: str) -> Tuple[str, Optional[str]
                         "Vipomall bị Cloudflare / CAPTCHA — fallback PandaMall.",
                         "vipomall",
                     )
-                if (isinstance(snap, dict) and snap.get("ctaFound")) or vipomall_html_shows_add_to_cart_cta(html1):
-                    return "in_stock", None, "vipomall"
+                from app.services.import_cssbuy_client import (
+                    notice_from_stock_zone,
+                    poll_page_out_of_stock_notice,
+                    product_zone_looks_loaded,
+                    read_page_stock_zone,
+                )
+
+                cta_found = bool(isinstance(snap, dict) and snap.get("ctaFound"))
+                zone = read_page_stock_zone(page)
+                notice = notice_from_stock_zone(zone)
+                if notice:
+                    return (
+                        "out_of_stock",
+                        f"Vipomall: vùng giá/thông báo báo hết hàng («{notice}»).",
+                        "vipomall",
+                    )
+                if cta_found:
+                    clicked = False
+                    try:
+                        page.locator('button.button:has(img[src*="cart_detail.svg"])').first.click(
+                            timeout=8_000, force=True
+                        )
+                        clicked = True
+                    except Exception:
+                        try:
+                            page.locator("button.button, span.spn-color").filter(
+                                has_text=re.compile(r"^\s*thêm\s*giỏ\s*hàng\s*$", re.I)
+                            ).first.click(timeout=4_000, force=True)
+                            clicked = True
+                        except Exception:
+                            clicked = False
+                    notice = poll_page_out_of_stock_notice(page)
+                    if notice:
+                        return (
+                            "out_of_stock",
+                            f"Vipomall: bấm giỏ báo hết hàng («{notice}»).",
+                            "vipomall",
+                        )
+                    if clicked:
+                        return "in_stock", None, "vipomall"
+                    return (
+                        "error",
+                        "Vipomall: thấy nút giỏ nhưng bấm không tới — chưa kết luận còn hàng.",
+                        "vipomall",
+                    )
+                if product_zone_looks_loaded(zone):
+                    return (
+                        "out_of_stock",
+                        "Vipomall: trang sản phẩm đã hiện nhưng không thấy nút «Thêm giỏ hàng» / «Mua ngay» — coi hết hàng.",
+                        "vipomall",
+                    )
                 return (
-                    "out_of_stock",
-                    "Vipomall: không thấy nút «Thêm giỏ hàng» / «Mua ngay» — coi hết hàng.",
+                    "error",
+                    "Vipomall: chưa hiện giá, tên hoặc ảnh sản phẩm — chưa kết luận hết hàng.",
                     "vipomall",
                 )
             finally:
@@ -316,7 +369,7 @@ def _evaluate_vipomall_pdp_stock_sync(page_url: str) -> Tuple[str, Optional[str]
 
 
 def evaluate_vipomall_1688_offer_stock(offer_id: str) -> Tuple[str, Optional[str], str]:
-    """Playwright: nút «Thêm giỏ hàng» (cart_detail.svg) tải được → còn hàng, kể cả disabled."""
+    """Playwright: bấm «Thêm giỏ hàng»; nhãn hết hàng sau cú bấm → hết hàng. Không thấy nút → hết hàng."""
     url = build_vipomall_1688_pdp_url(offer_id)
     if not url:
         return "error", "Không có offerId 1688 hợp lệ để kiểm tra Vipomall.", "vipomall"

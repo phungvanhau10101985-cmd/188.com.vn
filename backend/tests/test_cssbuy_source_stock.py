@@ -11,7 +11,10 @@ from app.services.import_cssbuy_client import (
     cssbuy_html_suggests_security_block,
     cssbuy_item_page_to_item_slug,
     cssbuy_playwright_pdp_url,
+    notice_from_stock_zone,
     parse_cssbuy_goods_detail,
+    product_zone_looks_loaded,
+    visible_text_out_of_stock_notice,
 )
 from app.services.pandamall_source_stock import pandamall_html_shows_cart_or_buy_cta
 from app.services.source_stock_checker import (
@@ -91,10 +94,43 @@ def test_classify_add_to_cart_cta_ignores_disabled():
     assert classify_cssbuy_add_to_cart_cta(found=False, disabled=False) == "out_of_stock"
 
 
+def test_oos_notice_beats_cart_button():
+    assert classify_cssbuy_add_to_cart_cta(found=True, out_of_stock_notice="Out of stock") == "out_of_stock"
+    assert visible_text_out_of_stock_notice("Price\nOut of stock\nAdd to Cart") == "Out of stock"
+    assert visible_text_out_of_stock_notice("该商品已下架") == "下架"
+    assert visible_text_out_of_stock_notice("Sản phẩm hết hàng") == "hết hàng"
+    assert visible_text_out_of_stock_notice("Sold out") == "Sold out"
+    assert (
+        visible_text_out_of_stock_notice(
+            "Không tìm thấy thông tin sản phẩm, vui lòng thử lại sau. Xin cảm ơn"
+        )
+        == "Không tìm thấy thông tin sản phẩm"
+    )
+    disclaimer = (
+        "All products available for shopping agent service displayed on CSSBuy "
+        "are from third-party shopping platforms. Add to Cart Buy now"
+    )
+    assert visible_text_out_of_stock_notice(disclaimer) is None
+    footer = "Câu hỏi thường gặp Hết hàng Chính sách bảo mật"
+    assert notice_from_stock_zone({"zoneText": "Add to Cart\n$12.00", "missingProduct": False}) is None
+    assert notice_from_stock_zone({"zoneText": footer, "missingProduct": False}) == "Hết hàng"
+    assert (
+        notice_from_stock_zone({"zoneText": "Trang chủ", "missingProduct": True})
+        == "Không tìm thấy thông tin sản phẩm"
+    )
+    assert product_zone_looks_loaded({"risksOpen": True, "productImage": True, "title": "Áo khoác bomber nam"}) is False
+    assert product_zone_looks_loaded({"risksOpen": False, "productImage": False, "title": "CSSBuy: Taobao Agent"}) is False
+    assert product_zone_looks_loaded({"risksOpen": False, "productImage": True, "title": ""}) is True
+
+
 def test_platform_button_html_snippets():
     assert cssbuy_html_shows_add_to_cart_button(CSS_BTN)
     assert vipomall_html_shows_add_to_cart_cta(VIPO_BTN)
     assert pandamall_html_shows_cart_or_buy_cta(PANDA_BTNS)
+    assert not pandamall_html_shows_cart_or_buy_cta(
+        '<div class="box-title fm-500">Tìm kiếm &amp; Thêm vào giỏ</div>'
+    )
+    assert not vipomall_html_shows_add_to_cart_cta("<div>Thêm giỏ hàng</div>")
 
 
 def test_security_block_html():
@@ -108,11 +144,38 @@ def test_security_block_html():
     )
 
 
-def test_fallback_on_blocked_or_error_not_on_oos():
-    assert _result_should_fallback_next_platform(SourceStockCheckResult(status="error")) is True
+def test_fallback_only_when_cloudflare_blocked():
     assert _result_should_fallback_next_platform(SourceStockCheckResult(status="blocked")) is True
+    assert _result_should_fallback_next_platform(SourceStockCheckResult(status="error")) is False
     assert _result_should_fallback_next_platform(SourceStockCheckResult(status="out_of_stock")) is False
+    assert _result_should_fallback_next_platform(SourceStockCheckResult(status="in_stock")) is False
     assert _result_is_conclusive_stock(SourceStockCheckResult(status="in_stock")) is True
+
+
+def test_all_platforms_blocked_emails_admin_once_per_window(monkeypatch):
+    import app.services.source_stock_block_alert as alert
+
+    alert._last_sent_mono = 0.0
+    sent = []
+
+    def _capture(**kwargs):
+        sent.append(kwargs)
+
+    class _Now:
+        def __init__(self, target, kwargs=None, **_ignored):
+            self.target = target
+            self.kwargs = kwargs or {}
+
+        def start(self):
+            self.target(**self.kwargs)
+
+    monkeypatch.setattr(alert.threading, "Thread", _Now)
+    monkeypatch.setattr(alert, "_send", _capture)
+    assert alert.maybe_notify_admin_all_platforms_blocked(product_id=1, link="https://detail.1688.com/offer/1.html") is True
+    assert alert.maybe_notify_admin_all_platforms_blocked(product_id=2) is False
+    assert len(sent) == 1
+    assert sent[0]["product_id"] == 1
+    alert._last_sent_mono = 0.0
 
 
 def test_all_platforms_blocked_stops():
