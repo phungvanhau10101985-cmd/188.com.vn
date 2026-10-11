@@ -165,12 +165,29 @@ class ImageProcessor:
         x1, y1, x2, y2 = self._clip_bbox(bbox, h_img, w_img)
         if x2 <= x1 or y2 <= y1:
             return img
-        mask = self._build_text_mask(img[y1:y2, x1:x2])
+        roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) if roi.size else None
+        radius = 3
+        if gray is not None and gray.size:
+            light = float(np.mean(gray >= 150))
+            dark = float(np.mean(gray <= 80))
+            if light >= 0.35 and 0.04 <= dark <= 0.45:
+                x1, y1 = max(0, x1 - 3), max(0, y1 - 3)
+                x2, y2 = min(w_img, x2 + 3), min(h_img, y2 + 3)
+                roi = img[y1:y2, x1:x2]
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                mask = (gray <= 140).astype(np.uint8) * 255
+                mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+                radius = 6
+            else:
+                mask = self._build_text_mask(roi)
+        else:
+            mask = self._build_text_mask(roi)
         if mask.size == 0 or int(np.count_nonzero(mask)) < 8:
             return img
         full_mask = np.zeros((h_img, w_img), dtype=np.uint8)
         full_mask[y1:y2, x1:x2] = mask
-        return cv2.inpaint(img, full_mask, 3, cv2.INPAINT_TELEA)
+        return cv2.inpaint(img, full_mask, radius, cv2.INPAINT_TELEA)
 
     def _advanced_inpainting(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Xóa chữ trên nền phẳng. Bbox đè lên ảnh sản phẩm thì chỉ xóa nét chữ."""
@@ -340,21 +357,23 @@ class ImageProcessor:
     def _apply_inset_caption_cards(self, img: np.ndarray, blocks: List[Dict], phone_min: int) -> None:
         """Các nhãn cùng hàng trên một thẻ trắng dùng chung một dải, không cắt chữ."""
         h_img, w_img = img.shape[:2]
-        pending = [item for item in blocks if item.get("_paper") and item.get("_draw") and item.get("src_bbox")]
+        pending = [
+            item for item in blocks
+            if item.get("_paper") and item.get("_draw") and item.get("src_bbox") and not item.get("_locked")
+        ]
         used = set()
         for item in pending:
             if id(item) in used:
                 continue
             src = tuple(map(int, item["src_bbox"]))
-            cy = (src[1] + src[3]) / 2
-            reach = max(12, src[3] - src[1])
             row = [item]
             for other in pending:
                 if other is item or id(other) in used:
                     continue
                 ob = tuple(map(int, other["src_bbox"]))
-                ocy = (ob[1] + ob[3]) / 2
-                if abs(ocy - cy) <= max(reach, ob[3] - ob[1]) * 1.8:
+                overlap_y = min(src[3], ob[3]) - max(src[1], ob[1])
+                shorter = max(1, min(src[3] - src[1], ob[3] - ob[1]))
+                if overlap_y >= shorter * 0.35:
                     row.append(other)
             if len(row) < 2:
                 continue
@@ -366,39 +385,66 @@ class ImageProcessor:
             card_x1, card_y1, card_x2, card_y2 = card
             row.sort(key=lambda it: int(it["src_bbox"][0]))
             n = len(row)
-            col_w = max(8, (card_x2 - card_x1) // n)
+            spans = []
+            for index, part in enumerate(row):
+                src_box = tuple(map(int, part["src_bbox"]))
+                x1 = src_box[0]
+                if index + 1 < n:
+                    x2 = int(row[index + 1]["src_bbox"][0]) - 3
+                else:
+                    box_w = max(8, src_box[2] - src_box[0])
+                    x2 = min(card_x2, src_box[2] + max(24, box_w))
+                spans.append((x1, max(x1 + 8, x2)))
+            row_heights = sorted(
+                max(8, int(part["src_bbox"][3]) - int(part["src_bbox"][1])) for part in row
+            )
+            typical = row_heights[len(row_heights) // 2]
             fitted = []
             tallest = 0
-            for part in row:
+            for part, (x1, x2) in zip(row, spans):
                 text = str(part.get("text") or "").strip()
+                src_h = max(12, int(part["src_bbox"][3]) - int(part["src_bbox"][1]))
                 font, lines, pad = self._fit_cell_lines(
                     text,
-                    col_w - 8,
-                    phone_min * 6,
-                    min_size=phone_min,
-                    max_size=phone_min,
+                    max(8, x2 - x1 - 4),
+                    max(src_h + 4, src_h),
+                    min_size=9,
+                    max_size=max(12, min(src_h, int(typical * 1.25))),
                 )
                 if not font:
                     fitted.append(None)
                     continue
                 _need_w, need_h = self._line_block_size(font, lines, pad)
-                tallest = max(tallest, need_h)
+                tallest = max(tallest, min(need_h, src_h + 4))
                 fitted.append((font, lines, pad))
             if tallest < 8:
                 continue
             y1 = max(card_y1, min(int(it["src_bbox"][1]) for it in row) - 2)
-            y2 = min(h_img - 2, y1 + tallest + 8)
-            img[y1:y2, card_x1:card_x2] = (255, 255, 255)
-            for index, part in enumerate(row):
-                pack = fitted[index]
+            y2 = min(h_img - 2, y1 + tallest + 4)
+            below = []
+            for other in blocks:
+                if other in row or not other.get("src_bbox"):
+                    continue
+                ob = tuple(map(int, other["src_bbox"]))
+                if ob[1] >= y1 + 4:
+                    below.append(ob[1])
+            if below:
+                y2 = min(y2, min(below) - 2)
+            if y2 - y1 < 8:
+                continue
+            before = img.copy()
+            color = row[0].get("_paper_bgr") or (255, 255, 255)
+            for (x1, x2), pack in zip(spans, fitted):
+                if not pack or x2 <= x1:
+                    continue
+                self._paint_panel_keep_art(img, before, (x1, y1, min(x2, w_img - 2), y2), color)
+            for part, (x1, x2), pack in zip(row, spans, fitted):
                 if not pack:
                     continue
                 font, lines, pad = pack
-                x1 = card_x1 + index * col_w
-                x2 = card_x2 if index == n - 1 else card_x1 + (index + 1) * col_w
                 part["ink_rgb"] = (0, 0, 0)
-                part["_align"] = "top-center"
-                part["_draw"] = (font, lines, pad, (x1, y1 + 4, x2, y2))
+                part["_align"] = "top"
+                part["_draw"] = (font, lines, pad, (x1, y1 + 1, min(x2, w_img - 2), y2))
 
     def _repaint_bbox_to_background(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Xóa nét chữ trong hộp OCR bằng màu nền ngay ngoài hộp."""
@@ -415,7 +461,10 @@ class ImageProcessor:
         samples = outer[ring]
         if samples.size < 9:
             return img
-        bg = np.median(samples, axis=0)
+        local = self._uniform_surround_bgr(img, (x1, y1, x2, y2), pad=pad)
+        if local is None:
+            return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
+        bg = np.array(local, dtype=np.uint8)
         inner = img[y1:y2, x1:x2].copy()
         diff = np.max(np.abs(inner.astype(np.int16) - bg.astype(np.int16)), axis=2)
         mask = (diff > 28).astype(np.uint8) * 255
@@ -438,7 +487,10 @@ class ImageProcessor:
         bg_pixels = roi[mask == 0]
         if bg_pixels.size < 9:
             return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
-        fill = np.median(bg_pixels, axis=0).astype(np.uint8)
+        local = self._uniform_surround_bgr(img, (x1, y1, x2, y2))
+        if local is None:
+            return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
+        fill = np.array(local, dtype=np.uint8)
         out = img.copy()
         painted = out[y1:y2, x1:x2]
         painted[mask > 0] = fill
@@ -856,13 +908,18 @@ class ImageProcessor:
             measure_text = str(match["text"]).strip()
             label = str(item["text"]).strip()
             text = label if measure_text in label else f"{label} {measure_text}".strip()
-            labels.append({
+            merged = {
                 **item,
                 "text": text,
                 "y1": min(item["y1"], match["y1"]),
                 "y2": max(item["y2"], match["y2"]),
                 "x2": match["x2"],
-            })
+            }
+            if item.get("src_boxes") or match.get("src_boxes"):
+                boxes = list(item.get("src_boxes") or [(item["x1"], item["y1"], item["x2"], item["y2"])])
+                boxes.extend(match.get("src_boxes") or [(match["x1"], match["y1"], match["x2"], match["y2"])])
+                merged["src_boxes"] = boxes
+            labels.append(merged)
         leftover = [it for it in measures if id(it) not in consumed and it in items]
         obstacles_left = [it for it in obstacles if id(it) not in consumed]
         return labels + leftover, obstacles_left
@@ -1139,15 +1196,100 @@ class ImageProcessor:
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         if self._is_text_on_flat_paper(gray):
             return False
+        if self._flat_panel_bgr(img, (x1, y1, x2, y2)) is not None:
+            return False
         b, g, r = cv2.split(roi)
         color_spread = float(np.mean(np.abs(r.astype(np.int16) - g.astype(np.int16))))
         color_spread += float(np.mean(np.abs(g.astype(np.int16) - b.astype(np.int16))))
         return color_spread > 12 and float(np.std(gray)) > 16
 
+    def _smooth_field_light_caption(self, img: np.ndarray, bbox) -> bool:
+        """Chữ sáng trên nền trời/gradient mịn. Khác ảnh sản phẩm và khác thẻ màu đặc."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 8 or y2 - y1 < 8:
+            return False
+        gray = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY).astype(np.float32)
+        blur = cv2.GaussianBlur(gray, (0, 0), 2.5)
+        glyphs = (gray - blur > 8) & (gray > 170)
+        glyph_u8 = glyphs.astype(np.uint8) * 255
+        count, _labels, stats, _cent = cv2.connectedComponentsWithStats(glyph_u8, connectivity=8)
+        if count <= 1:
+            return False
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        strokes = areas[areas >= 12]
+        if strokes.size == 0 or float(strokes.sum()) / float(max(1, areas.sum())) < 0.85:
+            return False
+        frac = float(np.mean(glyphs))
+        if frac < 0.08 or frac > 0.5:
+            return False
+        field = ~glyphs
+        if float(np.mean(field)) < 0.4 or float(np.mean(gray[field])) < 130:
+            return False
+        resid = np.abs(gray - blur)
+        if float(np.std(resid[field])) > 16:
+            return False
+        field_bgr = np.median(img[y1:y2, x1:x2][field], axis=0)
+        blue, green, red = (int(field_bgr[0]), int(field_bgr[1]), int(field_bgr[2]))
+        if blue < 140 or green < 140:
+            return False
+        if red - blue > 25:
+            return False
+        return True
+
+    def _erase_light_glyphs(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
+        """Xóa nét chữ sáng trên nền mịn, giữ gradient phía sau."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(bbox, h_img, w_img)
+        x1, y1 = max(0, x1 - 2), max(0, y1 - 2)
+        x2, y2 = min(w_img, x2 + 2), min(h_img, y2 + 2)
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return img
+        roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        if gray.shape[0] >= 28:
+            level = float(np.percentile(gray, 40))
+            mask = (gray.astype(np.float32) > level + 26).astype(np.uint8) * 255
+            mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
+            painted = roi.copy()
+            selected = mask > 0
+            for yy in range(painted.shape[0]):
+                field = painted[yy][~selected[yy]]
+                if field.shape[0] < 6:
+                    continue
+                painted[yy][selected[yy]] = np.median(field, axis=0)
+            edge = cv2.subtract(cv2.dilate(mask, np.ones((3, 3), np.uint8)), cv2.erode(mask, np.ones((3, 3), np.uint8)))
+            blur = cv2.GaussianBlur(painted, (0, 0), 0.8)
+            painted[edge > 0] = blur[edge > 0]
+            out = img.copy()
+            out[y1:y2, x1:x2] = painted
+            return out
+        gray_f = gray.astype(np.float32)
+        blur = cv2.GaussianBlur(gray_f, (0, 0), 2.2)
+        mask = ((gray_f - blur > 8) & (gray_f > 165)).astype(np.uint8) * 255
+        mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+        if int(np.count_nonzero(mask)) < 8:
+            return img
+        full = np.zeros((h_img, w_img), dtype=np.uint8)
+        full[y1:y2, x1:x2] = mask
+        return cv2.inpaint(img, full, 5, cv2.INPAINT_TELEA)
+
+    def _sky_limit_y(self, img: np.ndarray, bbox) -> int | None:
+        """Đường viền sáng ngay dưới nhãn, để chữ không tràn khỏi ô icon."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        xa, xb = max(0, x1 - 24), min(w_img, x2 + 24)
+        for yy in range(y2 + 2, min(h_img, y2 + 42)):
+            seg = gray[yy, xa:xb]
+            if seg.size >= 8 and float(np.mean(seg > 215)) > 0.55:
+                return yy
+        return None
+
     def _is_text_on_flat_paper(self, gray: np.ndarray) -> bool:
         """Chữ đen trên nền kem/trắng phẳng. Nét chữ làm lệch màu nhưng không phải ảnh sản phẩm."""
-        paper = gray >= 200
-        if float(np.mean(paper)) < 0.45 or int(np.count_nonzero(paper)) < 20:
+        paper = gray >= 185
+        if float(np.mean(paper)) < 0.42 or int(np.count_nonzero(paper)) < 20:
             return False
         if float(np.std(gray[paper])) >= 18:
             return False
@@ -1156,7 +1298,214 @@ class ImageProcessor:
         if count <= 1:
             return True
         largest = float(stats[1:, cv2.CC_STAT_AREA].max()) / float(max(1, ink.size))
-        return largest < 0.12
+        return largest < 0.16
+
+    def _flat_panel_bgr(self, img: np.ndarray, bbox) -> Tuple[int, int, int] | None:
+        """Nền một màu (thẻ nâu, ô xanh, giấy sáng). None nếu là ảnh sản phẩm có vân."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 6 or y2 - y1 < 6:
+            return None
+        pixels = img[y1:y2, x1:x2].reshape(-1, 3).astype(np.int16)
+        if pixels.shape[0] < 12:
+            return None
+        med = np.median(pixels, axis=0)
+        close = np.max(np.abs(pixels - med), axis=1) < 34
+        if float(np.mean(close)) < 0.52:
+            return None
+        if float(np.std(pixels[close], axis=0).mean()) > 12:
+            return None
+        return (int(med[0]), int(med[1]), int(med[2]))
+
+    def _panel_clip(self, img: np.ndarray, bbox, color: Tuple[int, int, int]) -> Tuple[int, int, int, int]:
+        """Vùng cùng màu quanh hộp chữ, không tràn sang áo/sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        target = np.array(color, dtype=np.int16)
+
+        def row_match(y: int, xa: int, xb: int) -> bool:
+            if xb - xa < 4 or y < 0 or y >= h_img:
+                return False
+            row = img[y, xa:xb].astype(np.int16)
+            return float(np.mean(np.max(np.abs(row - target), axis=1) < 36)) > 0.62
+
+        top, bot = y1, y2
+        while top > 0 and row_match(top - 1, x1, x2):
+            top -= 1
+        while bot < h_img and row_match(bot, x1, x2):
+            bot += 1
+        left, right = x1, x2
+        mid_y1, mid_y2 = max(top, y1), min(bot, y2)
+        if mid_y2 <= mid_y1:
+            mid_y1, mid_y2 = top, bot
+
+        def col_match(x: int) -> bool:
+            if x < 0 or x >= w_img or mid_y2 - mid_y1 < 4:
+                return False
+            col = img[mid_y1:mid_y2, x].astype(np.int16)
+            return float(np.mean(np.max(np.abs(col - target), axis=1) < 36)) > 0.62
+
+        while left > 0 and col_match(left - 1):
+            left -= 1
+        while right < w_img and col_match(right):
+            right += 1
+        return left, top, right, bot
+
+    def _flat_run_right(self, img: np.ndarray, x: int, y1: int, y2: int, color: Tuple[int, int, int]) -> int:
+        """Đi sang phải trên nền phẳng. Nét chữ cùng hàng không tính là hết nền."""
+        h_img, w_img = img.shape[:2]
+        y1 = max(0, min(h_img - 1, int(y1)))
+        y2 = max(y1 + 1, min(h_img, int(y2)))
+        target = np.array(color, dtype=np.int16)
+        panel_rgb = (int(color[2]), int(color[1]), int(color[0]))
+        light_panel = self._luminance(panel_rgb) >= 170
+        cursor = max(0, int(x))
+        while cursor < w_img - 1:
+            col = img[y1:y2, cursor]
+            if col.size == 0:
+                break
+            near = np.max(np.abs(col.astype(np.int16) - target), axis=1) < 42
+            spread = col.max(axis=1).astype(np.int16) - col.min(axis=1).astype(np.int16)
+            if int(np.count_nonzero(spread >= 36)) >= 4:
+                break
+            gray = cv2.cvtColor(col.reshape(-1, 1, 3), cv2.COLOR_BGR2GRAY).ravel()
+            ink = (gray < 165) if light_panel else (gray > 150)
+            plain = near & (spread < 36)
+            if float(np.mean(plain | (ink & (spread < 28)))) < 0.72:
+                break
+            cursor += 1
+        return cursor
+
+    def _illustration_left(self, img: np.ndarray, x: int, y1: int, y2: int) -> int:
+        """Cột trái nhất của hình có màu (sơ đồ, mũi tên), bên phải mốc x."""
+        h_img, w_img = img.shape[:2]
+        y1 = max(0, min(h_img - 1, int(y1)))
+        y2 = max(y1 + 1, min(h_img, int(y2)))
+        x = max(0, min(w_img - 1, int(x)))
+        band = img[y1:y2, x:w_img]
+        if band.size == 0:
+            return w_img
+        spread = band.max(axis=2).astype(np.int16) - band.min(axis=2).astype(np.int16)
+        hits = np.where((spread >= 36).sum(axis=0) >= 4)[0]
+        if hits.size == 0:
+            return w_img
+        return x + int(hits[0])
+
+    def _uniform_surround_bgr(self, img: np.ndarray, rect, pad: int = 6) -> Tuple[int, int, int] | None:
+        """Màu nền ngay ngoài hộp. None nếu vành không cùng một màu."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, rect)), h_img, w_img)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return None
+        ox1, oy1 = max(0, x1 - pad), max(0, y1 - pad)
+        ox2, oy2 = min(w_img, x2 + pad), min(h_img, y2 + pad)
+        outer = img[oy1:oy2, ox1:ox2]
+        if outer.size == 0:
+            return None
+        ring = np.ones(outer.shape[:2], dtype=bool)
+        ring[(y1 - oy1):(y2 - oy1), (x1 - ox1):(x2 - ox1)] = False
+        samples = outer[ring]
+        if samples.shape[0] < 12:
+            return None
+        spread = samples.max(axis=1).astype(np.int16) - samples.min(axis=1).astype(np.int16)
+        plain = samples[spread < 30]
+        if plain.shape[0] < 12:
+            return None
+        med = np.median(plain, axis=0)
+        close = np.max(np.abs(plain.astype(np.int16) - med.astype(np.int16)), axis=1) < 24
+        if float(np.mean(close)) < 0.7:
+            return None
+        if float(np.std(plain[close].astype(np.float32), axis=0).mean()) > 12:
+            return None
+        return (int(med[0]), int(med[1]), int(med[2]))
+
+    def _plate_bgr(self, img: np.ndarray, rect) -> Tuple[int, int, int]:
+        """Màu nền đặc để che chữ cũ. Ưu tiên vành cùng màu, không thì lấy phần sáng quanh hộp."""
+        local = self._uniform_surround_bgr(img, rect, pad=5)
+        if local is not None:
+            return local
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, rect)), h_img, w_img)
+        pad = 5
+        ox1, oy1 = max(0, x1 - pad), max(0, y1 - pad)
+        ox2, oy2 = min(w_img, x2 + pad), min(h_img, y2 + pad)
+        outer = img[oy1:oy2, ox1:ox2]
+        if outer.size == 0:
+            return self._background_bgr(img, (x1, y1, x2, y2))
+        ring = np.ones(outer.shape[:2], dtype=bool)
+        ring[(y1 - oy1):(y2 - oy1), (x1 - ox1):(x2 - ox1)] = False
+        samples = outer[ring]
+        if samples.shape[0] < 8:
+            samples = outer.reshape(-1, 3)
+        tone = samples.mean(axis=1)
+        keep = samples[tone >= np.percentile(tone, 55)]
+        if keep.shape[0] < 4:
+            keep = samples
+        med = np.median(keep, axis=0)
+        return (int(med[0]), int(med[1]), int(med[2]))
+
+    def _solid_cover_text(self, img: np.ndarray, bbox) -> np.ndarray:
+        """Tô kín hộp chữ bằng nền đặc để che hết nét cũ. Không đè ảnh sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return img
+        if self._region_is_color_photo(img, (x1, y1, x2, y2)) and not self._is_light_chart_surface(img, (x1, y1, x2, y2)):
+            return img
+        px1, py1, px2, py2 = self._expand_light_ink(img, x1, y1, x2, y2)
+        if self._region_is_color_photo(img, (px1, py1, px2, py2)):
+            px1, py1, px2, py2 = x1, y1, x2, y2
+        color = np.array(self._plate_bgr(img, (px1, py1, px2, py2)), dtype=np.uint8)
+        out = img.copy()
+        out[py1:py2, px1:px2] = color
+        return out
+
+    def _expand_light_ink(self, img: np.ndarray, x1: int, y1: int, x2: int, y2: int, margin: int = 6):
+        """Nới hộp tới nét chữ sát bên trên nền sáng, không nuốt cả ảnh tối."""
+        h_img, w_img = img.shape[:2]
+        xa, ya = max(0, x1 - margin), max(0, y1 - margin)
+        xb, yb = min(w_img, x2 + margin), min(h_img, y2 + margin)
+        gray = cv2.cvtColor(img[ya:yb, xa:xb], cv2.COLOR_BGR2GRAY)
+        if float(np.mean(gray >= 140)) < 0.5:
+            return x1, y1, x2, y2
+        ink = gray < 150
+        if float(np.mean(ink)) > 0.32 or int(np.count_nonzero(ink)) < 8:
+            return max(0, x1 - 2), max(0, y1 - 2), min(w_img, x2 + 2), min(h_img, y2 + 2)
+        ys, xs = np.where(ink)
+        return xa + int(xs.min()), ya + int(ys.min()), xa + int(xs.max()) + 1, ya + int(ys.max()) + 1
+
+    def _is_light_chart_surface(self, img: np.ndarray, bbox) -> bool:
+        """Nền bảng sáng, ít màu. Khác da và ảnh sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 4 or y2 - y1 < 4:
+            return False
+        roi = img[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        if float(np.mean(gray >= 140)) < 0.45:
+            return False
+        b, g, r = cv2.split(roi)
+        spread = float(np.mean(np.abs(r.astype(np.int16) - g.astype(np.int16))))
+        spread += float(np.mean(np.abs(g.astype(np.int16) - b.astype(np.int16))))
+        return spread < 14
+
+    def _paint_panel_keep_art(self, img: np.ndarray, original: np.ndarray, rect, color: Tuple[int, int, int]) -> None:
+        """Tô nền đặc bằng màu ngay quanh vị trí đó. Không tô nếu quanh đó không cùng màu."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, rect)), h_img, w_img)
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            return
+        local = self._uniform_surround_bgr(original, (x1, y1, x2, y2)) or self._uniform_surround_bgr(img, (x1, y1, x2, y2))
+        if local is None:
+            return
+        color = local
+        orig = original[y1:y2, x1:x2]
+        diff = np.max(np.abs(orig.astype(np.int16) - np.array(color, dtype=np.int16)), axis=2)
+        far = (diff > 36).astype(np.uint8) * 255
+        art = cv2.morphologyEx(far, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        roi = img[y1:y2, x1:x2]
+        roi[art == 0] = color
+        img[y1:y2, x1:x2] = roi
 
     def _region_is_product_photo(self, img: np.ndarray, bbox) -> bool:
         """Vùng da/kim loại có màu và dải xám giữa — khác nền trắng đen của bảng size."""
@@ -1198,6 +1547,241 @@ class ImageProcessor:
             if any(self._region_is_product_photo(img, part) for part in regions):
                 return True
         return False
+
+    def _spec_items(self, processed_blocks: List, ignore_blocks: List, img_w: int, img_h: int) -> List[Dict]:
+        items = []
+        for text, bbox in processed_blocks or []:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 <= x1 or y2 <= y1 or not str(text or "").strip():
+                continue
+            items.append({
+                "text": str(text).strip(),
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+                "src_boxes": [(x1, y1, x2, y2)],
+            })
+        obstacles = []
+        for text, bbox in ignore_blocks or []:
+            if not bbox or len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = self._clip_bbox(self._xyxy(bbox), img_h, img_w)
+            if x2 > x1 and y2 > y1:
+                obstacles.append({"text": str(text or "").strip(), "x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        items, _obstacles = self._attach_trailing_measurements(items, obstacles)
+        return items
+
+    def _dominant_spec_column(self, items: List[Dict]) -> List[Dict] | None:
+        """Một cột thông số xếp dọc, không phải bảng nhiều cột."""
+        if len(items) < 5:
+            return None
+        groups: List[List[Dict]] = []
+        for item in sorted(items, key=lambda it: it["x1"]):
+            if not groups or item["x1"] - groups[-1][-1]["x1"] > 48:
+                groups.append([item])
+            else:
+                groups[-1].append(item)
+        best = max(groups, key=len)
+        if len(best) < 5 or len(best) < 0.62 * len(items):
+            return None
+        ys = sorted(int(it["y1"]) for it in best)
+        gaps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        gaps = [gap for gap in gaps if gap > 4]
+        if not gaps or sorted(gaps)[len(gaps) // 2] > 48:
+            return None
+        if max(it["y2"] for it in best) - min(it["y1"] for it in best) < 80:
+            return None
+        return best
+
+    def _coalesce_spec_continuations(self, items: List[Dict]) -> List[Dict]:
+        """Nối dòng OCR bị cắt giữa câu. Câu đã chấm hết thì giữ thành đoạn riêng."""
+        merged: List[Dict] = []
+        for item in sorted(items, key=lambda it: (it["y1"], it["x1"])):
+            if not merged:
+                merged.append(dict(item))
+                continue
+            prev = merged[-1]
+            gap = item["y1"] - prev["y2"]
+            prev_wide = prev["x2"] - prev["x1"] >= 180
+            same_left = abs(item["x1"] - prev["x1"]) <= 20
+            unfinished = not str(prev["text"]).rstrip().endswith((".", "!", "?", "。", "！"))
+            if prev_wide and same_left and unfinished and -2 <= gap <= 10:
+                boxes = list(prev.get("src_boxes") or [])
+                boxes.extend(item.get("src_boxes") or [(item["x1"], item["y1"], item["x2"], item["y2"])])
+                nxt = str(item["text"]).strip()
+                if nxt[:1].isupper() and not nxt.isupper():
+                    nxt = nxt[:1].lower() + nxt[1:]
+                prev["text"] = f"{prev['text']} {nxt}".strip()
+                prev["x1"] = min(prev["x1"], item["x1"])
+                prev["y1"] = min(prev["y1"], item["y1"])
+                prev["x2"] = max(prev["x2"], item["x2"])
+                prev["y2"] = max(prev["y2"], item["y2"])
+                prev["src_boxes"] = boxes
+                continue
+            merged.append(dict(item))
+        return merged
+
+    def _text_pixel_size(self, font, text: str) -> Tuple[int, int]:
+        probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+        bb = probe.textbbox((0, 0), text or " ", font=font)
+        return bb[2] - bb[0], bb[3] - bb[1]
+
+    def _paper_right_limit(self, image: np.ndarray | None, img_w: int, y1: int, y2: int, x_start: int) -> int:
+        if image is None:
+            return img_w - 8
+        x = max(0, x_start)
+        y1 = max(0, y1)
+        y2 = min(image.shape[0], max(y1 + 8, y2))
+        while x + 16 < img_w:
+            if self._region_is_color_photo(image, (x, y1, min(img_w, x + 16), y2)):
+                break
+            x += 8
+        return max(x_start + 48, min(img_w - 8, x))
+
+    def _shared_spec_font(self, labels: List[Tuple[str, int]], max_h: int, max_size: int, min_size: int):
+        for size in range(int(max_size), int(min_size) - 1, -1):
+            font = self._get_font(size)
+            if not font:
+                continue
+            fits = True
+            for text, width in labels:
+                tw, th = self._text_pixel_size(font, text)
+                if tw > width or th > max_h:
+                    fits = False
+                    break
+            if fits:
+                return font
+        return self._get_font(min_size)
+
+    def _layout_spec_column(
+        self,
+        processed_blocks: List,
+        ignore_blocks: List,
+        img_w: int,
+        img_h: int,
+        image: np.ndarray | None = None,
+    ) -> List[Dict] | None:
+        """Cột thông số cạnh ảnh sản phẩm: mỗi nhãn một dòng đúng vị trí, ghi chú xuống dòng bên dưới."""
+        items = self._spec_items(processed_blocks, ignore_blocks, img_w, img_h)
+        column = self._dominant_spec_column(items)
+        if not column:
+            return None
+        column_ids = {id(item) for item in column}
+        rest = [item for item in items if id(item) not in column_ids]
+        column_top = min(item["y1"] for item in column)
+        headers = [item for item in rest if item["y2"] <= column_top + 12 and item["y1"] < img_h * 0.22]
+        if len(headers) != len(rest):
+            return None
+
+        body = self._coalesce_spec_continuations(column)
+        short_widths = sorted(item["x2"] - item["x1"] for item in body if len(item["text"]) < 36)
+        typical = short_widths[len(short_widths) // 2] if short_widths else 100
+        paragraphs = [
+            item for item in body
+            if len(item["text"]) >= 36 and (item["x2"] - item["x1"]) >= max(160, int(typical * 1.7))
+        ]
+        para_ids = {id(item) for item in paragraphs}
+        labels = [item for item in body if id(item) not in para_ids]
+        if len(labels) < 4:
+            return None
+        labels.sort(key=lambda it: it["y1"])
+        centers = [(item["y1"] + item["y2"]) / 2 for item in labels]
+        gaps = [centers[i + 1] - centers[i] for i in range(len(centers) - 1)]
+        gaps = [gap for gap in gaps if gap >= 8]
+        pitch = min(gaps) if gaps else max(16, labels[0]["y2"] - labels[0]["y1"])
+        max_h = max(12, int(pitch) - 2)
+
+        right = self._paper_right_limit(
+            image,
+            img_w,
+            min(item["y1"] for item in body),
+            max(item["y2"] for item in body),
+            min(item["x1"] for item in body),
+        )
+        fitted = [(item["text"], max(48, right - int(item["x1"]) - 2)) for item in labels]
+        font = self._shared_spec_font(fitted, max_h, min(22, max_h + 2), 13)
+        if not font:
+            return None
+        for text, width in fitted:
+            if self._text_pixel_size(font, text)[0] > width:
+                return None
+
+        placed = []
+        for item in headers:
+            text = str(item["text"]).strip()
+            box_h = max(14, item["y2"] - item["y1"] + 4)
+            width = max(48, img_w - 10 - int(item["x1"]))
+            header_font = self._shared_spec_font([(text, width)], box_h, 22, 13)
+            if not header_font or self._text_pixel_size(header_font, text)[0] > width:
+                return None
+            tw, th = self._text_pixel_size(header_font, text)
+            cy = (item["y1"] + item["y2"]) / 2
+            y1 = int(round(cy - th / 2))
+            placed.append(self._locked_spec_item(item, header_font, [text], int(item["x1"]), y1, tw, th))
+
+        label_bottom = 0
+        for item in labels:
+            text = str(item["text"]).strip()
+            tw, th = self._text_pixel_size(font, text)
+            cy = (item["y1"] + item["y2"]) / 2
+            y1 = int(round(cy - th / 2))
+            if label_bottom and y1 < label_bottom + 1:
+                y1 = label_bottom + 1
+            x1 = int(item["x1"])
+            if x1 + tw > right:
+                return None
+            node = self._locked_spec_item(item, font, [text], x1, y1, tw, th)
+            placed.append(node)
+            label_bottom = node["_draw"][3][3]
+
+        cursor = label_bottom + max(6, int(getattr(font, "size", 14) * 0.45))
+        for item in sorted(paragraphs, key=lambda it: it["y1"]):
+            text = str(item["text"]).strip()
+            x1 = int(item["x1"])
+            width = max(80, right - x1)
+            top = max(int(item["y1"]), cursor)
+            avail_h = max(28, img_h - 6 - top)
+            para_font, lines, pad = self._fit_cell_lines(
+                text,
+                width,
+                avail_h,
+                min_size=13,
+                max_size=getattr(font, "size", 16),
+            )
+            if not para_font:
+                return None
+            glyph_w = max(self._text_pixel_size(para_font, line)[0] for line in lines)
+            _need_w, need_h = self._line_block_size(para_font, lines, pad)
+            if top + need_h > img_h - 2:
+                return None
+            placed.append(self._locked_spec_item(item, para_font, lines, x1, top, glyph_w, need_h, pad=pad))
+            cursor = top + need_h + 4
+        return placed or None
+
+    def _locked_spec_item(self, item: Dict, font, lines: List[str], x: int, y: int, text_w: int, text_h: int, pad: int = 1) -> Dict:
+        x1 = int(x) - pad
+        y1 = int(y) - 1
+        rect = (x1, y1, int(x) + int(text_w) + pad, int(y) + int(text_h) + 3)
+        src_boxes = [
+            tuple(map(int, box))
+            for box in (item.get("src_boxes") or [(item["x1"], item["y1"], item["x2"], item["y2"])])
+        ]
+        src = src_boxes[0]
+        return {
+            "text": "\n".join(lines),
+            "x1": src[0],
+            "y1": src[1],
+            "x2": src[2],
+            "y2": src[3],
+            "src_bbox": src,
+            "src_boxes": src_boxes,
+            "_locked": True,
+            "_align": "top",
+            "_draw": (font, lines, pad, rect),
+        }
 
     def _layout_in_situ_blocks(
         self,
@@ -1290,6 +1874,7 @@ class ImageProcessor:
         *,
         align: str = "center",
         anchor: Tuple[int, int, int, int] | None = None,
+        halo: Tuple[int, int, int] | None = None,
     ) -> None:
         draw = ImageDraw.Draw(cell)
         w, h = cell.size
@@ -1317,7 +1902,14 @@ class ImageProcessor:
                 x = ax + pad
             else:
                 x = ax + max(0, (aw - lw) // 2)
-            draw.text((x - bb[0], y - bb[1]), line, font=font, fill=fill)
+            draw.text(
+                (x - bb[0], y - bb[1]),
+                line,
+                font=font,
+                fill=fill,
+                stroke_width=1 if halo else 0,
+                stroke_fill=halo or fill,
+            )
             y += (bb[3] - bb[1]) + gap
             if align == "top" and y >= ay + ah:
                 break
@@ -1338,29 +1930,74 @@ class ImageProcessor:
         for item in ordered:
             src = item.get("src_bbox") or (item["x1"], item["y1"], item["x2"], item["y2"])
             item["ink_rgb"] = self._resolve_ink_rgb(image_data, tuple(map(int, src)))
+            if item.get("_locked"):
+                sx1, sy1, sx2, sy2 = tuple(map(int, src))
+                ox1, oy1 = max(0, sx1 - 8), max(0, sy1 - 8)
+                ox2, oy2 = min(w_img, sx2 + 8), min(h_img, sy2 + 8)
+                outer = image_data[oy1:oy2, ox1:ox2]
+                ring = np.ones(outer.shape[:2], dtype=bool)
+                iy1, iy2 = sy1 - oy1, sy2 - oy1
+                ix1, ix2 = sx1 - ox1, sx2 - ox1
+                if iy2 > iy1 and ix2 > ix1:
+                    ring[iy1:iy2, ix1:ix2] = False
+                samples = outer[ring] if outer.size else None
+                if samples is not None and samples.size >= 3:
+                    med = np.median(samples, axis=0)
+                    if self._luminance((int(med[2]), int(med[1]), int(med[0]))) >= 160:
+                        item["ink_rgb"] = (0, 0, 0)
             if protect_color_only:
                 erase = tuple(map(int, src))
             else:
                 erase = item.get("erase") or (item["x1"], item["y1"], item["x2"], item["y2"])
                 if src and any(is_protected(img, part) for part in self._box_remainder(erase, src)):
                     erase = src
-            x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, erase)), h_img, w_img)
-            if x2 <= x1 or y2 <= y1 or is_protected(img, (x1, y1, x2, y2)):
+            erase_boxes = [tuple(map(int, box)) for box in (item.get("src_boxes") or [erase])]
+            erase_boxes = [self._clip_bbox(box, h_img, w_img) for box in erase_boxes]
+            erase_boxes = [box for box in erase_boxes if box[2] > box[0] and box[3] > box[1]]
+            sky = bool(erase_boxes) and self._smooth_field_light_caption(image_data, tuple(map(int, src)))
+            protected = bool(erase_boxes) and any(is_protected(img, box) for box in erase_boxes)
+            if not erase_boxes or (protected and not sky):
                 safe_boxes[id(item)] = None
                 continue
+            item["_sky"] = sky
+            x1, y1, x2, y2 = erase_boxes[0]
             keep_bg = False
-            if protect_color_only:
-                img = self._repaint_bbox_to_background(img, (x1, y1, x2, y2))
-                bg_bgr = self._background_bgr(image_data, (x1, y1, x2, y2))
-                outside = self._median_bgr(image_data, (
-                    max(0, x1 - 6), max(0, y1 - 6), min(w_img, x2 + 6), min(h_img, y2 + 6),
-                ))
-                paper_bgr = bg_bgr if self._luminance((bg_bgr[2], bg_bgr[1], bg_bgr[0])) > self._luminance((outside[2], outside[1], outside[0])) else outside
-                item["_paper"] = self._luminance((paper_bgr[2], paper_bgr[1], paper_bgr[0])) >= 185
-                item["_paper_bgr"] = paper_bgr if item["_paper"] else None
+            if sky:
+                for box in erase_boxes:
+                    img = self._erase_light_glyphs(img, box)
+                item["_flat"] = False
+                item["_panel_bgr"] = None
+                item["_paper"] = False
+                item["_paper_bgr"] = None
+                item["ink_rgb"] = (255, 255, 255)
+            elif protect_color_only:
+                flat = self._flat_panel_bgr(image_data, tuple(map(int, src)))
+                item["_flat"] = flat is not None
+                if flat is not None:
+                    for box in erase_boxes:
+                        img = self._solid_cover_text(img, box)
+                    item["_panel_bgr"] = flat
+                    item["_paper"] = self._luminance((flat[2], flat[1], flat[0])) >= 185
+                    item["_paper_bgr"] = flat if item["_paper"] else None
+                else:
+                    gray = cv2.cvtColor(image_data[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+                    item["_paper_text"] = self._is_text_on_flat_paper(gray)
+                    if self._region_is_color_photo(image_data, tuple(map(int, src))) and not self._is_light_chart_surface(image_data, tuple(map(int, src))):
+                        for box in erase_boxes:
+                            img = self._inpaint_text_strokes(img, box)
+                    else:
+                        for box in erase_boxes:
+                            img = self._solid_cover_text(img, box)
+                        if item["_paper_text"]:
+                            item["_paper"] = True
+                            item["_paper_bgr"] = self._plate_bgr(image_data, tuple(map(int, src)))
+                    item["_panel_bgr"] = None
+                    if not item.get("_paper"):
+                        item["_paper_bgr"] = None
             else:
                 keep_bg = False
-                img[y1:y2, x1:x2] = (255, 255, 255)
+                local = self._uniform_surround_bgr(image_data, (x1, y1, x2, y2))
+                img[y1:y2, x1:x2] = local if local is not None else self._background_bgr(image_data, (x1, y1, x2, y2))
             safe_boxes[id(item)] = (x1, y1, x2, y2, keep_bg)
         if protect_color_only:
             sources = [
@@ -1370,46 +2007,139 @@ class ImageProcessor:
             ]
             for item in blocks:
                 saved = safe_boxes.get(id(item))
-                if not saved:
+                if not saved or (item.get("_locked") and item.get("_draw")):
                     continue
                 text = str(item.get("text") or "").strip()
                 src = tuple(map(int, item.get("src_bbox") or (item["x1"], item["y1"], item["x2"], item["y2"])))
                 sx1, sy1, sx2, sy2 = src
                 src_h = max(2, sy2 - sy1)
-                left, right = self._row_slot_bounds(src, [box for box in sources if box != src], w_img)
-                slot_w = max(8, right - left)
-                glyph_h = max(phone_min, src_h - 2)
+                others = [box for box in sources if box != src]
+                if item.get("_sky"):
+                    left, right = self._row_slot_bounds(src, others, w_img)
+                    left = max(left, sx1 - 2)
+                    extra = 40 if src_h < 26 else max(24, int((sx2 - sx1) * 0.35))
+                    cap = sx2 + extra
+                    right = min(right, w_img - 4, cap)
+                    rule = self._sky_limit_y(image_data, src)
+                    if src_h < 26 and rule is not None:
+                        limit_y = max(sy2, rule - 2)
+                    elif src_h < 26:
+                        limit_y = sy2 + src_h
+                    else:
+                        limit_y = sy2
+                    slot_w = max(24, right - left)
+                    slot_h = max(src_h, limit_y - sy1)
+                    max_font = max(11, min(src_h if src_h >= 28 else max(src_h, 16), slot_h))
+                    font, lines, pad = self._fit_cell_lines(
+                        text,
+                        slot_w,
+                        slot_h,
+                        min_size=10,
+                        max_size=max_font,
+                    )
+                    if not font:
+                        continue
+                    need_w, need_h = self._line_block_size(font, lines, pad)
+                    need_w = min(need_w, slot_w)
+                    x1 = max(0, min(sx1, w_img - need_w))
+                    y1 = max(0, min(sy1, h_img - 2))
+                    x2 = min(w_img, x1 + need_w)
+                    y2 = min(h_img, y1 + need_h)
+                    item["ink_rgb"] = (255, 255, 255)
+                    item["_draw"] = (font, lines, pad, (x1, y1, x2, y2))
+                    item["_align"] = "top"
+                    continue
+                if item.get("_flat"):
+                    left, right = self._row_slot_bounds(src, others, w_img)
+                    panel = item.get("_panel_bgr")
+                    panel_box = self._panel_clip(image_data, src, panel) if panel is not None else None
+                    if panel_box is not None:
+                        left = max(left, panel_box[0] + 2)
+                        right = min(right, panel_box[2] - 2)
+                    probe_bottom = min(h_img, sy2 + src_h)
+                    if panel is not None:
+                        run = self._flat_run_right(image_data, sx2, sy1, probe_bottom, panel)
+                        art = self._illustration_left(image_data, sx2, max(0, sy1 - src_h * 2), probe_bottom)
+                        right = min(right, max(sx2, min(run, art) - 16))
+                else:
+                    left, right = self._row_slot_bounds(src, others, w_img)
+                    left = max(sx1, min(left, sx1))
+                    cap = sx1 + max(sx2 - sx1, min(w_img // 3, max(120, (sx2 - sx1) * 2)))
+                    right = min(right, w_img - 4, cap)
+                    panel_box = None
+                slot_w = max(24, right - left)
+                next_y = None
+                for box in sources:
+                    if box == src:
+                        continue
+                    if box[1] < sy2 - 2:
+                        continue
+                    if min(sx2, box[2]) - max(sx1, box[0]) <= 4:
+                        continue
+                    next_y = box[1] if next_y is None else min(next_y, box[1])
+                limit_y = sy2 + max(8, src_h)
+                if next_y is not None:
+                    limit_y = min(limit_y, next_y - 2)
+                if panel_box is not None:
+                    limit_y = min(limit_y, panel_box[3] - 2)
+                if not item.get("_flat") and not item.get("_paper_text"):
+                    limit_y = sy2 + 2
+                slot_h = max(src_h, limit_y - sy1)
+                max_font = max(12, min(max(src_h, 14), slot_h))
+                if item.get("_paper") or item.get("_paper_text"):
+                    heights = sorted(
+                        max(1, box[3] - box[1]) for box in sources
+                    )
+                    typical = heights[len(heights) // 2] if heights else src_h
+                    max_font = min(max_font, max(12, int(typical * 1.25)))
                 font, lines, pad = self._fit_cell_lines(
                     text,
                     slot_w,
-                    max(src_h + 4, phone_min * 4),
-                    min_size=phone_min,
-                    max_size=glyph_h,
+                    slot_h,
+                    min_size=11,
+                    max_size=max_font,
                 )
+                if item.get("_flat") and font and len(lines) > 1:
+                    one_font, one_lines, one_pad = self._fit_cell_lines(
+                        text,
+                        slot_w,
+                        max(src_h, 12),
+                        min_size=16,
+                        max_size=max_font,
+                    )
+                    if one_font and len(one_lines) == 1:
+                        font, lines, pad = one_font, one_lines, one_pad
                 if not font:
                     continue
                 need_w, need_h = self._line_block_size(font, lines, pad)
-                need_w = min(need_w, slot_w)
-                cx = (sx1 + sx2) // 2
-                cy = (sy1 + sy2) // 2
-                x1 = int(cx - need_w / 2)
-                x1 = min(max(left, x1), max(left, right - need_w))
-                if item.get("_paper") and need_h > src_h + 2:
+                need_w = min(need_w, slot_w, max(8, int(right) - sx1))
+                if item.get("_flat"):
+                    x1 = max(left, sx1)
                     y1 = sy1
                 else:
-                    y1 = int(cy - need_h / 2)
-                x1 = max(0, min(x1, w_img - need_w))
+                    x1 = sx1
+                    y1 = sy1
+                x1 = max(0, min(x1, w_img - 4))
                 y1 = max(0, min(y1, h_img - 2))
-                x2 = min(w_img, x1 + need_w)
-                y2 = min(h_img, y1 + need_h)
+                x2 = min(w_img, int(right), x1 + need_w)
+                y2 = min(h_img, int(limit_y), y1 + need_h)
+                if x2 <= x1 or y2 <= y1:
+                    continue
                 item["_draw"] = (font, lines, pad, (x1, y1, x2, y2))
-                item["_align"] = "top-center" if item.get("_paper") else "center"
+                item["_align"] = "top"
             self._apply_inset_caption_cards(img, blocks, phone_min)
             for item in blocks:
-                if item.get("_paper") and item.get("_draw") and item.get("_paper_bgr") is not None:
-                    _font, _lines, _pad, (px1, py1, px2, py2) = item["_draw"]
-                    if img[py1:py2, px1:px2].size and float(np.mean(img[py1:py2, px1:px2] > 230)) < 0.8:
-                        img[py1:py2, px1:px2] = (255, 255, 255)
+                if item.get("_locked") or not item.get("_flat") or not item.get("_draw"):
+                    continue
+                color = item.get("_panel_bgr")
+                if color is None:
+                    continue
+                _font, _lines, _pad, (px1, py1, px2, py2) = item["_draw"]
+                if px2 <= px1 or py2 <= py1:
+                    continue
+                if self._region_is_product_photo(image_data, (px1, py1, px2, py2)):
+                    continue
+                self._paint_panel_keep_art(img, image_data, (px1, py1, px2, py2), color)
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         for item in blocks:
             text = str(item.get("text") or "").strip()
@@ -1437,10 +2167,20 @@ class ImageProcessor:
             if w < 2 or h < 2:
                 continue
             fill = item.get("ink_rgb") or (0, 0, 0)
-            if keep_bg or prepared:
+            plate = None
+            if prepared and not item.get("_sky"):
+                on_photo = self._region_is_color_photo(image_data, (x1, y1, x2, y2)) and not self._is_light_chart_surface(image_data, (x1, y1, x2, y2))
+                if not on_photo and (item.get("_paper") or item.get("_paper_text") or item.get("_flat") or self._is_light_chart_surface(image_data, (x1, y1, x2, y2))):
+                    plate = item.get("_paper_bgr") or item.get("_panel_bgr") or self._plate_bgr(img, (x1, y1, x2, y2))
+            if plate is not None:
+                cell = Image.new("RGB", (w, h), (int(plate[2]), int(plate[1]), int(plate[0])))
+            elif keep_bg or prepared:
                 cell = pil.crop((x1, y1, x2, y2))
             else:
-                cell = Image.new("RGB", (w, h), (255, 255, 255))
+                local = self._uniform_surround_bgr(img, (x1, y1, x2, y2))
+                if local is None:
+                    local = self._background_bgr(img, (x1, y1, x2, y2))
+                cell = Image.new("RGB", (w, h), (int(local[2]), int(local[1]), int(local[0])))
             self._draw_lines_in_cell(
                 cell,
                 lines,
@@ -1449,6 +2189,7 @@ class ImageProcessor:
                 pad,
                 align=item.get("_align") or ("center" if protect_color_only else "top"),
                 anchor=anchor,
+                halo=item.get("_halo"),
             )
             pil.paste(cell, (x1, y1))
         return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
@@ -1506,7 +2247,21 @@ class ImageProcessor:
 
         return has_overlap, max_overlap_ratio
 
+    def _erase_cleared_text_blocks(self, image_data: np.ndarray, processed_blocks: List):
+        """Dòng để trống (nhà sản xuất, URL) được xóa nét chữ, không vẽ lại."""
+        img = image_data
+        kept = []
+        for text, bbox in processed_blocks or []:
+            if str(text or "").strip():
+                kept.append((text, bbox))
+                continue
+            if not bbox or len(bbox) < 4:
+                continue
+            img = self._erase_strokes_with_local_color(img, tuple(int(v) for v in bbox[:4]))
+        return img, kept
+
     def process_image_with_text(self, image_data: np.ndarray, processed_blocks: List, ignore_blocks: List) -> np.ndarray:
+        image_data, processed_blocks = self._erase_cleared_text_blocks(image_data, processed_blocks)
         img_h, img_w = image_data.shape[:2]
         table_blocks = self._layout_table_blocks(processed_blocks, ignore_blocks, img_w, img_h)
         if table_blocks is not None and self._table_expansion_covers_photo(image_data, table_blocks):
@@ -1515,6 +2270,13 @@ class ImageProcessor:
         if table_blocks is not None:
             print(f"  [TABLE] vẽ {len(table_blocks)} ô trong khung, không gộp đè")
             return self.add_smart_watermark(self._draw_table_blocks(image_data, table_blocks), [])
+        spec_blocks = self._layout_spec_column(processed_blocks, ignore_blocks, img_w, img_h, image_data)
+        if spec_blocks:
+            print(f"  [SPEC] vẽ {len(spec_blocks)} dòng thông số, giữ ảnh sản phẩm")
+            return self.add_smart_watermark(
+                self._draw_table_blocks(image_data, spec_blocks, protect_color_only=True),
+                [],
+            )
         in_situ = self._layout_in_situ_blocks(processed_blocks, ignore_blocks, img_w, img_h)
         if in_situ:
             for item in in_situ:

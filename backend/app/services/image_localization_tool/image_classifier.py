@@ -1,7 +1,14 @@
 # image_classifier.py - FULL CODE HOÀN CHỈNH
 from typing import List, Tuple, Dict
 import re
-from config import IMAGE_CLASSIFICATION, SKIP_REGEX, DOMAIN_REGEX, URGENT_DELETE_REGEX
+from config import (
+    IMAGE_CLASSIFICATION,
+    SKIP_REGEX,
+    DOMAIN_REGEX,
+    URGENT_DELETE_REGEX,
+    MANUFACTURER_ERASE_KEYWORDS,
+    RETURN_CLUSTER_RE,
+)
 
 def normalize_ocr_results(ocr_results):
     """
@@ -254,9 +261,16 @@ class ImageClassifier:
         """
         if not text:
             return False, ""
+        # Cụm có 退 không xóa ảnh. Chữ 换 trong 退换 đi cùng cụm đó.
+        text = RETURN_CLUSTER_RE.sub("", text)
+        if not text.strip():
+            return False, ""
         
-        # 1. Kiểm tra từ khóa URGENT (nhanh nhất)
+        # 1. Kiểm tra từ khóa URGENT (nhanh nhất).
+        # Chữ nhà sản xuất không xóa cả ảnh — translator chỉ xóa dòng đó.
         for keyword in self.urgent_delete_keywords:
+            if keyword in MANUFACTURER_ERASE_KEYWORDS:
+                continue
             if keyword in text:
                 return True, f"Từ khóa URGENT: {keyword}"
         
@@ -394,6 +408,9 @@ class ImageClassifier:
         for item in text_blocks_to_draw:
             text = item.get('text', '')
             if not text:
+                continue
+            text = RETURN_CLUSTER_RE.sub("", text)
+            if not text.strip():
                 continue
                 
             # Kiểm tra pattern xóa (CHÍNH XÁC)
@@ -773,9 +790,10 @@ class ImageClassifier:
         for item in processed_blocks:
             if 'bbox' in item:
                 item['bbox'] = self._validate_bbox(item['bbox'])
-        
-        # DEBUG: Hiển thị tất cả OCR blocks
-        print(f"    📋 Tổng số OCR blocks: {len(processed_blocks)}")
+
+        from nano_rules import classify_image as nano_classify_image
+
+        return nano_classify_image(processed_blocks, ignore_blocks, original_url)
         
         # BƯỚC 0: KIỂM TRA URGENT DELETE - XÓA NGAY LẬP TỨC
         print(f"    ⚠️  Kiểm tra URGENT DELETE...")

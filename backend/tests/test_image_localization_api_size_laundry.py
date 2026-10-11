@@ -107,7 +107,11 @@ def test_deepseek_payload_disables_v4_thinking():
         out = tr.call_deepseek_for_translation_single("高品质")
     assert out == "Chất lượng cao"
     assert captured.get("thinking") == {"type": "disabled"}
-    assert int(captured.get("max_tokens") or 0) >= 256
+    assert captured.get("temperature") == 0.1
+    assert captured.get("max_tokens") == 400
+    user = captured["messages"][1]["content"]
+    assert "REQUIREMENTS:" in user
+    assert "Preserve all measurements" in user
 
 
 def test_domain_on_label_keeps_image_and_blanks_url():
@@ -129,6 +133,100 @@ def test_dropship_keyword_still_deletes_image():
     tr = _translator()
     ocr = [{"text": "www.shop.com 一件代发", "bbox": [0, 0, 100, 20]}]
     assert tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True) is None
+
+
+def test_return_phrase_is_erased_and_image_is_kept():
+    tr = _translator()
+    ocr = [
+        {"text": "特殊靴子订制都不退换", "bbox": [0, 0, 180, 24]},
+        {"text": "商品信息", "bbox": [0, 40, 80, 64]},
+    ]
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Thông tin sản phẩm"):
+        result = tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True)
+    assert result is not None
+    processed, _ignore = result
+    assert processed[0][0] == ""
+    assert any(block[0] == "Thông tin sản phẩm" for block in processed)
+
+
+def test_classifier_keeps_size_chart_that_mentions_no_return():
+    from image_classifier import ImageClassifier
+
+    clf = ImageClassifier()
+    ocr = [
+        {"text": "上筒宽", "bbox": [10, 10, 80, 30]},
+        {"text": "特殊靴子订制都不退换", "bbox": [10, 200, 240, 230]},
+        {"text": "尺码", "bbox": [10, 360, 80, 390]},
+    ]
+    result = clf.classify_image(ocr, [], "https://example.com/boot-detail.png")
+    assert result.get("type") != "delete"
+
+
+def test_exchange_word_without_return_still_deletes_image():
+    from image_classifier import ImageClassifier
+
+    clf = ImageClassifier()
+    result = clf.classify_image(
+        [{"text": "换货", "bbox": [0, 0, 40, 20]}],
+        [],
+        "https://example.com/exchange.jpg",
+    )
+    assert result.get("type") == "delete"
+
+
+def test_year_number_is_erased_and_other_text_is_translated():
+    tr = _translator()
+    assert tr._without_year_numbers("220225230235") is None
+    assert tr._without_year_numbers("2022") == ""
+    assert tr._without_year_numbers("2022年新款") == "新款"
+    ocr = [
+        {"text": "2022", "bbox": [0, 0, 40, 20]},
+        {"text": "2024年新款", "bbox": [0, 30, 120, 50]},
+        {"text": "220225230235240245250", "bbox": [0, 60, 200, 80]},
+    ]
+    assert tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True) is None
+
+
+def test_classifier_keeps_size_chart_when_numbers_contain_a_year_span():
+    from image_classifier import ImageClassifier
+
+    clf = ImageClassifier()
+    ocr = [
+        {"text": "上筒宽", "bbox": [10, 10, 80, 30]},
+        {"text": "47cm", "bbox": [90, 10, 140, 30]},
+        {"text": "220225230235240245250255260265", "bbox": [10, 400, 400, 430]},
+        {"text": "尺码对照表", "bbox": [10, 360, 80, 390]},
+    ]
+    result = clf.classify_image(ocr, [], "https://example.com/shoe.png")
+    assert result.get("type") == "delete"
+    assert result.get("details", {}).get("detected_keyword") == "2022"
+
+
+def test_manufacturer_line_is_cleared_and_image_is_kept():
+    tr = _translator()
+    ocr = [
+        {"text": "源头工厂", "bbox": [0, 0, 80, 24]},
+        {"text": "不易起球", "bbox": [0, 40, 90, 64]},
+    ]
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Không xù"):
+        result = tr.classify_and_process_blocks(ocr, delete_size_and_laundry=True)
+    assert result is not None
+    processed, _ignore = result
+    assert processed[0][0] == ""
+    assert list(processed[0][1]) == [0, 0, 80, 24]
+    assert any(block[0] == "Không xù" for block in processed)
+
+
+def test_classifier_keeps_image_that_only_mentions_factory():
+    from image_classifier import ImageClassifier
+
+    clf = ImageClassifier()
+    ocr = [
+        {"text": "源头工厂", "bbox": [8, 8, 80, 28]},
+        {"text": "贡丝锦面料", "bbox": [8, 40, 120, 68]},
+    ]
+    result = clf.classify_image(ocr, [], "https://example.com/suit.jpg")
+    assert result.get("type") != "delete"
 
 
 def test_classifier_does_not_delete_product_photo_for_label_domain():
@@ -164,8 +262,9 @@ def test_chinese_jin_weight_converts_to_kg_and_spares_cm_column():
             delete_size_and_laundry=False,
         )
     drawn = {text for text, _bbox in processed}
-    assert "49kg" in drawn
+    assert "49kg" not in drawn
     assert "84" not in drawn
+    assert "Cân nặng" in drawn
 
 
 def test_gpt_size_laundry_review_rejects_chinese_and_accepts_kg():
@@ -188,3 +287,19 @@ def test_gpt_size_laundry_review_rejects_chinese_and_accepts_kg():
         {"text": "49kg", "bbox": [205, 70, 250, 88]},
     ]
     assert tr.review_localized_size_laundry(source, good) == []
+
+
+def test_laundry_ocr_noise_is_erased_and_hang_dry_is_corrected():
+    tr = _translator()
+    assert tr._is_ocr_noise_char("汹") is True
+    assert tr._is_ocr_noise_char("薄") is False
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Phơi treo") as translate:
+        processed, _ignored = tr.classify_and_process_blocks(
+            [
+                {"text": "汹", "bbox": [0, 0, 20, 20]},
+                {"text": "悬挂明干", "bbox": [30, 0, 120, 24]},
+            ],
+            delete_size_and_laundry=False,
+        )
+    assert all(text != "汹" for text, _bbox in processed)
+    assert translate.call_args[0][0] == "悬挂晾干"

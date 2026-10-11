@@ -59,24 +59,18 @@ class ImageMerger:
 
     def is_junk_thumbnail(self, url: str) -> bool:
         """
-        Kiểm tra xem URL có phải là ảnh thumbnail rác không.
-        Trả về True nếu phát hiện kích thước nhỏ (220x220, 100x100...)
+        Thumbnail rác theo URL: .search., _sum.jpg, hoặc hậu tố WxH khi cả hai cạnh dưới 350px.
+        Hậu tố từ 350px trở lên vẫn tải và xử lý bình thường.
         """
-        if not url: return False
-        
-        # Regex bắt các pattern kích thước rác
-        junk_patterns = [
-            r'[._-]\d{2,4}x\d{2,4}[._-]',   # VD: .220x220. hoặc _50x50.
-            r'[._-]\d{2,4}x\d{2,4}\.jpg$',  # VD: .220x220.jpg (cuối dòng)
-            r'[._-]\d{2,4}x\d{2,4}$',       # VD: ...image.jpg_220x220
-            r'\.search\.', 
-            r'_sum\.jpg'
-        ]
-        
-        for pattern in junk_patterns:
-            if re.search(pattern, url, re.IGNORECASE):
-                return True
-        return False
+        if not url:
+            return False
+        if re.search(r"\.search\.", url, re.IGNORECASE) or re.search(r"_sum\.jpg", url, re.IGNORECASE):
+            return True
+        dims = re.findall(r"[._-](\d{2,4})x(\d{2,4})(?:[._-]|\.jpe?g$|$)", url, re.IGNORECASE)
+        if not dims:
+            return False
+        width, height = int(dims[-1][0]), int(dims[-1][1])
+        return width < self.min_image_width and height < self.min_image_width
     
     def fix_url(self, url: str) -> str:
         """Sửa lỗi format URL cơ bản"""
@@ -216,7 +210,7 @@ class ImageMerger:
                         continue
                     
                     # Check kích thước vật lý
-                    if w <= self.min_image_width:
+                    if w < self.min_image_width:
                         logger.warning(f"      🗑️ Ảnh tải về quá nhỏ ({w}px) -> XÓA")
                         self.small_images_found.add(url)
                         return None 

@@ -222,7 +222,8 @@ class StartImageLocalizationPayload(BaseModel):
     allow_ai_image_models: Optional[bool] = Field(
         None,
         description=(
-            "false = cấm hẳn Gemini/GPT ảnh trong batch (chỉ OCR + DeepSeek + vẽ local), bất kể IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY. "
+            "false = ảnh thường chỉ OCR + DeepSeek + vẽ local, bất kể IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY. "
+            "Bảng size và hướng dẫn giặt của quần áo từ 350px vẫn gửi GPT. "
             "true = luôn cho phép gọi AI ảnh khi pipeline cần. "
             "null = mặc định: nếu explicit_only bật thì chỉ AI khi SP có product_info.image_localization.allow_ai_models; "
             "nếu explicit_only tắt thì cho phép AI như cũ."
@@ -924,14 +925,20 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                         try:
                             from app.services.ops_health_alert import notify_ops_health_alert
 
+                            ink_failed = "Mực loang vẫn còn sau" in err_tail
                             notify_ops_health_alert(
                                 "image_localization_gpt",
-                                "Bản địa hóa ảnh dừng vì Gemini đọc ảnh lỗi"
-                                if gemini_failed
-                                else "Bản địa hóa ảnh dừng vì GPT Image lỗi",
+                                "Bản địa hóa ảnh dừng vì mực loang sau 2 lần tạo lại"
+                                if ink_failed
+                                else (
+                                    "Bản địa hóa ảnh dừng vì Gemini đọc ảnh lỗi"
+                                    if gemini_failed
+                                    else "Bản địa hóa ảnh dừng vì GPT Image lỗi"
+                                ),
                                 detail=err_tail,
                                 action=(
                                     "Job bản địa hóa đã dừng, không xử lý sản phẩm tiếp theo. "
+                                    "Mực loang còn sau khi tạo lại thì xem ảnh và chạy lại job. "
                                     "Kiểm tra GEMINI_API_KEY nếu lỗi đọc ảnh, hoặc OPENAI_API_KEY nếu lỗi GPT Image."
                                 ),
                                 force=True,
@@ -1101,7 +1108,10 @@ def check_gemini_auth(
             settings, "IMAGE_LOCALIZATION_OPENAI_DEFAULT_IMAGE_QUALITY", "high"
         ),
         "ai_image_explicit_only": bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", False)),
-        "ai_image_explicit_help": "Khi ai_image_explicit_only: chỉ gọi Gemini/GPT ảnh nếu job gửi allow_ai_image_models=true hoặc product_info.image_localization.allow_ai_models=true.",
+        "ai_image_explicit_help": (
+            "Bật AI thì mọi ảnh còn lại đi GPT Image. Tắt AI thì ảnh thường DeepSeek vẽ local. "
+            "Quần áo: bảng size và hướng dẫn giặt từ 350px vẫn gửi GPT, dưới 350px xóa."
+        ),
         "gemini_api_image_sizes": ["2K", "4K"],
         "openai_image_qualities": ["high", "auto"],
         "openai_image_sizes": ["auto", "1024x1792", "1792x1024", "1536x1024", "1024x1536"],
@@ -1160,7 +1170,7 @@ def start_job(
             status_code=400,
             detail=(
                 "Server đang giới hạn chỉ pipeline OCR + DeepSeek + vẽ local — gửi allow_ai_image_models=false. "
-                "Bật lại Gemini/GPT ảnh: IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true trong .env."
+                "Bật lại GPT Image: IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true trong .env."
             ),
         )
     mode = _resolve_gemini_mode(payload.gemini_mode)

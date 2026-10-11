@@ -9,7 +9,7 @@ from typing import List, Tuple, Dict, Optional, Any
 import hashlib
 import json
 
-from config import DEEPSEEK_API_KEY, DEEPSEEK_URL, SKIP_REGEX, DOMAIN_REGEX
+from config import DEEPSEEK_API_KEY, DEEPSEEK_URL, SKIP_REGEX, DOMAIN_REGEX, MANUFACTURER_ERASE_KEYWORDS, YEAR_TOKEN_RE, RETURN_CLUSTER_RE
 from error_handler import ErrorHandler
 
 try:
@@ -37,6 +37,7 @@ class TextTranslator:
         self.error_handler = ErrorHandler()
         self.chinese_regex = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002b73f\U0002b740-\U0002b81f\U0002b820-\U0002ceaf]')
         self.translation_cache = {}
+        self.target_language = "vi"
         
     def contains_forbidden_content(self, text: str) -> bool:
         if not text or not isinstance(text, str): return False
@@ -227,38 +228,40 @@ class TextTranslator:
         )
         return strong_title or (laundry_count >= 2 and has_care_action)
 
+    def _without_manufacturer_text(self, text: str):
+        """Bỏ cụm nhà sản xuất. '' nếu cả dòng chỉ còn chữ đó. None nếu không có."""
+        raw = unicodedata.normalize("NFKC", str(text or ""))
+        cleaned = raw
+        hit = False
+        for keyword in MANUFACTURER_ERASE_KEYWORDS:
+            if keyword in cleaned:
+                hit = True
+                cleaned = cleaned.replace(keyword, " ")
+        if not hit:
+            return None
+        cleaned = re.sub(r"[\s,，、:：|/]+", " ", cleaned).strip()
+        if not cleaned or not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", cleaned):
+            return ""
+        return cleaned
 
-    def _has_factory_intro_context(self, items: List[Tuple[str, tuple]]) -> bool:
-        texts = [unicodedata.normalize("NFKC", str(text or "")).lower() for text, _ in items]
-        combined = "\n".join(texts)
-        strong_keywords = [
-            "\u5b9e\u529b\u5de5\u5382",  # factory strength / factory intro
-            "\u751f\u4ea7\u8f66\u95f4",  # production workshop
-            "\u5236\u978b\u56e2\u961f",  # shoemaking team
-            "\u8bbe\u8ba1\u56e2\u961f",  # design team
-            "\u5f00\u53d1\u8bbe\u8ba1\u56e2\u961f",  # development/design team
-            "\u51fa\u8d27\u54c1\u8d28\u4e25\u63a7",  # strict outbound quality control
-            "\u54c1\u8d28\u4e25\u63a7",  # strict quality control
-        ]
-        if any(k in combined for k in strong_keywords):
-            return True
+    def _without_year_numbers(self, text: str):
+        """Bỏ số năm đứng riêng. '' nếu dòng chỉ còn năm. None nếu không có năm."""
+        raw = unicodedata.normalize("NFKC", str(text or ""))
+        if not YEAR_TOKEN_RE.search(raw):
+            return None
+        cleaned = YEAR_TOKEN_RE.sub(" ", raw)
+        cleaned = re.sub(r"[\s,，、:：|/]+", " ", cleaned).strip()
+        if not cleaned or not re.search(r"[A-Za-z0-9\u4e00-\u9fff]", cleaned):
+            return ""
+        return cleaned
 
-        signals = [
-            "\u5de5\u5382",  # factory
-            "\u8f66\u95f4",  # workshop
-            "\u516c\u53f8",  # company
-            "\u978b\u4e1a",  # footwear company/industry
-            "\u56e2\u961f",  # team
-            "\u8bbe\u8ba1\u5e08",  # designer
-            "\u5f00\u53d1",  # development
-            "\u751f\u4ea7\u7ebf",  # production line
-            "\u8d28\u68c0",  # quality inspection
-            "\u54c1\u63a7",  # quality control
-            "\u5458\u5de5",  # staff
-            "\u5de5\u4eba",  # worker
-        ]
-        hit_count = sum(1 for k in signals if k in combined)
-        return hit_count >= 2
+    def _is_ocr_noise_char(self, text: str) -> bool:
+        """Một chữ Hán lẻ không phải nhãn size/chất liệu/giặt. Icon hay bị OCR thành chữ rác."""
+        compact = re.sub(r"\s+", "", str(text or ""))
+        if len(compact) != 1 or not re.search(r"[\u4e00-\u9fff]", compact):
+            return False
+        keep = set("薄厚软硬弹松紧大小长短宽窄高低中棉麻绒暖轻重量码胸腰臀袖肩洗手熨漂晒晾干挂")
+        return compact not in keep
 
     def remove_chinese_characters(self, text: str) -> str:
         if not text: return text
@@ -272,7 +275,8 @@ class TextTranslator:
                 "Thiếu DEEPSEEK_API_KEY nên không thể dịch ảnh bằng DeepSeek."
             )
 
-        text_hash = hashlib.md5(text.encode()).hexdigest()
+        language = getattr(self, "target_language", None) or "vi"
+        text_hash = hashlib.md5(f"{language}:{text}".encode()).hexdigest()
         
         if text_hash in self.translation_cache:
             cached_result = self.translation_cache[text_hash]
@@ -283,19 +287,21 @@ class TextTranslator:
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}", 
             "Content-Type": "application/json"
         }
-        
-        prompt = f"""Dịch đoạn văn bản ngắn sau sang tiếng Việt (chuẩn thương mại điện tử):
-"{text}"
-YÊU CẦU:
-1. CHỈ trả về kết quả tiếng Việt. KHÔNG lặp lại prompt.
-2. Giữ nguyên số đo cm và số đã ghi kg. Nếu có 斤 thì đổi sang kg (1斤 = 0,5kg).
-3. Dịch cả tiếng Anh lẫn tiếng Trung nếu có.
-4. Không giải thích thêm."""
+
+        from nano_rules import deepseek_image_prompt
+
+        prompt = deepseek_image_prompt(text, language)
 
         model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
         payload = {
             "model": model,
-            "messages": [{"role":"user","content":prompt}],
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a precise e-commerce image translator. Output only the translated text.",
+                },
+                {"role": "user", "content": prompt},
+            ],
             "temperature": 0.1,
             # V4 thinking mặc định chiếm hết budget → content rỗng, bbox bị xóa trắng.
             "max_tokens": 400,
@@ -304,8 +310,14 @@ YÊU CẦU:
         
         def _clean_translated(raw: str) -> str:
             translated = (raw or "").strip()
-            translated = re.sub(r'^(Dịch:|Bản dịch:|Translation:|Vietnamese:)\s*', '', translated, flags=re.IGNORECASE)
+            translated = re.sub(
+                r'^(?:Dịch|Bản dịch|Translation|Vietnamese|English|Chinese|Japanese|Korean):\s*',
+                '',
+                translated,
+                flags=re.IGNORECASE,
+            )
             translated = translated.strip('"').strip("'")
+            translated = re.sub(r'\s*[|/／]\s*$', '', translated)
             return re.sub(r'\s+', ' ', translated).strip()
 
         def _do_request():
@@ -513,82 +525,53 @@ YÊU CẦU:
         Phân loại và xử lý text blocks. 
         Hỗ trợ input cả Dict và Tuple để tránh lỗi format.
         """
-        processed_blocks = []
-        ignore_blocks = []
-        
-        if not ocr_results: return [], []
-        
-        print(f"  📝 Phân tích {len(ocr_results)} khối text để dịch...")
+        _ = delete_size_and_laundry
+        from nano_rules import convert_jin_weight_text, has_chinese_text, local_blocks_need_draw
 
-        normalized_items = self._normalize_ocr_items(ocr_results)
-        if not normalized_items:
+        decision = local_blocks_need_draw(ocr_results or [])
+        if decision["action"] == "deleted":
+            print("    🔴 [CẤM] Xóa ảnh theo keyword khẩn")
+            return None
+        if decision["action"] == "empty":
             return [], []
 
-        if self._has_factory_intro_context(normalized_items):
-            print("    [FACTORY INTRO] delete image")
-            return None
-
-        weight_replacements = self.chinese_weight_replacements(normalized_items)
-        size_table_context = self._has_size_table_context(normalized_items)
-        if size_table_context:
-            print("    [SIZE TABLE] vẽ local — không xóa ảnh")
-        elif self._has_laundry_care_context(normalized_items):
-            print("    [LAUNDRY CARE] vẽ local — không xóa ảnh")
-        # Tham số cũ: bảng size / giặt không còn xóa ảnh dù caller truyền True.
-        _ = delete_size_and_laundry
-
-        for idx, (text, bbox) in enumerate(normalized_items):
-            if idx in weight_replacements:
-                converted = weight_replacements[idx]
-                print(f"    ⚖️ [QUY ĐỔI] '{text}' ➡️ '{converted}'")
+        processed_blocks = []
+        ignore_blocks = []
+        print(f"  📝 Phân tích {len(decision['blocks'])} khối text để dịch...")
+        for block in decision["blocks"]:
+            bbox = tuple(int(v) for v in list(block.get("bbox") or [])[:4])
+            if block.get("layoutOnly"):
+                ignore_blocks.append((str(block.get("text") or ""), bbox))
+                continue
+            text = str(block.get("text") or "").strip()
+            if not text:
+                processed_blocks.append(("", bbox))
+                continue
+            if text == "悬挂明干":
+                text = "悬挂晾干"
+            converted = convert_jin_weight_text(text)
+            if converted != text and not has_chinese_text(converted):
                 processed_blocks.append((converted, bbox))
                 continue
-            if self._is_standalone_cm_measurement(text.strip()):
-                print(f"    [CM] group with processed text: '{text.strip()}'")
-                processed_blocks.append((text.strip(), tuple(bbox)))
+            if converted != text:
+                text = converted
+            if re.fullmatch(r"\d+(?:[.,]\d+)?\s*cm", text, flags=re.IGNORECASE):
+                processed_blocks.append((text, bbox))
                 continue
-            
-            if self.contains_forbidden_content(text):
-                # SKIP_REGEX cũng khớp domain. URL trên tem SP chỉ xóa dòng chữ,
-                # không xóa cả ảnh — nếu không storefront gắn nhầm ảnh gallery vào SKU.
-                without_domain = self.domain_regex.sub(" ", text)
-                if self.skip_regex.search(without_domain):
-                    print(f"    🔴 [CẤM] Phát hiện từ khóa: '{text}' -> XÓA ẢNH")
-                    return None
-                print(f"    🗑️ [XÓA] Domain (giữ ảnh): '{text}'")
-                processed_blocks.append(("", bbox))
-                continue
-            
-            has_chinese = self.contains_chinese(text)
-            has_jin = '斤' in text
-            is_domain = bool(self.domain_regex.search(text))
-            is_old_year = any(y in text for y in ['2019', '2020', '2021', '2022', '2023', '2024'])
-            
-            if is_domain:
-                print(f"    🗑️ [XÓA] Domain: '{text}'")
-                processed_blocks.append(("", bbox))
-            elif is_old_year:
-                 print(f"    🗑️ [XÓA] Năm cũ: '{text}'")
-                 processed_blocks.append(("", bbox))
-            elif has_jin:
-                if any(c.isdigit() for c in text):
-                    processed = self.process_jin_weight_text(text)
-                    processed = self.remove_chinese_characters(processed)
-                    processed_blocks.append((processed, bbox))
-                else:
-                    processed_blocks.append(("Trọng Lượng TQ/ 1 cân = 0,5kg", bbox))
-            elif has_chinese:
-                if len(text.strip()) == 1:
-                    ignore_blocks.append((text, bbox))
-                else:
-                    translated_text = self.call_deepseek_for_translation_single(text)
-                    if not str(translated_text or "").strip():
-                        # DeepSeek rỗng: giữ pixel gốc. Không được inpaint rồi bỏ qua bước vẽ.
-                        print(f"    ⚠️ [DỊCH RỖNG] giữ nguyên, không xóa: '{text}'")
-                        ignore_blocks.append((text, bbox))
-                    else:
-                        processed_blocks.append((translated_text, bbox))
-            else:
+            if not has_chinese_text(text):
                 ignore_blocks.append((text, bbox))
-        
+                continue
+            text = re.sub(r"(\d)\*(?=[\u4e00-\u9fff])", r"\1%", text)
+            translated_text = self.call_deepseek_for_translation_single(text)
+            if self.contains_chinese(translated_text):
+                translated_text = self.call_deepseek_for_translation_single(
+                    "Phiên âm và dịch hết, cấm chữ Hán: " + text
+                )
+            if self.contains_chinese(translated_text):
+                translated_text = self.remove_chinese_characters(translated_text)
+            if not str(translated_text or "").strip():
+                print(f"    ⚠️ [DỊCH RỖNG] giữ nguyên, không xóa: '{text}'")
+                ignore_blocks.append((text, bbox))
+            else:
+                processed_blocks.append((translated_text, bbox))
         return processed_blocks, ignore_blocks

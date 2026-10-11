@@ -169,22 +169,6 @@ function ImageLocReportUrlCell({ url, textClassName }: { url: string; textClassN
   );
 }
 
-/** Model Gemini API: ảnh hưởng “hiểu” prompt, dịch chữ và giữ layout. imageSize chỉ là độ nét đầu ra. */
-const IMAGE_LOC_GEMINI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
-  { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
-  {
-    id: 'pro',
-    label: 'Nano Banana Pro — gemini-3-pro-image-preview (2K/4K, khuyến nghị)',
-    model: 'gemini-3-pro-image-preview',
-  },
-];
-
-function resolveGeminiApiModelPresetId(modelTrimmed: string): string {
-  if (!modelTrimmed) return 'server';
-  const hit = IMAGE_LOC_GEMINI_MODEL_PRESETS.find((p) => p.model && p.model === modelTrimmed);
-  return hit ? hit.id : 'custom';
-}
-
 const IMAGE_LOC_OPENAI_MODEL_PRESETS: { id: string; label: string; model: string }[] = [
   { id: 'server', label: 'Theo backend (.env) — để trống ô Model', model: '' },
   { id: 'gpt2', label: 'gpt-image-2 — mặc định OpenAI', model: 'gpt-image-2' },
@@ -704,10 +688,8 @@ export default function AdminProductsPage() {
   const [importBatchDeleting, setImportBatchDeleting] = useState(false);
   const [imageLocalizationLanguage, setImageLocalizationLanguage] = useState('vi');
   const [imageLocalizationGeminiMode, setImageLocalizationGeminiMode] = useState<
-    'api' | 'openai' | 'local_only'
-  >('api');
-  const [imageLocalizationGeminiApiModel, setImageLocalizationGeminiApiModel] = useState('');
-  const [imageLocalizationGeminiImageSize, setImageLocalizationGeminiImageSize] = useState('2K');
+    'openai' | 'local_only'
+  >('local_only');
   const [imageLocalizationOpenaiModel, setImageLocalizationOpenaiModel] = useState('');
   const [imageLocalizationOpenaiQuality, setImageLocalizationOpenaiQuality] = useState('high');
   const [imageLocalizationOpenaiSize, setImageLocalizationOpenaiSize] = useState('auto');
@@ -771,21 +753,14 @@ export default function AdminProductsPage() {
   const imageLocalizationGeminiReady = useMemo(() => {
     if (imageLocalizationGeminiMode === 'local_only') return true;
     if (!geminiAuthStatus) return false;
-    if (imageLocalizationGeminiMode === 'api') return Boolean(geminiAuthStatus.api?.ready);
-    if (imageLocalizationGeminiMode === 'openai') return Boolean(geminiAuthStatus.openai?.ready);
-    return false;
+    return Boolean(geminiAuthStatus.openai?.ready);
   }, [geminiAuthStatus, imageLocalizationGeminiMode]);
 
-  /** Gemini API và GPT Image: backend cho phép + phải chọn ít nhất 1 SP trong bảng. Hàng loạt chỉ DeepSeek + vẽ local. */
+  /** GPT Image: backend cho phép + phải chọn ít nhất 1 SP trong bảng. Hàng loạt chỉ DeepSeek + vẽ local. */
   const imageLocAiImageModesSelectable =
     selectedProductIds.size > 0 &&
     geminiAuthStatus != null &&
     (geminiAuthStatus.ai_image_jobs_allowed ?? true);
-
-  const geminiApiModelPresetSelectValue = useMemo(() => {
-    const id = resolveGeminiApiModelPresetId(imageLocalizationGeminiApiModel.trim());
-    return id === 'custom' ? 'custom' : id;
-  }, [imageLocalizationGeminiApiModel]);
 
   const openaiImageModelPresetSelectValue = useMemo(() => {
     const id = resolveOpenaiImageModelPresetId(imageLocalizationOpenaiModel.trim());
@@ -1394,10 +1369,9 @@ export default function AdminProductsPage() {
 
   const handleStartImageLocalization = async () => {
     setImageLocalizationError(null);
-    const isAiImageMode =
-      imageLocalizationGeminiMode === 'api' || imageLocalizationGeminiMode === 'openai';
+    const isAiImageMode = imageLocalizationGeminiMode === 'openai';
     if (isAiImageMode && selectedProductIds.size === 0) {
-      const msg = 'Gemini / GPT Image chỉ chạy khi đã chọn ít nhất một sản phẩm trong bảng.';
+      const msg = 'GPT Image chỉ chạy khi đã chọn ít nhất một sản phẩm trong bảng.';
       setImageLocalizationError(msg);
       showToast('err', msg, 8000);
       return;
@@ -1414,12 +1388,8 @@ export default function AdminProductsPage() {
         language: imageLocalizationLanguage,
         force: imageLocalizationForce,
         product_ids: productIds,
-        gemini_mode: imageLocalizationGeminiMode === 'local_only' ? 'api' : imageLocalizationGeminiMode,
-        allow_ai_image_models: imageLocalizationGeminiMode === 'local_only' ? false : null,
-        ...(imageLocalizationGeminiMode === 'api' && {
-          gemini_image_model: imageLocalizationGeminiApiModel.trim() || undefined,
-          gemini_image_size: imageLocalizationGeminiImageSize.trim() || undefined,
-        }),
+        gemini_mode: 'openai',
+        allow_ai_image_models: imageLocalizationGeminiMode === 'openai',
         ...(imageLocalizationGeminiMode === 'openai' && {
           openai_image_model: imageLocalizationOpenaiModel.trim() || undefined,
           openai_image_quality: imageLocalizationOpenaiQuality.trim() || undefined,
@@ -4017,14 +3987,13 @@ export default function AdminProductsPage() {
             {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
               <>
                 <span className="font-semibold">Đang chỉ bật pipeline DeepSeek + vẽ local</span> (OCR → DeepSeek dịch → vẽ chữ).{' '}
-                Gemini / GPT ảnh <span className="font-medium">tạm tắt</span> trên server — bật lại bằng{' '}
+                GPT Image <span className="font-medium">tạm tắt</span> trên server — bật lại bằng{' '}
                 <code className="text-[11px]">IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED=true</code> trong .env backend.
               </>
             ) : (
               <>
-                <span className="font-semibold text-slate-900">Chạy hàng loạt (không chọn SP):</span> chỉ{' '}
-                <span className="font-medium">DeepSeek + vẽ local</span>.{' '}
-                <span className="font-medium">Gemini API</span> / <span className="font-medium">GPT Image</span> chỉ bật khi đã tick chọn sản phẩm trong bảng — mặc định Gemini 2K dịch bảng size &amp; giặt qua API (không xóa); DeepSeek + local vẫn xóa các loại ảnh đó.
+                Tắt AI: ảnh thường đi <span className="font-medium">DeepSeek + vẽ local</span>. Quần áo vẫn gửi bảng size và hướng dẫn giặt cho GPT.
+                Bật GPT: mọi ảnh còn lại đi GPT Image. Bảng size quần áo xóa người mẫu và ảnh sản phẩm, giữ bảng và chữ.
               </>
             )}
           </p>
@@ -4047,31 +4016,8 @@ export default function AdminProductsPage() {
                       <span>
                         <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>{' '}
-                          chữ trên ảnh, kể cả ảnh kích thước và giặt tẩy. Không gọi GPT.
-                        </span>
-                      </span>
-                    </label>
-                    <label
-                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
-                    >
-                      <input
-                        type="radio"
-                        name="imageLocalizationGeminiMode"
-                        className="mt-1"
-                        checked={imageLocalizationGeminiMode === 'api'}
-                        onChange={() => setImageLocalizationGeminiMode('api')}
-                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
-                      />
-                      <span>
-                        <span className="font-medium">Gemini API (GEMINI_API_KEY)</span>
-                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
-                        ) : selectedProductIds.size === 0 ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
-                        ) : null}
-                        <span className="mt-0.5 block text-xs text-gray-500">
-                          Ảnh thường được chỉ định AI dùng model này. Ảnh kích thước và giặt tẩy không đi Gemini — dùng GPT Image.
+                          OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>.
+                          Quần áo: bảng size và hướng dẫn giặt từ 350px vẫn gửi GPT Image 2 chất lượng medium, xóa người mẫu và ảnh sản phẩm, lưu kho theo shop và danh mục cấp 2. Dưới 350px xóa.
                         </span>
                       </span>
                     </label>
@@ -4094,78 +4040,12 @@ export default function AdminProductsPage() {
                           <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          Ảnh kích thước và giặt tẩy dùng model này, mặc định{' '}
-                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}, chất lượng high. Sau GPT, hệ thống
-                          kiểm tra lại chủ yếu là mực loang, tối đa 2 lần GPT. Chữ Trung còn sót thì DeepSeek đọc và vẽ lại. Vẫn loang thì job dừng và gửi email cho admin.
+                          Mọi ảnh còn chữ Trung đi GPT Image, mặc định{' '}
+                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}, chất lượng high. Bảng size và hướng dẫn giặt dùng chất lượng medium.
                         </span>
                       </span>
                     </label>
                   </div>
-                  {imageLocalizationGeminiMode === 'api' && (
-                    <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Gemini API — model (chữ &amp; bố cục)</p>
-                      <label className="block text-sm">
-                        <span className="mb-1 block font-medium text-gray-700">Chọn nhanh model</span>
-                        <select
-                          value={geminiApiModelPresetSelectValue}
-                          onChange={(e) => {
-                            const id = e.target.value;
-                            if (id === 'custom') return;
-                            const row = IMAGE_LOC_GEMINI_MODEL_PRESETS.find((x) => x.id === id);
-                            setImageLocalizationGeminiApiModel(row?.model ?? '');
-                          }}
-                          disabled={localizationStartBusy}
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        >
-                          {IMAGE_LOC_GEMINI_MODEL_PRESETS.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.label}
-                            </option>
-                          ))}
-                          <option value="custom">Tùy chỉnh… (ghi ID model trong ô dưới)</option>
-                        </select>
-                      </label>
-                      <label className="block text-sm">
-                        <span className="mb-1 block font-medium text-gray-700">
-                          Model (ID) — ưu tiên dịch &amp; layout
-                        </span>
-                        <input
-                          type="text"
-                          value={imageLocalizationGeminiApiModel}
-                          onChange={(e) => setImageLocalizationGeminiApiModel(e.target.value)}
-                          disabled={localizationStartBusy}
-                          placeholder={geminiAuthStatus?.image_model || 'gemini-3-pro-image-preview'}
-                          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
-                          autoComplete="off"
-                        />
-                        <span className="mt-1 block text-xs text-gray-500">
-                          Để trống = model mặc định trên server (.env). Pro Image thường cho bố cục/chữ ổn định hơn Flash cùng đời.
-                        </span>
-                      </label>
-                      <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Đầu ra — chỉ chất lượng / độ nét ảnh</p>
-                        <label className="mt-2 block text-sm">
-                          <span className="mb-1 block font-medium text-gray-700">Độ phân giải (imageSize)</span>
-                          <select
-                            value={imageLocalizationGeminiImageSize}
-                            onChange={(e) => setImageLocalizationGeminiImageSize(e.target.value)}
-                            disabled={localizationStartBusy}
-                            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-                          >
-                            <option value="">Mặc định (.env IMAGE_LOCALIZATION_GEMINI_API_DEFAULT_IMAGE_SIZE)</option>
-                            {(geminiAuthStatus?.gemini_api_image_sizes ?? ['2K', '4K']).map((s) => (
-                              <option key={s} value={s}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
-                          <span className="mt-1 block text-xs text-gray-500">
-                            Chỉ 2K và 4K — không còn 512/1K. Luôn tier Standard Gemini (không Flex).
-                          </span>
-                        </label>
-                      </div>
-                    </div>
-                  )}
                   {imageLocalizationGeminiMode === 'openai' && (
                     <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
                       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">GPT Image — model (chữ &amp; bố cục)</p>

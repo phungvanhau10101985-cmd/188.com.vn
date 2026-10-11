@@ -25,15 +25,28 @@ from app.services.image_localization_temp_cleanup import (
     cleanup_merge_batch_files,
     cleanup_stale_image_localization_temp,
 )
-from app.services.size_chart_model_remover import has_ink_smear, remove_fashion_model
+from app.services.image_localization_tool.nano_rules import (
+    INK_BLEED_PROMPT,
+    chinese_blocks_to_redraw,
+    has_size_table_context,
+    image_loc_gpt_verify_attempts,
+    image_loc_ink_bleed_model,
+    apparel_sheet_kinds,
+    image_loc_sheet_kinds,
+    language_prompt,
+    localized_image_problem,
+    parse_ink_bleed_verdict,
+    remaining_chinese_on_localized_image,
+    resolve_stored_image_loc_sheet,
+    select_localization_engine,
+)
 from app.services.shop_size_laundry_poster import (
+    APPAREL_SHEET_RENDER_VERSION,
     collapse_repeated_poster_urls,
-    explicit_ai_image_requested,
-    localization_image_branch,
-    lookup_poster_image_url,
+    lookup_stored_sheets,
+    product_uses_apparel_size_laundry,
     resolve_poster_key,
-    save_poster_if_absent,
-    size_laundry_nano_prompt,
+    save_sheet_kinds,
 )
 
 logger = logging.getLogger(__name__)
@@ -375,6 +388,20 @@ class ImageLocalizationFatalDependencyError(ImageLocalizationError):
     pass
 
 
+class ImageLocalizationGptStopError(ImageLocalizationFatalDependencyError):
+    """Hết lần hậu kiểm hoặc GPT Image lỗi — dừng cả job."""
+
+    def __init__(self, message: str):
+        detail = str(message or "").strip() or "GPT Image dừng job"
+        if "gpt_image_failed" not in detail:
+            detail = f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: {detail}"
+        super().__init__(detail)
+
+
+def is_image_localization_gpt_stop_error(exc: BaseException) -> bool:
+    return isinstance(exc, ImageLocalizationGptStopError)
+
+
 _FATAL_DEPENDENCY_MARKERS = (
     "IMAGE_LOCALIZATION_FATAL_DEPENDENCY",
     "FatalDependencyError",
@@ -422,6 +449,12 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
         "Không xét chữ Trung, số đo, font hay câu dịch. "
         'Trả JSON {"smear": false} nếu nền giấy sạch, hoặc {"smear": true} nếu có vệt loang.'
     )
+    gen_cfg = {
+        "temperature": 0,
+        "maxOutputTokens": 256,
+        "responseMimeType": "application/json",
+        "thinkingConfig": {"thinkingBudget": 0},
+    }
     payload = {
         "contents": [
             {
@@ -432,15 +465,14 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
                 ],
             }
         ],
-        "generationConfig": {
-            "temperature": 0,
-            "maxOutputTokens": 80,
-            "responseMimeType": "application/json",
-        },
+        "generationConfig": gen_cfg,
     }
     url = f"{_GEMINI_AI_GENERATE_BASE}/models/{model}:generateContent"
     try:
         res = requests.post(url, params={"key": api_key}, json=payload, timeout=60)
+        if res.status_code in {400, 422} and "thinkingConfig" in gen_cfg:
+            payload["generationConfig"] = {k: v for k, v in gen_cfg.items() if k != "thinkingConfig"}
+            res = requests.post(url, params={"key": api_key}, json=payload, timeout=60)
     except Exception as exc:
         raise ImageLocalizationFatalDependencyError(
             f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gemini_review_failed: không gọi được Gemini đọc ảnh — {exc}"
@@ -452,7 +484,8 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
         )
     try:
         body = res.json()
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
+        parts = ((body.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        text = "\n".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
         return parse_gemini_ink_smear(text)
     except ImageLocalizationFatalDependencyError:
         raise
@@ -460,6 +493,74 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
         raise ImageLocalizationFatalDependencyError(
             f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gemini_review_failed: Gemini đọc ảnh không trả JSON — {exc}"
         ) from exc
+
+
+def _preview_jpeg_for_ink_bleed(image_bytes: bytes) -> bytes:
+    import cv2
+    import numpy as np
+
+    arr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if img is None:
+        return image_bytes
+    height, width = img.shape[:2]
+    long_edge = max(width, height)
+    if long_edge > 1600:
+        scale = 1600 / float(long_edge)
+        img = cv2.resize(img, (max(1, int(width * scale)), max(1, int(height * scale))))
+    ok, encoded = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    if not ok:
+        return image_bytes
+    return encoded.tobytes()
+
+
+def detect_ink_bleed(image_bytes: bytes) -> Dict[str, Any]:
+    """Gemini Flash-Lite chỉ nhìn mực loang. Không vẽ lại ảnh."""
+    api_key = (getattr(settings, "GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY") or "").strip()
+    if len(api_key) < 10:
+        raise ImageLocalizationGptStopError("Thiếu GEMINI_API_KEY để kiểm tra mực loang.")
+    model = image_loc_ink_bleed_model()
+    jpeg = _preview_jpeg_for_ink_bleed(image_bytes)
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": INK_BLEED_PROMPT},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64.b64encode(jpeg).decode("ascii"),
+                        }
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0,
+            "maxOutputTokens": 120,
+            "responseMimeType": "application/json",
+        },
+    }
+    url = f"{_GEMINI_AI_GENERATE_BASE}/models/{model}:generateContent"
+    try:
+        res = requests.post(url, params={"key": api_key}, json=payload, timeout=45)
+    except Exception as exc:
+        raise ImageLocalizationGptStopError(f"Kiểm tra mực loang lỗi: {exc}") from exc
+    if res.status_code != 200:
+        raise ImageLocalizationGptStopError(
+            f"Kiểm tra mực loang lỗi HTTP {res.status_code}: {(res.text or '')[:300]}"
+        )
+    try:
+        body = res.json()
+        parts = ((body.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        raw = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
+    except Exception as exc:
+        raise ImageLocalizationGptStopError(f"Kiểm tra mực loang không trả JSON dùng được: {exc}") from exc
+    verdict = parse_ink_bleed_verdict(raw)
+    if not verdict:
+        raise ImageLocalizationGptStopError("Kiểm tra mực loang không trả JSON dùng được.")
+    return verdict
 
 
 def is_image_localization_fatal_dependency_error(exc: BaseException) -> bool:
@@ -592,7 +693,7 @@ def _normalize_gemini_image_size(raw: Optional[str]) -> Optional[str]:
 
 
 def _normalize_openai_image_quality(raw: Optional[str]) -> Optional[str]:
-    """Chỉ high / auto; low và medium không còn hỗ trợ → high."""
+    """Job chung chỉ high / auto. low và medium bị ép thành high."""
     s = (raw or "").strip().lower()
     if not s:
         return None
@@ -601,6 +702,17 @@ def _normalize_openai_image_quality(raw: Optional[str]) -> Optional[str]:
     if s in ("high", "auto"):
         return s
     return None
+
+
+SIZE_LAUNDRY_GPT_QUALITY = "medium"
+
+
+def gpt_edit_quality(override: Optional[str], adapter_quality: str) -> str:
+    """Ảnh size/giặt truyền medium. Ảnh khác giữ chất lượng của adapter."""
+    chosen = (override or "").strip().lower()
+    if chosen in ("medium", "high", "auto", "low"):
+        return chosen
+    return adapter_quality or "high"
 
 
 def _normalize_openai_image_size(raw: Optional[str], model: str) -> Optional[str]:
@@ -814,6 +926,7 @@ class OpenAiGptImageAdapter:
         filename: str,
         source_url: str,
         prompt: Optional[str] = None,
+        quality: Optional[str] = None,
     ) -> Tuple[str, Optional[bytes], str]:
         import base64
         import io
@@ -842,8 +955,8 @@ class OpenAiGptImageAdapter:
             data["size"] = self._size or "auto"
         elif self._size:
             data["size"] = self._size
-        if self._quality:
-            data["quality"] = self._quality
+        if self._quality or quality:
+            data["quality"] = gpt_edit_quality(quality, self._quality or "high")
         if not is_g2:
             data["input_fidelity"] = "high"
         res = requests.post(
@@ -944,6 +1057,7 @@ class LegacyImageLocalizationPipeline:
         gemini_mode: str = "api",
         poster_shop_norm: str = "",
         poster_cat2_slug: str = "",
+        apparel_sheets: bool = False,
         explicit_other_ai: bool = False,
         size_laundry_ai_enabled: Optional[bool] = None,
         dry_run: bool = False,
@@ -957,9 +1071,10 @@ class LegacyImageLocalizationPipeline:
         )
         self.poster_shop_norm = (poster_shop_norm or "").strip()
         self.poster_cat2_slug = (poster_cat2_slug or "").strip()
+        self.apparel_sheets = bool(apparel_sheets)
         self.explicit_other_ai = bool(explicit_other_ai)
         self.size_laundry_ai_enabled = (
-            self.allows_ai_image_models if size_laundry_ai_enabled is None else bool(size_laundry_ai_enabled)
+            False if size_laundry_ai_enabled is None else bool(size_laundry_ai_enabled)
         )
         self.dry_run = bool(dry_run)
         self.size_laundry_gpt = (
@@ -1082,6 +1197,7 @@ class LegacyImageLocalizationPipeline:
         splitter = self.ImageSplitter()
         ocr = self.OCRProcessor()
         translator = self.TextTranslator()
+        translator.target_language = self.language
         img_proc = self.ImageProcessor()
 
         def _note(msg: str) -> None:
@@ -1269,14 +1385,12 @@ class LegacyImageLocalizationPipeline:
         image_bytes: bytes,
         filename: str,
     ) -> ImageProcessResult:
-        """
-        Một URL, không merge/split: OCR → size/giặt tra kho hoặc Nano Banana;
-        ảnh khác dịch local, Gemini chỉ khi được chỉ định AI.
-        """
+        """Một URL: OCR rồi local hoặc GPT Image. Bật AI thì mọi ảnh còn lại đi GPT."""
         from app.services.consult_image_text import ocr_items_to_lines
 
         normalized = normalize_image_url(url)
         translator = self.TextTranslator()
+        translator.target_language = self.language
         img_proc = self.ImageProcessor()
         ocr = self.OCRProcessor()
         consult_lines: Optional[List[str]] = None
@@ -1326,24 +1440,60 @@ class LegacyImageLocalizationPipeline:
         if outcome.action == "processed" and outcome.image is not None:
             final_bytes = _encode_image_bytes(apply_brand_logo_top_right_bgr(outcome.image), filename)
             final_url = self._upload_bytes(product, final_bytes, filename)
+            self._save_sheet_if_needed(product, outcome.detail, final_url)
             return ImageProcessResult(orig_url, final_url, "processed", outcome.message, detail=outcome.detail)
         return ImageProcessResult(orig_url, orig_url, "kept", outcome.message, detail=outcome.detail)
 
     def _wrap_local(self, local_res: Tuple[str, Any, str]) -> PartProcessOutcome:
         return PartProcessOutcome(local_res[0], local_res[1], local_res[2] or "")
 
-    def _library_poster_outcome(self) -> Optional[PartProcessOutcome]:
-        if not self.poster_shop_norm or not self.poster_cat2_slug:
+    def _library_poster_outcome(self, kinds: List[str], *, apparel: bool = False) -> Optional[PartProcessOutcome]:
+        if self.dry_run:
             return None
-        hit = lookup_poster_image_url(self.poster_shop_norm, self.poster_cat2_slug)
+        if not apparel and not self.allows_ai_image_models:
+            return None
+        if not kinds or not self.poster_shop_norm or not self.poster_cat2_slug:
+            return None
+        stored = lookup_stored_sheets(
+            self.poster_shop_norm,
+            self.poster_cat2_slug,
+            render_version=APPAREL_SHEET_RENDER_VERSION if apparel else None,
+        )
+        hit = resolve_stored_image_loc_sheet(kinds, stored)
         if not hit:
             return None
         return PartProcessOutcome(
             "processed",
             None,
-            "Đã thay bằng ảnh kho size/giặt (cùng shop Trung Quốc, danh mục cấp 2)",
+            "Dùng ảnh size/giặt đã lưu cho cùng shop Trung Quốc và danh mục cấp 2",
             final_url=hit,
-            detail={"library_poster": True, "library_hit": True},
+            detail={
+                "library_poster": True,
+                "library_hit": True,
+                "sheet_kinds": list(kinds),
+                "apparel_sheet": apparel,
+            },
+        )
+
+    def _save_sheet_if_needed(self, product: Product, detail: Optional[Dict[str, Any]], final_url: str) -> None:
+        info = detail or {}
+        apparel = bool(info.get("apparel_sheet"))
+        if self.dry_run or not final_url:
+            return
+        if self.apparel_sheets and not apparel:
+            return
+        if not self.allows_ai_image_models and not apparel:
+            return
+        kinds = list(info.get("sheet_kinds") or [])
+        if not kinds or not self.poster_shop_norm or not self.poster_cat2_slug:
+            return
+        save_sheet_kinds(
+            self.poster_shop_norm,
+            self.poster_cat2_slug,
+            kinds,
+            final_url,
+            getattr(product, "product_id", None),
+            render_version=APPAREL_SHEET_RENDER_VERSION if apparel else None,
         )
 
     def _localize_size_laundry_originals(
@@ -1460,205 +1610,167 @@ class LegacyImageLocalizationPipeline:
         cls = self.image_classifier.classify_image(norm_ocr, [], data.get("original_url") or "")
         image = data["image_data"]
         filename = data.get("filename") or "image.jpg"
-        flags = translator.size_laundry_flags(norm_ocr)
-        has_chinese = _has_chinese_text_blocks(norm_ocr)
         if cls.get("type") == "delete":
             return PartProcessOutcome(
                 "deleted",
                 None,
                 f"Xóa theo classifier: {cls.get('details', {}).get('detected_keyword') or 'keyword'}",
             )
-        if flags.is_size_or_laundry:
-            library = self._library_poster_outcome()
+        kinds = image_loc_sheet_kinds(norm_ocr)
+        apparel_kinds = apparel_sheet_kinds(norm_ocr) if self.apparel_sheets else []
+        if apparel_kinds and cls.get("type") != "keep":
+            library = self._library_poster_outcome(apparel_kinds, apparel=True)
             if library is not None:
                 return library
-            removed_model = False
-            if flags.is_size:
-                image, removed_model = remove_fashion_model(image)
-                if removed_model:
-                    data = dict(data)
-                    data["image_data"] = image
-                    logger.info(
-                        "Đã xóa người mẫu trên ảnh kích thước: %s",
-                        (data.get("original_url") or "")[:120],
-                    )
-            branch = localization_image_branch(
-                is_size_or_laundry=True,
-                has_chinese=has_chinese,
-                size_laundry_ai_enabled=self.size_laundry_ai_enabled,
-                explicit_other_ai=self.explicit_other_ai,
-                classifier_type=str(cls.get("type") or ""),
-            )
-            if branch == "gpt":
-                if product is None:
-                    raise ImageLocalizationFatalDependencyError(
-                        "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: "
-                        "Thiếu sản phẩm để gọi GPT Image cho ảnh size/giặt"
-                    )
-                logger.info(
-                    "Ảnh size/giặt tẩy — GPT Image: %s",
-                    (data.get("original_url") or "")[:120],
+            detail = {"sheet_kinds": apparel_kinds, "apparel_sheet": True}
+            logger.info("GPT Image bảng size/giặt quần áo: %s", (data.get("original_url") or "")[:120])
+            try:
+                outcome = self._run_gpt_image(
+                    data, translator, img_proc, image, filename, norm_ocr, strip_photos=True,
                 )
-                return self._run_size_laundry_gpt(
-                    product,
-                    data,
-                    translator,
-                    img_proc,
+            except ImageLocalizationGptStopError as exc:
+                if "Mực loang vẫn còn sau" in str(exc):
+                    raise
+                logger.warning("GPT bảng size/giặt quần áo lỗi, giữ ảnh gốc: %s", exc)
+                return PartProcessOutcome(
+                    "kept",
                     image,
-                    filename,
-                    flags.comprehensive,
-                    is_size=flags.is_size,
+                    f"GPT bảng size/giặt lỗi, giữ ảnh gốc: {exc}",
                 )
-            if branch == "keep":
-                if removed_model:
-                    return PartProcessOutcome(
-                        "processed",
-                        image,
-                        "Đã xóa người mẫu trên ảnh kích thước",
-                    )
-                return PartProcessOutcome("kept", image, "Ảnh size/giặt không còn chữ Trung cần dịch")
-            return self._wrap_local(
-                self._process_local(
-                    data, translator, img_proc, data.get("original_url") or "",
-                    delete_size_and_laundry=False,
-                )
-            )
-
-        branch = localization_image_branch(
-            is_size_or_laundry=False,
-            has_chinese=has_chinese,
-            size_laundry_ai_enabled=self.size_laundry_ai_enabled,
-            explicit_other_ai=self.explicit_other_ai,
-            classifier_type=str(cls.get("type") or ""),
+            outcome.detail = {**(outcome.detail or {}), **detail}
+            return outcome
+        if cls.get("type") != "keep":
+            library = self._library_poster_outcome(kinds)
+            if library is not None:
+                return library
+        route = select_localization_engine(
+            classification=str(cls.get("type") or ""),
+            allows_ai=self.allows_ai_image_models,
         )
-        if branch == "keep":
+        if route == "keep":
             return PartProcessOutcome("kept", image, "Không có chữ Trung cần xử lý")
-        if branch == "explicit_gemini":
-            return self._wrap_local(self._run_gemini_image_edit(data, translator, img_proc, image, filename))
-
-        local_res = self._process_local(
-            data, translator, img_proc, data.get("original_url") or "",
-            delete_size_and_laundry=False,
-        )
-        if (
-            self.explicit_other_ai
-            and local_res[0] == "kept"
-            and "Local overlap cao" in (local_res[2] or "")
-        ):
-            logger.info(
-                "Local overlap cao — leo thang Gemini vì được chỉ định AI: %s",
-                (data.get("original_url") or "")[:120],
+        detail = {"sheet_kinds": kinds}
+        if route == "ai":
+            logger.info("GPT Image: %s", (data.get("original_url") or "")[:120])
+            outcome = self._run_gpt_image(
+                data, translator, img_proc, image, filename, norm_ocr,
             )
-            gem_res = self._run_gemini_image_edit(data, translator, img_proc, image, filename)
-            if gem_res[0] in ("processed", "deleted"):
-                return self._wrap_local(gem_res)
-        return self._wrap_local(local_res)
+            outcome.detail = {**(outcome.detail or {}), **detail}
+            return outcome
+        local = self._wrap_local(
+            self._process_local(
+                data, translator, img_proc, data.get("original_url") or "",
+                delete_size_and_laundry=False,
+            )
+        )
+        local.detail = {**(local.detail or {}), **detail}
+        return local
 
-    def _run_size_laundry_gpt(
+    def _erase_return_clusters(self, img_proc: Any, image: Any, ocr_results: List[Any]) -> Any:
+        """Cụm có chữ 退 bị xóa khỏi ảnh trước khi GPT dịch. Không dịch cụm đó."""
+        for block in self._normalize_ocr(ocr_results):
+            if "退" not in block["text"] or len(block["bbox"]) < 4:
+                continue
+            image = img_proc._erase_strokes_with_local_color(image, tuple(block["bbox"][:4]))
+        return image
+
+    def _gpt_edit(
         self,
-        product: Product,
+        image_bytes: bytes,
+        filename: str,
+        url: str,
+        prompt: str,
+        quality: Optional[str] = None,
+    ) -> Tuple[bytes, str]:
+        try:
+            _status, output_bytes, msg = self.size_laundry_gpt.process(
+                image_bytes, filename, url, prompt=prompt, quality=quality
+            )
+        except ImageLocalizationGptStopError:
+            raise
+        except ImageLocalizationError as exc:
+            if exc.__class__.__name__ == "ImageLocalizationError" and str(exc) == "Job đã bị hủy":
+                raise
+            raise ImageLocalizationGptStopError(str(exc)) from exc
+        except Exception as exc:
+            _raise_if_fatal_dependency(exc)
+            raise ImageLocalizationGptStopError(str(exc)) from exc
+        if not output_bytes:
+            raise ImageLocalizationGptStopError("GPT Image không trả ảnh")
+        return output_bytes, msg or "OpenAI GPT Image đã xử lý ảnh"
+
+    def _run_gpt_image(
+        self,
         data: Dict[str, Any],
         translator: Any,
         img_proc: Any,
         image: Any,
         filename: str,
-        comprehensive: bool,
-        is_size: bool = False,
+        blocks: List[Dict[str, Any]],
+        strip_photos: bool = False,
     ) -> PartProcessOutcome:
+        """GPT Image, rồi hậu kiểm. Chữ Trung còn sót thì vẽ local và nhận ảnh. Chỉ mực loang mới tạo lại."""
         url = data.get("original_url") or ""
-        prompt = size_laundry_nano_prompt(self.language)
-        smeared = False
-        try:
-            for attempt in range(1, SIZE_LAUNDRY_GPT_REVIEW_ATTEMPTS + 1):
-                attempt_prompt = prompt
-                if smeared:
-                    attempt_prompt += (
-                        "\nThe previous image had ink smears or blurry blotches on the white chart background. "
-                        "Redraw it clean, with no smeared ink. Keep the table, numbers, and layout."
+        prompt = language_prompt(
+            self.language,
+            remove_model=has_size_table_context(blocks) and not strip_photos,
+            strip_photos=strip_photos,
+        )
+        regen_limit = image_loc_gpt_verify_attempts()
+        sheet_quality = (
+            SIZE_LAUNDRY_GPT_QUALITY
+            if strip_photos or image_loc_sheet_kinds(blocks)
+            else None
+        )
+        original_bytes = _encode_image_bytes(image, filename)
+        output_bytes, message = self._gpt_edit(
+            original_bytes, filename, url, prompt, quality=sheet_quality
+        )
+        current = self._decode_image_bytes(output_bytes)
+        regen = 0
+        while True:
+            review_bytes = _encode_image_bytes(current, filename)
+            bleed = detect_ink_bleed(review_bytes)
+            if bleed.get("bleed"):
+                regen += 1
+                where = str(bleed.get("where") or "")
+                if regen > regen_limit:
+                    problem = localized_image_problem(bleed=True, where=where, chinese=[])
+                    raise ImageLocalizationGptStopError(
+                        f"Mực loang vẫn còn sau {regen_limit} lần tạo lại — {problem}"
                     )
-                _status, output_bytes, msg = self.size_laundry_gpt.process(
-                    _encode_image_bytes(image, filename),
-                    filename,
-                    url,
-                    prompt=attempt_prompt,
+                again_bytes, again_msg = self._gpt_edit(
+                    original_bytes, filename, url, prompt, quality=sheet_quality
                 )
-                if not output_bytes:
-                    raise ImageLocalizationFatalDependencyError(
-                        "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: GPT Image không trả ảnh size/giặt"
-                    )
-                processed = self._decode_image_bytes(output_bytes)
-                if is_size:
-                    processed, _removed_again = remove_fashion_model(processed)
-                review_bytes = _encode_image_bytes(processed, filename)
-                smeared = has_ink_smear(processed) or gemini_flash_sees_ink_smear(review_bytes)
-                if not smeared:
-                    logger.info(
-                        "Ảnh size/giặt không còn mực loang, lần %s/%s: %s",
-                        attempt,
-                        SIZE_LAUNDRY_GPT_REVIEW_ATTEMPTS,
-                        url[:120],
-                    )
-                    break
-                logger.warning(
-                    "Ảnh size/giặt còn mực loang, GPT vẽ lại lần %s/%s: %s",
-                    attempt,
-                    SIZE_LAUNDRY_GPT_REVIEW_ATTEMPTS,
-                    url[:120],
-                )
-            else:
-                raise ImageLocalizationFatalDependencyError(
-                    "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: "
-                    f"sau {SIZE_LAUNDRY_GPT_REVIEW_ATTEMPTS} lần GPT vẫn còn mực loang"
-                )
-            post_ocr = self._post_check_ocr(review_bytes)
-            if _has_chinese_text_blocks(post_ocr):
+                current = self._decode_image_bytes(again_bytes)
+                message = f"{again_msg} (tạo lại lần {regen} vì mực loang)"
+                continue
+            try:
+                post_ocr = self._normalize_ocr(self.OCRProcessor().process_image(review_bytes))
+            except Exception as exc:
+                _raise_if_fatal_dependency(exc)
+                raise ImageLocalizationGptStopError(str(exc)) from exc
+            chinese_blocks = chinese_blocks_to_redraw(post_ocr)
+            chinese = remaining_chinese_on_localized_image([block["text"] for block in chinese_blocks])
+            if chinese:
                 loc = self._process_local(
-                    {"image_data": processed, "ocr_results": post_ocr},
+                    {"image_data": current, "ocr_results": chinese_blocks},
                     translator,
                     img_proc,
                     url,
                     delete_size_and_laundry=False,
                 )
                 if loc[0] == "processed" and loc[1] is not None:
-                    processed = loc[1]
-                    msg = (msg or "GPT Image đã xử lý ảnh") + " — DeepSeek vẽ lại chữ Trung còn sót"
-            final_bytes = _encode_image_bytes(apply_brand_logo_top_right_bgr(processed), filename)
-            final_url = self._upload_bytes(product, final_bytes, filename)
-            detail: Dict[str, Any] = {"size_laundry_gpt": True}
-            if (
-                comprehensive
-                and self.poster_shop_norm
-                and self.poster_cat2_slug
-                and not self.dry_run
-            ):
-                saved = save_poster_if_absent(
-                    self.poster_shop_norm,
-                    self.poster_cat2_slug,
-                    final_url,
-                    getattr(product, "product_id", None),
-                )
-                if saved:
-                    detail = {
-                        "library_poster": True,
-                        "library_saved": True,
-                        "size_laundry_gpt": True,
-                    }
-                    msg = (msg or "GPT Image đã xử lý ảnh") + " — đã lưu kho size/giặt"
+                    current = loc[1]
+                    message = f"{message} + DeepSeek vẽ chữ Trung còn sót"
+                else:
+                    message = f"{message} + còn chữ Trung, giữ ảnh GPT"
             return PartProcessOutcome(
                 "processed",
-                None,
-                msg or "GPT Image đã xử lý ảnh",
-                final_url=final_url,
-                detail=detail,
+                current,
+                message,
+                detail={"gpt_image": True, "local_chinese_redraw": bool(chinese)},
             )
-        except ImageLocalizationFatalDependencyError:
-            raise
-        except Exception as exc:
-            logger.warning("GPT Image ảnh size/giặt lỗi: %s", exc)
-            raise ImageLocalizationFatalDependencyError(
-                "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: "
-                f"GPT Image không xử lý được ảnh size/giặt — {exc}"
-            ) from exc
 
     def _run_gemini_image_edit(
         self,
@@ -1850,6 +1962,7 @@ class ProductImageLocalizationService:
         self.force = force
         self.dry_run = dry_run
         self.allow_ai_image_models_override = allow_ai_image_models
+        self._apparel_sheets = False
         gm = (gemini_mode or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_MODE", "api") or "api").strip().lower()
         if gm == "web":
             logger.warning("gemini_mode=web không còn hỗ trợ — job dùng Gemini API.")
@@ -1905,10 +2018,7 @@ class ProductImageLocalizationService:
             gemini_mode=self.gemini_mode,
             poster_shop_norm=getattr(self, "_poster_shop_norm", "") or "",
             poster_cat2_slug=getattr(self, "_poster_cat2_slug", "") or "",
-            explicit_other_ai=bool(getattr(self, "_explicit_other_ai", False)),
-            size_laundry_ai_enabled=bool(
-                getattr(self, "_size_laundry_ai_enabled", self.allow_ai_image_models_override is not False)
-            ),
+            apparel_sheets=bool(getattr(self, "_apparel_sheets", False)),
             dry_run=self.dry_run,
         )
 
@@ -1978,10 +2088,7 @@ class ProductImageLocalizationService:
         poster_shop, poster_cat2 = resolve_poster_key(db, product)
         self._poster_shop_norm = poster_shop
         self._poster_cat2_slug = poster_cat2
-        self._explicit_other_ai = explicit_ai_image_requested(
-            product, self.allow_ai_image_models_override
-        )
-        self._size_laundry_ai_enabled = self.allow_ai_image_models_override is not False
+        self._apparel_sheets = product_uses_apparel_size_laundry(db, product)
         # Trả connection về pool trước bước xử lý ảnh lâu — tránh SSL idle timeout khi commit.
         preload_product_for_offline_use(product)
         release_db_session(db, detach_objects=(product,))
@@ -2169,17 +2276,6 @@ class ProductImageLocalizationService:
             return self._legacy_pipeline(self._allows_ai_image(product)).process_single_image(
                 product, url, image_bytes, filename
             )
-        if getattr(self, "_explicit_other_ai", False):
-            image_bytes, filename = self._download(url)
-            status, output_bytes, message = self.gemini.process(image_bytes, filename, url)
-            if status == "deleted":
-                return ImageProcessResult(url, None, "deleted", message)
-            if status == "kept" and output_bytes == image_bytes:
-                return ImageProcessResult(url, url, "kept", message)
-            if output_bytes is None:
-                return ImageProcessResult(url, url, "kept", message)
-            final_url = self._upload_to_bunny(output_bytes, filename, product)
-            return ImageProcessResult(url, final_url, "processed", message)
         return ImageProcessResult(
             url,
             url,

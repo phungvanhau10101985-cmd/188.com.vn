@@ -20,5 +20,8 @@ class ShopCat2SizeLaundryPoster(Base):
     shop_name_chinese_norm = Column(String(200), nullable=False, index=True)
     category_level2_slug = Column(String(300), nullable=False, index=True)
     image_url = Column(String(800), nullable=False)
+    size_image_url = Column(String(800), nullable=True)
+    laundry_image_url = Column(String(800), nullable=True)
+    render_version = Column(String(40), nullable=True)
     source_product_id = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

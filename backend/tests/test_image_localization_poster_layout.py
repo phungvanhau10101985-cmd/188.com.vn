@@ -81,8 +81,8 @@ def test_size_chart_still_uses_table_cells():
     proc = _processor()
     assert proc._layout_table_blocks(blocks, [], 520, 260) is not None
     out = proc.process_image_with_text(img, blocks, [])
-    # Khoảng giữa hai cột cùng hàng phải được tô nền bảng, không giữ xám 180.
-    assert int(out[32, 112, 0]) >= 245
+    # Nền ô lấy màu ngay xung quanh, không tô trắng lệch.
+    assert abs(int(out[32, 112, 0]) - 180) <= 12
     assert int(out[28:44, 20:90].min()) < 40
 
 
@@ -164,6 +164,51 @@ def test_in_situ_keeps_original_ink_and_phone_min_size():
     assert ink_rows.size and int(ink_rows.max() - ink_rows.min()) >= 20
 
 
+def test_text_on_a_photo_is_not_covered_by_a_flat_plate():
+    import cv2
+
+    rng = np.random.default_rng(5)
+    img = rng.integers(0, 30, (180, 320, 3), dtype=np.uint8)
+    img[20:150, 140:300] = rng.integers(170, 255, (130, 160, 3), dtype=np.uint8)
+    before = img[24:40, 150:180].copy()
+    cv2.putText(img, "MUI", (150, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+    out = _processor().process_image_with_text(
+        img,
+        [("Tinh khiet khong mui, giu am tot hon", (146, 72, 250, 112))],
+        [],
+    )
+    assert np.array_equal(out[24:40, 150:180], before)
+    plate = out[72:112, 146:250]
+    assert float(np.std(plate)) > 18
+
+
+def test_colored_badge_keeps_its_fill_and_gets_new_text():
+    import cv2
+
+    img = np.full((180, 220, 3), 248, np.uint8)
+    img[40:150, 24:150] = (48, 78, 128)
+    cv2.putText(img, "WOOL", (36, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (245, 245, 245), 2, cv2.LINE_AA)
+    proc = _processor()
+    assert proc._region_is_color_photo(img, (36, 70, 130, 110)) is False
+    out = proc.process_image_with_text(img, [("Long cuu", (36, 72, 130, 108))], [])
+    badge = out[48:140, 30:140]
+    assert int(badge[:, :, 0].mean()) < 90
+    assert int(badge.min()) > 180 or int(out[78:100, 40:120].max()) > 200
+
+
+def test_blank_manufacturer_line_is_erased_without_touching_the_photo():
+    import cv2
+
+    img = np.full((120, 240, 3), 255, np.uint8)
+    cv2.putText(img, "XUONG", (16, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2, cv2.LINE_AA)
+    photo = _leather(70, 80, 6)
+    img[20:90, 140:220] = photo
+    out = _processor().process_image_with_text(img, [("", (14, 24, 110, 54))], [])
+    assert int(out[30:50, 20:100].mean()) > 180
+    delta = np.abs(out[20:90, 140:220].astype(np.int16) - photo.astype(np.int16)).mean()
+    assert delta < 8
+
+
 def test_photo_bbox_is_not_filled_white():
     photo = _leather(160, 220, 7)
     img = np.full((200, 260, 3), 255, np.uint8)
@@ -190,3 +235,76 @@ def test_brand_logo_skips_corner_that_already_has_an_icon(monkeypatch):
     original = busy.copy()
     kept = svc.apply_brand_logo_top_right_bgr(busy)
     assert np.array_equal(kept, original)
+
+
+def test_spec_column_keeps_the_product_photo_and_separates_lines():
+    import cv2
+
+    img = np.full((452, 749, 3), 255, np.uint8)
+    img[0:34, :] = (232, 232, 232)
+    img[48:430, 40:350] = _leather(382, 310, 3)
+    photo = img[48:430, 40:350].copy()
+    blocks = [("Thong so san pham", (12, 6, 240, 28)), ("Thong so san pham", (420, 72, 560, 90))]
+    y = 110
+    for label in (
+        "Chat lieu mat giay: PU",
+        "Chat lieu lot giay: PU",
+        "Chat lieu de: cao su",
+        "Mau sac: hoa tiet da bao",
+        "Kich co: 34-50",
+        "Chieu cao got: 19cm",
+        "De be: 9cm",
+    ):
+        blocks.append((label, (442, y, 560, y + 14)))
+        y += 22
+    blocks.append((
+        "Luu y: do chuan la size 36, moi lan tang mot size thi chieu dai giay tang 5mm va co the lech so voi hang that.",
+        (421, y + 16, 700, y + 30),
+    ))
+    proc = _processor()
+    assert proc._layout_spec_column(blocks, [], 749, 452, img) is not None
+    out = proc.process_image_with_text(img, blocks, [])
+    delta = np.abs(out[48:430, 40:350].astype(np.int16) - photo.astype(np.int16)).mean()
+    assert delta < 8, f"anh san pham bi de chu delta={delta:.1f}"
+    gray = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+    column = gray[100:270, 430:700]
+    ink_rows = np.where(column.min(axis=1) < 40)[0]
+    groups = 0
+    previous = -10
+    for row in ink_rows:
+        if row > previous + 2:
+            groups += 1
+        previous = int(row)
+    assert groups >= 6, f"chu cot thong so bi dinh, chi thay {groups} cum"
+
+
+def test_long_label_stays_inside_its_row_and_beside_its_neighbor():
+    img = np.full((180, 360, 3), 255, np.uint8)
+    img[28:42, 320:340] = (0, 0, 255)
+    img[100:114, 20:36] = (0, 0, 255)
+    blocks = [
+        ("Mo ta dai hon rat nhieu so voi o chu goc", (16, 24, 80, 44)),
+        ("Ngan", (200, 24, 250, 44)),
+        ("Dong duoi", (16, 120, 90, 142)),
+    ]
+    out = _processor().process_image_with_text(img, blocks, [])
+    assert np.all(out[28:42, 320:340, 2] == 255)
+    assert np.all(out[100:114, 20:36, 2] == 255)
+    assert int(out[26:42, 18:70].min()) < 80
+    assert int(out[122:140, 18:80].min()) < 80
+
+
+def test_old_ink_is_covered_by_a_solid_plate():
+    import cv2
+
+    img = np.full((80, 220, 3), 248, np.uint8)
+    cv2.putText(img, "OLD", (18, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (30, 30, 30), 2, cv2.LINE_AA)
+    before = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    out = _processor().process_image_with_text(img, [("Chu moi", (16, 22, 90, 58))], [])
+    gray = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+    was_ink = before[24:56, 18:88] < 80
+    now = gray[24:56, 18:88]
+    light = now[now > 40]
+    assert float(light.mean()) > 220
+    assert int(now.min()) < 40
+    assert int(was_ink.sum()) > 20

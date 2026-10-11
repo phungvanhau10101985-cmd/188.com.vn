@@ -50,7 +50,7 @@ GEMINI_MAX_WORKERS = 3  # Số worker threads cho xử lý song song
 # ==================== IMAGE PROCESSING CONFIG ====================
 MAX_IMAGE_SIZE = (2000, 2000)
 MIN_IMAGE_SIZE = 500
-# Loại thumbnail: rộng <= 350px. Ảnh 400px vẫn OCR / dịch / vẽ.
+# Ảnh rộng dưới 350px bị xóa, kể cả bảng size và hướng dẫn giặt. Ảnh đúng 350px vẫn xử lý.
 MIN_IMAGE_WIDTH = 350
 MAX_IMAGE_WIDTH = 5000
 MERGE_SPACING = 10
@@ -216,9 +216,7 @@ IMAGE_CLASSIFICATION = {
         '推',      # Yêu cầu thêm
         '热卖',    # Yêu cầu thêm
         
-        # === SỐ NĂM ĐƠN LẺ - XÓA NGAY (2019-2030) ===
-        '2019', '2020', '2021', '2022', '2023', '2024', 
-        '2025', '2026', '2027', '2028', '2029', '2030',
+        # Số năm 2019-2030 không xóa cả ảnh. Translator chỉ gỡ token năm.
         
         # 1. Nguồn hàng & bán buôn (cụm từ)
         '一件代发', '一手货源', '货源充足', '大量现货',
@@ -230,9 +228,8 @@ IMAGE_CLASSIFICATION = {
         '网店代理', '微商代理', '实体店代理',
         
         # 3. Thông tin công ty & bản quyền (cụm từ)
-        # 2b. Factory/company/team intro images - delete image
-        '实力工厂', '工厂', '生产车间', '车间', '制鞋团队', '设计团队',
-        '开发设计团队', '出货品质严控', '品质严控', '鞋业', '品控', '质检',
+        # 2b. Xưởng/nhà máy: không xóa cả ảnh — chỉ xóa dòng chữ (MANUFACTURER_ERASE_KEYWORDS).
+        '出货品质严控', '品质严控', '品控', '质检',
 
         '未经授权', '盗用图片', '投诉原图',
         '我公司', '本公司', '公司投诉',
@@ -279,19 +276,13 @@ IMAGE_CLASSIFICATION = {
         'DISCOUNT', 'PROMOTION', 'SPECIAL OFFER',
         'NEW ARRIVAL', 'BEST SELLER', 'TOP SELLER',
         
-        # 14. NĂM SẢN XUẤT/HÀNG TỒN KHO (cụm từ)
-        '2019年', '2020年', '2021年', '2022年', '2023年', '2024年', 
-        '2025年', '2026年', '2027年', '2028年', '2029年', '2030年',
+        # 14. Hàng tồn kho (cụm từ). Số năm không nằm ở đây.
         '生产日期', '出厂日期', '生产年份', '年份标注',
         '库存处理', '积压库存', '尾货清仓', '清库存',
         '老款式', '旧款式', '过季款', '下架款',
         '停产款', '停售款', '不再生产',
         
-        # 15. Kết hợp năm với từ khóa (cụm từ đầy đủ)
-        '2019库存', '2020尾货', '2021清仓',
-        '老款2019', '旧款2020', '过季2021',
-        
-        # 16. Các từ khóa mới thêm
+        # 15. Các từ khóa mới thêm
         'Click to buy', 'Click here', '推荐购买', '热门推荐',
     ],
     
@@ -301,8 +292,6 @@ IMAGE_CLASSIFICATION = {
         '荐', '退', '价', '换',
         # CÁC CHỮ MỚI
         'Click', '推', '热卖',
-        # SỐ NĂM ĐƠN LẺ
-        '2019', '2020', '2021', '2022', '2023', '2024',
         # Các từ khác
         '价格表', 'báo giá', '报价单', '价目表',
         '微信联系', 'QQ号码', '电话号码',
@@ -311,18 +300,14 @@ IMAGE_CLASSIFICATION = {
         '更优惠', '立减', '满减', '折扣', '促销', '特价', '秒杀',
         '抢先购', '淘金币', '消费券', '优惠券', '叠加优惠', '下单立减',
         '官方立减', '折上折', '券后价', '618抢先购', '百亿补贴', '限时优惠',
-        # NĂM SẢN XUẤT (cụm từ)
-        '2019年', '2020年', '2021年', '2022年', '2023年', '2024年',
         '生产日期', '库存处理', '尾货清仓',
         '老款式', '停产款',
     ],
     
     # === THÊM: DANH SÁCH TỪ ĐƠN PHÂN LOẠI ===
     'SINGLE_CHAR_RULES': {
-        # 4 CHỮ NGUY HIỂM + SỐ NĂM - XÓA NGAY
-        'DANGEROUS_SINGLE_ITEMS': ['荐', '退', '价', '换', '推',
-                                  '2019', '2020', '2021', '2022', '2023', '2024',
-                                  '2025', '2026', '2027', '2028', '2029', '2030'],
+        # 4 CHỮ NGUY HIỂM - XÓA NGAY. Số năm không xóa ảnh.
+        'DANGEROUS_SINGLE_ITEMS': ['荐', '退', '价', '换', '推'],
         
         # CÁC TỪ TIẾNG ANH CẦN XÓA
         'DANGEROUS_ENGLISH_ITEMS': ['Click'],
@@ -344,6 +329,33 @@ OCR_BATCH_ENABLED = True
 OCR_MAX_BATCH_SIZE = 15  # Max images per OCR batch
 OCR_MIN_BATCH_SIZE = 3   # Min images to use batch processing
 
+# Chữ giới thiệu nhà sản xuất / xưởng. Giữ ảnh, chỉ xóa các dòng chứa cụm này.
+MANUFACTURER_ERASE_KEYWORDS = (
+    "实力工厂",
+    "源头工厂",
+    "源头厂家",
+    "生产厂家",
+    "制造商",
+    "生产车间",
+    "制鞋团队",
+    "设计团队",
+    "开发设计团队",
+    "生产线",
+    "厂家",
+    "厂商",
+    "工厂",
+    "车间",
+    "鞋业",
+)
+
+# Năm đứng riêng (2019-2030), không phải đoạn nằm trong số đo dài hơn như 220225.
+YEAR_TOKEN_RE = re.compile(
+    r"(?<!\d)(?:2019|2020|2021|2022|2023|2024|2025|2026|2027|2028|2029|2030)(?!\d)\s*年?"
+)
+
+# Cụm đổi/trả có chữ 退. Không xóa cả ảnh — translator xóa cụm này khỏi ảnh.
+RETURN_CLUSTER_RE = re.compile(r"退换|换退|退")
+
 # ==================== URGENT DELETE PATTERNS ====================
 # ĐẶC BIỆT: THÊM PATTERN CHO 4 CHỮ QUAN TRỌNG + SỐ NĂM (XÓA NGAY CẢ ĐƠN LẺ)
 URGENT_DELETE_PATTERNS = [
@@ -357,10 +369,6 @@ URGENT_DELETE_PATTERNS = [
     r'Click',   # Yêu cầu thêm (tiếng Anh)
     r'推',      # Yêu cầu thêm (chữ Hán)
     r'热卖',    # Yêu cầu thêm (chữ Hán)
-    
-    # === SỐ NĂM ĐƠN LẺ - XÓA NGAY ===
-    r'2019', r'2020', r'2021', r'2022', r'2023', r'2024',
-    r'2025', r'2026', r'2027', r'2028', r'2029', r'2030',
     
     # 1. Nguồn hàng & bán buôn (cụm từ)
     r'一件代发',
@@ -465,29 +473,13 @@ URGENT_DELETE_PATTERNS = [
     r'BEST\s+SELLER',
     r'TOP\s+SELLER',
     
-    # 12. NĂM SẢN XUẤT/HÀNG TỒN KHO (cụm từ)
-    r'20(19|20|21|22|23|24|25|26|27|28|29|30)年',
-    r'生产日期[：:]?\s*20[0-9]{2}',
-    r'出厂日期[：:]?\s*20[0-9]{2}',
-    r'生产年份[：:]?\s*20[0-9]{2}',
-    r'有效期至[：:]?\s*20[0-9]{2}',
-    r'保质期至[：:]?\s*20[0-9]{2}',
+    # 12. Hàng tồn kho. Số năm không xóa ảnh — translator gỡ riêng token năm.
     r'库存[积压尾货清仓处理]{2,}',
     r'[积压尾货清仓]{2,}库存',
     r'[老旧过时下架]{2,}款',
     r'[停产停售下架]{2,}',
     
-    # 13. Kết hợp năm với thông tin bán hàng
-    r'(20(19|20|21|22|23|24|25|26|27|28|29|30)).*(清仓|处理|特价|优惠|甩卖)',
-    r'(清仓|处理|特价|优惠|甩卖).*(20(19|20|21|22|23|24|25|26|27|28|29|30))',
-    r'(库存|尾货).*(20(19|20|21|22|23|24|25|26|27|28|29|30))',
-    r'(20(19|20|21|22|23|24|25|26|27|28|29|30)).*(库存|尾货)',
-    
-    # 14. Kết hợp năm với sản phẩm cũ
-    r'20(19|20|21|22|23|24).*(老款|旧款|过季|下架|停产)',
-    r'(老款|旧款|过季|下架|停产).*20(19|20|21|22|23|24)',
-    
-    # 15. Pattern cho "荐" kết hợp
+    # 13. Pattern cho "荐" kết hợp
     r'荐.*(价格|批发|微信|电话|购买|BUY\s+NOW|Click)',
     r'(价格|批发|微信|电话|购买|BUY\s+NOW|Click).*荐',
     r'(热卖|爆款|新品).*荐',
@@ -514,10 +506,6 @@ SKIP_PATTERNS = [
     r'Click',   # Yêu cầu thêm
     r'推',      # Yêu cầu thêm
     r'热卖',    # Yêu cầu thêm
-    
-    # === SỐ NĂM ĐƠN LẺ - XÓA NGAY ===
-    r'2019', r'2020', r'2021', r'2022', r'2023', r'2024',
-    r'2025', r'2026', r'2027', r'2028', r'2029', r'2030',
     
     # 1. CHỈ XÓA KHI CÓ GIÁ TIỀN CỤ THỂ VÀ ĐƠN VỊ
     r"价格[表目单]",
@@ -619,13 +607,7 @@ SKIP_PATTERNS = [
     r"NEW\s+ARRIVAL",
     r"BEST\SELLER",
     
-    # 12. NĂM SẢN XUẤT/HÀNG TỒN KHO (cụm từ)
-    r'20(19|20|21|22|23|24|25|26|27|28|29|30)年',
-    r'生产日期[：:]\s*20[0-9]{2}',
-    r'出厂日期[：:]\s*20[0-9]{2}',
-    r'生产年份[：:]\s*20[0-9]{2}',
-    r'有效期至[：:]\s*20[0-9]{2}',
-    r'保质期至[：:]\s*20[0-9]{2}',
+    # 12. Hàng tồn kho. Số năm không xóa dòng/ảnh.
     r'库存[积压尾货]{2,}',
     r'积压库存',
     r'尾货处理',
@@ -789,7 +771,7 @@ def should_delete_image_urgent(text_content: str) -> bool:
     KIỂM TRA THÔNG MINH: 
     - 4 CHỮ QUAN TRỌNG (荐, 退, 价, 换): XÓA NGAY KHI CÓ 1 CHỮ
     - CÁC CHỮ MỚI (Click, 推, 热卖): XÓA NGAY KHI CÓ 1 CHỮ/TỪ
-    - SỐ NĂM ĐƠN LẺ (2019-2030): XÓA NGAY
+    - Số năm 2019-2030: không xóa ảnh
     - Các từ khác: Chỉ xóa khi là cụm từ 2+ chữ có ý nghĩa
     
     Args:
@@ -801,11 +783,13 @@ def should_delete_image_urgent(text_content: str) -> bool:
     if not text_content or not text_content.strip():
         return False
     
-    # CHUẨN HÓA TEXT
-    normalized_text = text_content.strip()
+    # CHUẨN HÓA TEXT. Cụm có 退 không xóa ảnh.
+    normalized_text = RETURN_CLUSTER_RE.sub("", text_content.strip())
+    if not normalized_text.strip():
+        return False
     
     # === 1. KIỂM TRA 4 CHỮ QUAN TRỌNG - XÓA NGAY ===
-    DANGEROUS_CHARS = ['荐', '退', '价', '换', '推']
+    DANGEROUS_CHARS = ['荐', '价', '换', '推']
     for char in DANGEROUS_CHARS:
         if char in normalized_text:
             print(f"⚠️  PHÁT HIỆN CHỮ NGUY HIỂM '{char}' trong: {normalized_text[:50]}...")
@@ -824,15 +808,7 @@ def should_delete_image_urgent(text_content: str) -> bool:
         print(f"⚠️  PHÁT HIỆN TỪ NGUY HIỂM '热卖' trong: {normalized_text[:50]}...")
         return True
     
-    # === 4. KIỂM TRA SỐ NĂM ĐƠN LẺ (2019-2030) - XÓA NGAY ===
-    # Tạo pattern cho năm 2019-2030
-    import re
-    year_pattern = r'(?<!\d)20(19|20|21|22|23|24|25|26|27|28|29|30)(?!\d)'
-    year_matches = re.findall(year_pattern, normalized_text)
-    
-    if year_matches:
-        print(f"⚠️  PHÁT HIỆN SỐ NĂM {year_matches} trong: {normalized_text[:50]}...")
-        return True
+    # Số năm không xóa ảnh. Translator gỡ token năm, phần chữ còn lại vẫn dịch.
     
     # === 5. KIỂM TRA CÁC TỪ ĐƠN THÔNG THƯỜNG - KHÔNG XÓA ===
     SAFE_SINGLE_CHARS = ['产', '销', '售', '品', '牌', '色', '码', '货', '型', '号']
@@ -859,9 +835,6 @@ def should_delete_image_urgent(text_content: str) -> bool:
         '618抢先购', '618抢先', '618大促', '双11', '双十一', '双12', '双十二',
         '百亿补贴', '限时优惠', '限时特价', '限时抢购', '限时秒杀',
         '热卖促销', '促销价', '活动价', '购物津贴', '红包',
-        # Năm sản xuất (dạng đầy đủ)
-        '2019年', '2020年', '2021年', '2022年',
-        '生产日期', '出厂日期', '生产年份',
         # Hàng tồn
         '库存处理', '尾货清仓', '清库存',
         # Hàng cũ
@@ -936,7 +909,7 @@ __all__ = [
     
     # Content Filtering
     'SKIP_PATTERNS', 'SKIP_REGEX', 'DOMAIN_REGEX', 'SIZE_PATTERN',
-    'URGENT_DELETE_PATTERNS',
+    'URGENT_DELETE_PATTERNS', 'YEAR_TOKEN_RE', 'RETURN_CLUSTER_RE',
     
     # Performance
     'MAX_WORKERS', 'DOWNLOAD_TIMEOUT', 'UPLOAD_TIMEOUT', 'WAIT_BETWEEN_ROWS',
@@ -989,9 +962,7 @@ if __name__ == "__main__":
     print(f"     • Click - Các từ tiếng Anh kêu gọi hành động")
     print(f"     • 推 - Đẩy/giới thiệu")
     print(f"     • 热卖 - Bán chạy/hot sale")
-    print(f"  ⚠️  SỐ NĂM ĐƠN LẺ - XÓA NGAY:")
-    print(f"     • 2019, 2020, 2021, 2022, 2023, 2024")
-    print(f"     • 2025, 2026, 2027, 2028, 2029, 2030")
+    print(f"  ✅ Số năm 2019-2030 - KHÔNG xóa ảnh, chỉ gỡ số năm")
     print(f"  ✅ Các từ đơn an toàn - KHÔNG xóa:")
     print(f"     • 产, 销, 品, 牌, 色, 码, 货, 型, 号")
     print(f"  🔥 Cụm từ urgent - XÓA: 一件代发, 价格表, 微信联系, Click here")
@@ -1005,9 +976,10 @@ if __name__ == "__main__":
     test_cases = [
         # 4 CHỮ QUAN TRỌNG - XÓA NGAY
         ("荐", True, "荐 - XÓA NGAY"),
-        ("退", True, "退 - XÓA NGAY"),
+        ("退", False, "退 - giữ ảnh, xóa cụm chữ"),
         ("价", True, "价 - XÓA NGAY"),
         ("换", True, "换 - XÓA NGAY"),
+        ("不退换", False, "不退换 - giữ ảnh, xóa cụm chữ"),
         
         # TỪ KHÓA MỚI - XÓA NGAY
         ("Click", True, "Click - XÓA NGAY"),
@@ -1017,15 +989,12 @@ if __name__ == "__main__":
         ("热卖推荐", True, "热卖推荐 - XÓA"),
         ("推荐商品", True, "Có '推' - XÓA"),
         
-        # SỐ NĂM ĐƠN LẺ - XÓA NGAY
-        ("2019", True, "2019 - XÓA NGAY"),
-        ("2020", True, "2020 - XÓA NGAY"),
-        ("2021", True, "2021 - XÓA NGAY"),
-        ("2022", True, "2022 - XÓA NGAY"),
-        ("2023", True, "2023 - XÓA NGAY"),
-        ("2024", True, "2024 - XÓA NGAY"),
-        ("2019年", True, "2019年 - XÓA"),
-        ("库存2020", True, "库存2020 - XÓA"),
+        # SỐ NĂM - KHÔNG XÓA ẢNH
+        ("2019", False, "2019 - giữ ảnh"),
+        ("2022", False, "2022 - giữ ảnh"),
+        ("2019年", False, "2019年 - giữ ảnh"),
+        ("库存2020", False, "库存2020 - giữ ảnh"),
+        ("220225", False, "220225 không phải năm 2022"),
         
         # TỪ ĐƠN AN TOÀN - KHÔNG XÓA
         ("产", False, "产 - KHÔNG xóa"),
@@ -1045,7 +1014,7 @@ if __name__ == "__main__":
         ("尺寸表", False, "尺寸表 - KHÔNG xóa"),
         
         # KẾT HỢP
-        ("2021清仓处理", True, "2021清仓处理 - XÓA"),
+        ("2021清仓处理", False, "số năm không xóa; cụm cấm do danh sách từ khóa"),
         ("荐2022热卖", True, "荐2022热卖 - XÓA"),
         ("Click 2023", True, "Click 2023 - XÓA"),
         ("推荐2024", True, "推荐2024 - XÓA"),
@@ -1086,5 +1055,5 @@ if __name__ == "__main__":
         print(f"⚠️  OpenCV (cv2) is NOT installed.")
     
     print(f"\n🚀 HỆ THỐNG ĐÃ SẴN SÀNG!")
-    print("   ⚠️  荐, 退, 价, 换 + Click, 推, 热卖 + 2019-2030 - XÓA NGAY KHI PHÁT HIỆN")
+    print("   ⚠️  荐, 退, 价, 换 + Click, 推, 热卖 - XÓA NGAY KHI PHÁT HIỆN")
     print("=" * 80)
