@@ -294,6 +294,68 @@ def test_long_label_stays_inside_its_row_and_beside_its_neighbor():
     assert int(out[122:140, 18:80].min()) < 80
 
 
+def test_long_line_on_a_pale_card_keeps_the_ending():
+    import cv2
+
+    img = np.full((240, 720, 3), 248, np.uint8)
+    text = "Ngong trang vung cao lanh phia Bac do co sinh truong dai"
+    out = _processor().process_image_with_text(img, [(text, (24, 36, 210, 70))], [])
+    gray = cv2.cvtColor(out[36:78, 24:700], cv2.COLOR_BGR2GRAY)
+    ink = np.where(gray.min(axis=0) < 50)[0]
+    assert ink.size > 0
+    assert int(ink.max()) > 200, "cau bi cat trong o OCR hep"
+
+
+def test_contain_lines_keeps_every_word_inside_the_box():
+    proc = _processor()
+    text = "Ham luong long to ZZZ"
+    font, lines, pad = proc._fit_cell_lines(text, 90, 28, min_size=11, max_size=16)
+    font, lines, pad = proc._contain_lines(text, 90, 28, font, lines, pad, 16)
+    assert "ZZZ" in " ".join(lines)
+    probe_font = font
+    from PIL import Image, ImageDraw
+
+    probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    inner = 90 - pad * 2
+    for line in lines:
+        box = probe.textbbox((0, 0), line, font=probe_font)
+        assert box[2] - box[0] <= inner + 1
+
+
+def test_short_caption_on_fleece_is_redrawn_and_texture_stays():
+    import cv2
+
+    rng = np.random.default_rng(7)
+    img = np.full((520, 360, 3), 255, np.uint8)
+    tex = np.zeros((300, 180, 3), np.uint8)
+    tex[:, :, 2] = rng.integers(150, 230, (300, 180))
+    tex[:, :, 1] = rng.integers(10, 50, (300, 180))
+    tex[:, :, 0] = rng.integers(10, 40, (300, 180))
+    img[80:380, 90:270] = tex
+    cv2.putText(img, "LOT", (110, 130), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+    below = img[200:360, 100:260].copy()
+    out = _processor().process_image_with_text(img, [("Vai long cuu", (100, 96, 240, 140))], [])
+    delta = np.abs(out[200:360, 100:260].astype(np.int16) - below.astype(np.int16)).mean()
+    assert delta < 8, f"van vai bi to trang delta={delta:.1f}"
+    cap = out[96:140, 100:240]
+    assert float(np.std(cap)) > 12
+    assert int(cap[:, :, 2].mean()) > 80
+    assert not np.array_equal(cap, img[96:140, 100:240])
+
+
+def test_caption_covering_the_product_is_left_alone():
+    rng = np.random.default_rng(8)
+    img = rng.integers(30, 220, (400, 300, 3), dtype=np.uint8)
+    before = img.copy()
+    out = _processor().process_image_with_text(
+        img,
+        [("Khong duoc to trang ca tam", (20, 40, 260, 200))],
+        [],
+    )
+    delta = np.abs(out.astype(np.int16) - before.astype(np.int16)).mean()
+    assert delta < 1, f"anh san pham bi de chu delta={delta:.1f}"
+
+
 def test_old_ink_is_covered_by_a_solid_plate():
     import cv2
 

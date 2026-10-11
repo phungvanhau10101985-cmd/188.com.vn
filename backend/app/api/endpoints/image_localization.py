@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -1404,6 +1404,26 @@ def list_image_localization_trials(
     from app.services.image_localization_trial import list_trials
 
     return {"items": list_trials(), "ttl_days": 7}
+
+
+class TrialImageUrlBody(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2000)
+
+
+@router.post("/trials/fetch-url")
+def fetch_image_localization_trial_url(
+    body: TrialImageUrlBody,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    """Tải ảnh từ link công khai để dán vào cổng thử (tránh CORS trình duyệt)."""
+    from app.services.image_localization_trial import MAX_TRIAL_BYTES
+    from app.services.public_image_fetch import PublicImageFetchError, fetch_public_image_bytes
+
+    try:
+        raw, mime = fetch_public_image_bytes(body.url, max_bytes=MAX_TRIAL_BYTES)
+    except PublicImageFetchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=raw, media_type=mime)
 
 
 @router.post("/trials")

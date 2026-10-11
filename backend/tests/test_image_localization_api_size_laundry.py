@@ -114,6 +114,19 @@ def test_deepseek_payload_disables_v4_thinking():
     assert "Preserve all measurements" in user
 
 
+def test_poster_label_asks_for_a_short_phrase_and_size_table_does_not():
+    tr = _translator()
+    poster = [{"text": "摇粒绒面料", "bbox": [20, 20, 160, 52]}]
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Vải nỉ") as translate:
+        tr.classify_and_process_blocks(poster)
+    budget = translate.call_args.kwargs.get("max_chars")
+    assert isinstance(budget, int) and 8 <= budget <= 48
+
+    with patch.object(tr, "call_deepseek_for_translation_single", return_value="Vòng ngực") as translate:
+        tr.classify_and_process_blocks(SIZE_OCR)
+    assert translate.call_args.kwargs.get("max_chars") is None
+
+
 def test_domain_on_label_keeps_image_and_blanks_url():
     """Tem SP có www… không được xóa cả ảnh biến thể."""
     tr = _translator()

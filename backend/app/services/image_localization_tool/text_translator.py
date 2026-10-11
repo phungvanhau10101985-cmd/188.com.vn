@@ -268,7 +268,22 @@ class TextTranslator:
         cleaned_text = self.chinese_regex.sub('', text)
         return re.sub(r'\s+', ' ', cleaned_text).strip()
     
-    def call_deepseek_for_translation_single(self, text: str) -> str:
+    def _poster_label_char_budget(self, text: str, bbox) -> int | None:
+        """Nhãn Hán ngắn trên poster: bản dịch phải vừa ô, không thành câu dài."""
+        if not bbox or len(bbox) < 4:
+            return None
+        hanzi = self.chinese_regex.findall(str(text or ""))
+        if not hanzi or len(hanzi) > 16:
+            return None
+        x1, y1, x2, y2 = [int(float(v)) for v in list(bbox)[:4]]
+        box_w, box_h = max(0, x2 - x1), max(0, y2 - y1)
+        if box_w < 12 or box_h < 8 or box_h > 96:
+            return None
+        per_line = max(8, int(box_w / 10))
+        lines = 2 if box_h >= 34 else 1
+        return min(48, per_line * lines)
+
+    def call_deepseek_for_translation_single(self, text: str, max_chars: int | None = None) -> str:
         if not (DEEPSEEK_API_KEY or "").strip():
             raise RuntimeError(
                 "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:deepseek_missing_key: "
@@ -276,7 +291,8 @@ class TextTranslator:
             )
 
         language = getattr(self, "target_language", None) or "vi"
-        text_hash = hashlib.md5(f"{language}:{text}".encode()).hexdigest()
+        budget = int(max_chars) if max_chars else 0
+        text_hash = hashlib.md5(f"{language}:{budget}:{text}".encode()).hexdigest()
         
         if text_hash in self.translation_cache:
             cached_result = self.translation_cache[text_hash]
@@ -291,6 +307,11 @@ class TextTranslator:
         from nano_rules import deepseek_image_prompt
 
         prompt = deepseek_image_prompt(text, language)
+        if budget:
+            prompt += (
+                f"\n11. This is a short poster label. Use at most {budget} characters. "
+                "Keep the full meaning in the shortest natural phrase. Do not add a second sentence."
+            )
 
         model = (os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash").strip() or "deepseek-v4-flash"
         payload = {
@@ -537,6 +558,7 @@ class TextTranslator:
 
         processed_blocks = []
         ignore_blocks = []
+        poster_labels = not self.size_laundry_flags(ocr_results or []).is_size_or_laundry
         print(f"  📝 Phân tích {len(decision['blocks'])} khối text để dịch...")
         for block in decision["blocks"]:
             bbox = tuple(int(v) for v in list(block.get("bbox") or [])[:4])
@@ -562,10 +584,12 @@ class TextTranslator:
                 ignore_blocks.append((text, bbox))
                 continue
             text = re.sub(r"(\d)\*(?=[\u4e00-\u9fff])", r"\1%", text)
-            translated_text = self.call_deepseek_for_translation_single(text)
+            budget = self._poster_label_char_budget(text, bbox) if poster_labels else None
+            translated_text = self.call_deepseek_for_translation_single(text, max_chars=budget)
             if self.contains_chinese(translated_text):
                 translated_text = self.call_deepseek_for_translation_single(
-                    "Phiên âm và dịch hết, cấm chữ Hán: " + text
+                    "Phiên âm và dịch hết, cấm chữ Hán: " + text,
+                    max_chars=budget,
                 )
             if self.contains_chinese(translated_text):
                 translated_text = self.remove_chinese_characters(translated_text)

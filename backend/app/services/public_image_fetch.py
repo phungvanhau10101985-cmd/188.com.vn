@@ -80,20 +80,22 @@ def sniff_image_mime(raw: bytes, content_type: str = "") -> Optional[str]:
     return None
 
 
-def _read_limited(resp: requests.Response) -> bytes:
+def _read_limited(resp: requests.Response, max_bytes: int = MAX_IMAGE_BYTES) -> bytes:
     chunks: list[bytes] = []
     total = 0
     for chunk in resp.iter_content(64 * 1024):
         if not chunk:
             continue
         total += len(chunk)
-        if total > MAX_IMAGE_BYTES:
-            raise PublicImageFetchError("Ảnh vượt quá ~5 MB")
+        if total > max_bytes:
+            if max_bytes <= MAX_IMAGE_BYTES:
+                raise PublicImageFetchError("Ảnh vượt quá ~5 MB")
+            raise PublicImageFetchError(f"Ảnh lớn hơn {max_bytes // (1024 * 1024)}MB")
         chunks.append(chunk)
     return b"".join(chunks)
 
 
-def fetch_public_image_bytes(url: str) -> Tuple[bytes, str]:
+def fetch_public_image_bytes(url: str, *, max_bytes: int = MAX_IMAGE_BYTES) -> Tuple[bytes, str]:
     current = assert_public_http_url(url)
     headers = {"User-Agent": FETCH_UA, "Accept": "image/*,*/*;q=0.8"}
     for _ in range(MAX_REDIRECTS + 1):
@@ -118,7 +120,7 @@ def fetch_public_image_bytes(url: str) -> Tuple[bytes, str]:
         if resp.status_code != 200:
             raise PublicImageFetchError(f"Máy chủ ảnh trả lỗi ({resp.status_code}).")
 
-        raw = _read_limited(resp)
+        raw = _read_limited(resp, max_bytes)
         if not raw:
             raise PublicImageFetchError("Link không trỏ tới file ảnh (JPEG, PNG, …).")
         mime = sniff_image_mime(raw, resp.headers.get("content-type") or "")

@@ -1507,6 +1507,68 @@ class ImageProcessor:
         roi[art == 0] = color
         img[y1:y2, x1:x2] = roi
 
+    def _pale_label(self, img: np.ndarray, bbox) -> bool:
+        """Chữ tối trên thẻ sáng, kể cả thẻ mờ phủ lên ảnh. Khác cả con thiên nga hay sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        bh = y2 - y1
+        if bh < 8 or bh > h_img * 0.14 or x2 - x1 < 8:
+            return False
+        gray = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
+        if float(np.mean(gray >= 150)) < 0.48:
+            return False
+        ink = float(np.mean(gray < 110))
+        return 0.012 <= ink <= 0.42
+
+    def _pale_span_right(self, img: np.ndarray, x: int, y1: int, y2: int) -> int:
+        """Đi sang phải khi hàng còn nền sáng, dừng trước ảnh có vân."""
+        h_img, w_img = img.shape[:2]
+        y1 = max(0, min(h_img - 1, int(y1)))
+        y2 = max(y1 + 1, min(h_img, int(y2)))
+        cursor = max(0, min(w_img - 1, int(x)))
+        while cursor < w_img - 2:
+            nxt = min(w_img, cursor + 8)
+            if self._region_is_color_photo(img, (cursor, y1, nxt, y2)):
+                break
+            col = cv2.cvtColor(img[y1:y2, cursor:nxt], cv2.COLOR_BGR2GRAY)
+            if col.size == 0 or float(np.mean(col >= 145)) < 0.55:
+                break
+            cursor = nxt
+        return cursor
+
+    def _contain_lines(self, text: str, width: int, height: int, font, lines: List[str], pad: int, max_size: int):
+        """Co cỡ chữ tới khi mỗi dòng nằm trọn trong ô, không cắt giữa tiếng."""
+        probe = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+
+        def overflows(chosen, rows) -> bool:
+            if not chosen or not rows:
+                return True
+            inner = max(8, int(width) - int(pad) * 2)
+            for line in rows:
+                box = probe.textbbox((0, 0), line, font=chosen)
+                if box[2] - box[0] > inner + 1:
+                    return True
+            return False
+
+        if not overflows(font, lines):
+            return font, lines, pad
+        start = int(getattr(font, "size", max_size) or max_size) - 1
+        for size in range(min(int(max_size), start), 7, -1):
+            font, lines, pad = self._fit_cell_lines(text, width, height, min_size=8, max_size=size)
+            if not overflows(font, lines):
+                return font, lines, pad
+        return font, lines, pad
+
+    def _caption_box_covers_subject(self, img: np.ndarray, bbox) -> bool:
+        """Ô chữ phủ gần cả sản phẩm thì không đè. Nhãn hẹp trên vải/thẻ vẫn được dịch."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        bw, bh = max(0, x2 - x1), max(0, y2 - y1)
+        area = max(1, w_img * h_img)
+        wide = bw >= w_img * 0.34
+        tall = bh >= h_img * 0.18
+        return (bw * bh) / area >= 0.12 or (wide and tall)
+
     def _region_is_product_photo(self, img: np.ndarray, bbox) -> bool:
         """Vùng da/kim loại có màu và dải xám giữa — khác nền trắng đen của bảng size."""
         if self._region_is_color_photo(img, bbox):
@@ -1956,6 +2018,10 @@ class ImageProcessor:
             erase_boxes = [box for box in erase_boxes if box[2] > box[0] and box[3] > box[1]]
             sky = bool(erase_boxes) and self._smooth_field_light_caption(image_data, tuple(map(int, src)))
             protected = bool(erase_boxes) and any(is_protected(img, box) for box in erase_boxes)
+            if protect_color_only and protected and not sky:
+                src_box = tuple(map(int, item.get("src_bbox") or erase_boxes[0]))
+                if self._pale_label(image_data, src_box) or not self._caption_box_covers_subject(image_data, src_box):
+                    protected = False
             if not erase_boxes or (protected and not sky):
                 safe_boxes[id(item)] = None
                 continue
@@ -2039,6 +2105,7 @@ class ImageProcessor:
                     )
                     if not font:
                         continue
+                    font, lines, pad = self._contain_lines(text, slot_w, slot_h, font, lines, pad, max_font)
                     need_w, need_h = self._line_block_size(font, lines, pad)
                     need_w = min(need_w, slot_w)
                     x1 = max(0, min(sx1, w_img - need_w))
@@ -2066,6 +2133,14 @@ class ImageProcessor:
                     left = max(sx1, min(left, sx1))
                     cap = sx1 + max(sx2 - sx1, min(w_img // 3, max(120, (sx2 - sx1) * 2)))
                     right = min(right, w_img - 4, cap)
+                    row_mid = (sy1 + sy2) / 2
+                    has_right = any(
+                        ox1 >= sx2 - 2
+                        and abs(((oy1 + oy2) / 2) - row_mid) <= max(src_h, oy2 - oy1)
+                        for ox1, oy1, ox2, oy2 in others
+                    )
+                    if not has_right and (item.get("_paper_text") or self._pale_label(image_data, src)):
+                        right = max(right, min(w_img - 4, self._pale_span_right(image_data, sx2, sy1, sy2)))
                     panel_box = None
                 slot_w = max(24, right - left)
                 next_y = None
@@ -2082,9 +2157,17 @@ class ImageProcessor:
                     limit_y = min(limit_y, next_y - 2)
                 if panel_box is not None:
                     limit_y = min(limit_y, panel_box[3] - 2)
-                if not item.get("_flat") and not item.get("_paper_text"):
+                texture_caption = (
+                    not item.get("_flat")
+                    and not item.get("_paper_text")
+                    and self._region_is_color_photo(image_data, src)
+                    and not self._caption_box_covers_subject(image_data, src)
+                )
+                if not item.get("_flat") and not item.get("_paper_text") and not texture_caption:
                     limit_y = sy2 + 2
                 slot_h = max(src_h, limit_y - sy1)
+                origin_x = max(int(left), sx1) if item.get("_flat") else sx1
+                fit_w = max(24, int(right) - origin_x)
                 max_font = max(12, min(max(src_h, 14), slot_h))
                 if item.get("_paper") or item.get("_paper_text"):
                     heights = sorted(
@@ -2094,7 +2177,7 @@ class ImageProcessor:
                     max_font = min(max_font, max(12, int(typical * 1.25)))
                 font, lines, pad = self._fit_cell_lines(
                     text,
-                    slot_w,
+                    fit_w,
                     slot_h,
                     min_size=11,
                     max_size=max_font,
@@ -2102,23 +2185,28 @@ class ImageProcessor:
                 if item.get("_flat") and font and len(lines) > 1:
                     one_font, one_lines, one_pad = self._fit_cell_lines(
                         text,
-                        slot_w,
+                        fit_w,
                         max(src_h, 12),
                         min_size=16,
                         max_size=max_font,
                     )
                     if one_font and len(one_lines) == 1:
                         font, lines, pad = one_font, one_lines, one_pad
+                font, lines, pad = self._contain_lines(text, fit_w, slot_h, font, lines, pad, max_font)
                 if not font:
                     continue
                 need_w, need_h = self._line_block_size(font, lines, pad)
-                need_w = min(need_w, slot_w, max(8, int(right) - sx1))
+                need_w = min(need_w, fit_w, max(8, int(right) - origin_x))
                 if item.get("_flat"):
                     x1 = max(left, sx1)
                     y1 = sy1
                 else:
                     x1 = sx1
                     y1 = sy1
+                if texture_caption:
+                    ink = item.get("ink_rgb") or (255, 255, 255)
+                    if self._luminance(tuple(ink)) >= 150:
+                        item["_halo"] = (0, 0, 0)
                 x1 = max(0, min(x1, w_img - 4))
                 y1 = max(0, min(y1, h_img - 2))
                 x2 = min(w_img, int(right), x1 + need_w)

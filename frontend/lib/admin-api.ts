@@ -200,6 +200,19 @@ function messageForAdminFileDownloadFailure(status: number, statusText: string, 
     : `Tải file thất bại (HTTP ${status}${statusText ? ` ${statusText}` : ''})`;
 }
 
+function filenameFromImageUrl(url: string, mime: string): string {
+  const ext =
+    mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/gif' ? 'gif' : 'jpg';
+  try {
+    const last = decodeURIComponent(new URL(url).pathname.split('/').pop() || '');
+    const clean = last.replace(/[^\w.\- ]+/g, '').slice(0, 80);
+    if (/\.(jpe?g|png|webp|gif)$/i.test(clean)) return clean;
+  } catch {
+    /* giữ tên mặc định */
+  }
+  return `anh-tu-link.${ext}`;
+}
+
 /** Chuỗi thân thiện từ FastAPI detail (chuỗi | mảng validation | object { message }) */
 function formatFastApiDetail(detail: unknown): string {
   if (detail == null || detail === '') return '';
@@ -1861,6 +1874,30 @@ export const adminProductAPI = {
     fetchAdmin<{ items: AdminImageLocalizationTrial[]; ttl_days: number }>('/image-localization/trials', {
       timeoutMs: 60_000,
     }),
+
+  fetchImageLocalizationTrialSource: async (url: string) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const trimmed = url.trim();
+    const res = await fetch(`${getApiBaseUrl()}/image-localization/trials/fetch-url`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...ngrokFetchHeaders(),
+        ...adminStepUpHeaders(),
+      },
+      body: JSON.stringify({ url: trimmed }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || `Lỗi ${res.status}`);
+    }
+    const blob = await res.blob();
+    const mime = (blob.type || 'image/jpeg').split(';')[0].trim().toLowerCase();
+    if (!mime.startsWith('image/')) throw new Error('Link không trỏ tới file ảnh.');
+    return new File([blob], filenameFromImageUrl(trimmed, mime), { type: mime });
+  },
 
   runImageLocalizationTrial: async (file: File, payload: {
     language: string;

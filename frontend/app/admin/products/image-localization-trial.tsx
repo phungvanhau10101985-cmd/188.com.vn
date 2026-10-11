@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   adminProductAPI,
   type AdminImageLocalizationTrial,
 } from '@/lib/admin-api';
+import { looksLikeHttpUrl } from '@/lib/image-from-url';
 
 type TrialMode = 'local_only' | 'api' | 'openai';
 type Slide = { trialId: string; kind: 'source' | 'result'; title: string; caption: string };
@@ -38,6 +39,20 @@ function expiresLabel(iso: string): string {
   const days = Math.max(0, Math.ceil(ms / 86_400_000));
   if (days <= 1) return 'Xóa trong hôm nay';
   return `Xóa sau ${days} ngày`;
+}
+
+function clipboardImageFile(data: DataTransfer | null): File | null {
+  if (!data) return null;
+  for (const item of Array.from(data.items)) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) return file;
+    }
+  }
+  for (const file of Array.from(data.files)) {
+    if (file.type.startsWith('image/')) return file;
+  }
+  return null;
 }
 
 function whenLabel(iso: string): string {
@@ -122,8 +137,16 @@ export function ImageLocalizationTrial({
   const [error, setError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
+  const [linkBusy, setLinkBusy] = useState(false);
   const [slides, setSlides] = useState<Slide[] | null>(null);
   const [slideIndex, setSlideIndex] = useState(0);
+  const urlInputRef = useRef<HTMLInputElement>(null);
+  const imageUrlRef = useRef('');
+  const lastFetchedUrlRef = useRef<string | null>(null);
+  const inflightUrlRef = useRef<string | null>(null);
+  const fileFromUrlRef = useRef(false);
+  imageUrlRef.current = imageUrl;
 
   const load = useCallback(async () => {
     try {
@@ -154,12 +177,96 @@ export function ImageLocalizationTrial({
 
   const pickFile = (next: File | null) => {
     if (!next) return;
-    if (!next.type.startsWith('image/')) {
-      setError('Chỉ nhận file ảnh.');
+    let chosen = next;
+    if (!chosen.type.startsWith('image/')) {
+      const ext = chosen.name.split('.').pop()?.toLowerCase() || '';
+      const mime =
+        ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : '';
+      if (!mime) {
+        setError('Chỉ nhận file ảnh.');
+        return;
+      }
+      chosen = new File([chosen], chosen.name, { type: mime });
+    }
+    if (chosen.size > 12 * 1024 * 1024) {
+      setError('Ảnh lớn hơn 12MB.');
       return;
     }
     setError(null);
-    setFile(next);
+    setFile(chosen);
+  };
+
+  const pickLocalFile = (next: File | null) => {
+    fileFromUrlRef.current = false;
+    lastFetchedUrlRef.current = null;
+    inflightUrlRef.current = null;
+    setLinkBusy(false);
+    setImageUrl('');
+    pickFile(next);
+  };
+
+  const applyUrl = useCallback(async (rawInput: string) => {
+    const raw = rawInput.trim();
+    if (!raw) return;
+    if (!looksLikeHttpUrl(raw)) {
+      setError('Link cần bắt đầu bằng http:// hoặc https://');
+      return;
+    }
+    if (raw === lastFetchedUrlRef.current || inflightUrlRef.current === raw) return;
+    inflightUrlRef.current = raw;
+    setLinkBusy(true);
+    setError(null);
+    try {
+      const next = await adminProductAPI.fetchImageLocalizationTrialSource(raw);
+      if (inflightUrlRef.current !== raw || imageUrlRef.current.trim() !== raw) return;
+      lastFetchedUrlRef.current = raw;
+      fileFromUrlRef.current = true;
+      setFile(next);
+    } catch (err) {
+      if (inflightUrlRef.current === raw) {
+        lastFetchedUrlRef.current = null;
+        setError(err instanceof Error ? err.message : 'Không tải được ảnh từ link');
+      }
+    } finally {
+      if (inflightUrlRef.current === raw) {
+        inflightUrlRef.current = null;
+        setLinkBusy(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const raw = imageUrl.trim();
+    if (!raw) {
+      if (fileFromUrlRef.current) {
+        fileFromUrlRef.current = false;
+        lastFetchedUrlRef.current = null;
+        setFile(null);
+      }
+      return;
+    }
+    if (!looksLikeHttpUrl(raw) || raw === lastFetchedUrlRef.current) return;
+    const id = window.setTimeout(() => {
+      void applyUrl(raw);
+    }, 450);
+    return () => window.clearTimeout(id);
+  }, [imageUrl, applyUrl]);
+
+  const onZonePaste = (event: React.ClipboardEvent) => {
+    const image = clipboardImageFile(event.clipboardData);
+    if (image) {
+      event.preventDefault();
+      event.stopPropagation();
+      pickLocalFile(image);
+      return;
+    }
+    if (event.target === urlInputRef.current) return;
+    const text = event.clipboardData.getData('text/plain').trim();
+    if (looksLikeHttpUrl(text)) {
+      event.preventDefault();
+      setError(null);
+      setImageUrl(text);
+    }
   };
 
   const run = async () => {
@@ -176,6 +283,9 @@ export function ImageLocalizationTrial({
       });
       setItems((prev) => [created, ...prev.filter((row) => row.id !== created.id)]);
       setSelectedId(created.id);
+      fileFromUrlRef.current = false;
+      lastFetchedUrlRef.current = null;
+      setImageUrl('');
       setFile(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không chạy được ảnh thử');
@@ -248,7 +358,22 @@ export function ImageLocalizationTrial({
         onDrop={(event) => {
           event.preventDefault();
           setDragOver(false);
-          pickFile(event.dataTransfer.files?.[0] || null);
+          const dropped = event.dataTransfer.files?.[0] || null;
+          if (dropped) {
+            pickLocalFile(dropped);
+            return;
+          }
+          const text = event.dataTransfer.getData('text/plain').trim();
+          if (looksLikeHttpUrl(text)) {
+            setError(null);
+            setImageUrl(text);
+          }
+        }}
+        onPaste={onZonePaste}
+        onMouseDown={(event) => {
+          const target = event.target as HTMLElement;
+          if (target.closest('button, label, input, a')) return;
+          urlInputRef.current?.focus();
         }}
       >
         <div className="flex flex-wrap items-center gap-3">
@@ -259,23 +384,55 @@ export function ImageLocalizationTrial({
               Ảnh
             </div>
           )}
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <p className="truncate text-sm text-gray-800">{file ? file.name : 'Kéo ảnh vào đây hoặc chọn file'}</p>
-            <p className="mt-0.5 text-xs text-gray-500">JPG, PNG, WebP. Tối đa 12MB.</p>
+            <p className="mt-0.5 text-xs text-gray-500">
+              {linkBusy ? 'Đang tải ảnh từ link…' : 'JPG, PNG, WebP. Tối đa 12MB.'}
+            </p>
           </div>
+          <input
+            ref={urlInputRef}
+            type="url"
+            inputMode="url"
+            autoComplete="off"
+            placeholder="Dán link ảnh hoặc Ctrl+V"
+            aria-label="Dán link ảnh hoặc Ctrl+V"
+            value={imageUrl}
+            disabled={busy || linkBusy}
+            onChange={(event) => {
+              setImageUrl(event.target.value);
+              setError(null);
+            }}
+            onPaste={(event) => {
+              const image = clipboardImageFile(event.clipboardData);
+              if (!image) return;
+              event.preventDefault();
+              event.stopPropagation();
+              pickLocalFile(image);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              void applyUrl(imageUrl);
+            }}
+            className="min-w-[16rem] flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-200 disabled:opacity-60"
+          />
           <label className="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
             Chọn ảnh
             <input
               type="file"
               accept="image/jpeg,image/png,image/webp"
               className="sr-only"
-              onChange={(event) => pickFile(event.target.files?.[0] || null)}
+              onChange={(event) => {
+                pickLocalFile(event.target.files?.[0] || null);
+                event.target.value = '';
+              }}
             />
           </label>
           <button
             type="button"
             onClick={() => void run()}
-            disabled={!file || busy}
+            disabled={!file || busy || linkBusy}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60"
           >
             {busy ? 'Đang chạy…' : 'Chạy ảnh này'}
