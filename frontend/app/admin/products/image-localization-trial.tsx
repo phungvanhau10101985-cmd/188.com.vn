@@ -8,6 +8,7 @@ import {
 import { looksLikeHttpUrl } from '@/lib/image-from-url';
 
 type TrialMode = 'local_only' | 'api' | 'openai';
+type TrialProductKind = 'apparel' | 'other';
 type Slide = { trialId: string; kind: 'source' | 'result'; title: string; caption: string };
 
 const ENGINE_LABEL: Record<string, string> = {
@@ -31,6 +32,12 @@ function modeLabel(mode: TrialMode): string {
   if (mode === 'api') return 'Gemini';
   if (mode === 'openai') return 'GPT Image';
   return 'Local · DeepSeek + vẽ';
+}
+
+function productKindLabel(kind: string | undefined): string {
+  if (kind === 'apparel') return 'Thời trang';
+  if (kind === 'other') return 'Không phải thời trang';
+  return '';
 }
 
 function expiresLabel(iso: string): string {
@@ -138,6 +145,7 @@ export function ImageLocalizationTrial({
   const [listError, setListError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
+  const [productKind, setProductKind] = useState<TrialProductKind>('other');
   const [linkBusy, setLinkBusy] = useState(false);
   const [slides, setSlides] = useState<Slide[] | null>(null);
   const [slideIndex, setSlideIndex] = useState(0);
@@ -277,6 +285,7 @@ export function ImageLocalizationTrial({
       const created = await adminProductAPI.runImageLocalizationTrial(file, {
         language,
         mode,
+        product_kind: productKind,
         openai_image_model: openaiModel.trim() || undefined,
         openai_image_quality: openaiQuality.trim() || undefined,
         openai_image_size: openaiSize.trim() || undefined,
@@ -299,6 +308,12 @@ export function ImageLocalizationTrial({
       await adminProductAPI.deleteImageLocalizationTrial(trialId);
       setItems((prev) => prev.filter((row) => row.id !== trialId));
       setSelectedId((current) => (current === trialId ? null : current));
+      setSlides((current) => {
+        if (!current?.some((slide) => slide.trialId === trialId)) return current;
+        const next = current.filter((slide) => slide.trialId !== trialId);
+        return next.length ? next : null;
+      });
+      if (slides?.some((slide) => slide.trialId === trialId)) setSlideIndex(0);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không xóa được ảnh thử');
     }
@@ -331,9 +346,9 @@ export function ImageLocalizationTrial({
             Cổng thử một ảnh
           </h3>
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-gray-600">
-            Đưa một ảnh rồi chạy. Job chỉ xử lý ảnh đó, theo chế độ đang chọn phía trên:{' '}
-            <span className="font-medium text-gray-800">{modeLabel(mode)}</span>. Ảnh gốc và ảnh kết quả lưu trong thư
-            mục thử và tự xóa sau 7 ngày.
+            Cùng pipeline với job thật, chế độ{' '}
+            <span className="font-medium text-gray-800">{modeLabel(mode)}</span>. Thời trang thì bảng size và hướng dẫn
+            giặt đi nhánh quần áo. Loại khác đi nhánh còn lại. Ảnh thử tự xóa sau 7 ngày.
           </p>
         </div>
         <button
@@ -345,6 +360,34 @@ export function ImageLocalizationTrial({
           Mở hết ảnh thử
         </button>
       </div>
+
+      <fieldset className="mt-3">
+        <legend className="text-xs font-medium text-gray-700">Loại sản phẩm</legend>
+        <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-2">
+          <label className="inline-flex items-center gap-2 text-sm text-gray-800">
+            <input
+              type="radio"
+              name="trial-product-kind"
+              value="apparel"
+              checked={productKind === 'apparel'}
+              onChange={() => setProductKind('apparel')}
+              disabled={busy}
+            />
+            Thời trang
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-800">
+            <input
+              type="radio"
+              name="trial-product-kind"
+              value="other"
+              checked={productKind === 'other'}
+              onChange={() => setProductKind('other')}
+              disabled={busy}
+            />
+            Không phải thời trang
+          </label>
+        </div>
+      </fieldset>
 
       <div
         className={`mt-3 rounded-xl border border-dashed px-4 py-4 ${
@@ -465,26 +508,56 @@ export function ImageLocalizationTrial({
           <p className="mt-2 text-sm text-gray-500">Chưa có ảnh thử.</p>
         ) : (
           <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-            {items.map((trial) => (
-              <button
-                key={trial.id}
-                type="button"
-                onClick={() => setSelectedId(trial.id)}
-                className={`w-28 shrink-0 overflow-hidden rounded-lg border bg-white text-left ${
-                  trial.id === selectedId ? 'border-violet-500 ring-2 ring-violet-200' : 'border-gray-200'
-                }`}
-              >
-                <div className="h-20 bg-gray-100">
-                  <TrialThumb trial={trial} />
+            {items.map((trial) => {
+              const pair = slidesFor([trial]);
+              return (
+                <div
+                  key={trial.id}
+                  className={`w-32 shrink-0 overflow-hidden rounded-lg border bg-white text-left ${
+                    trial.id === selectedId ? 'border-violet-500 ring-2 ring-violet-200' : 'border-gray-200'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(trial.id)}
+                    className="block w-full text-left"
+                    aria-label={`Chọn ${trial.filename || 'ảnh thử'}`}
+                  >
+                    <div className="h-20 bg-gray-100">
+                      <TrialThumb trial={trial} />
+                    </div>
+                    <div className="space-y-1 px-2 pt-1.5">
+                      <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${engineClass(trial.engine)}`}>
+                        {ENGINE_LABEL[trial.engine] || trial.engine}
+                      </span>
+                      <p className="truncate text-[11px] text-gray-600">{trial.filename}</p>
+                    </div>
+                  </button>
+                  <div className="flex gap-1 px-2 pb-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedId(trial.id);
+                        openSlides(pair);
+                      }}
+                      disabled={pair.length === 0}
+                      className="flex-1 rounded border border-gray-300 bg-white py-0.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+                      aria-label={`Xem ${trial.filename || 'ảnh thử'}`}
+                    >
+                      Xem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void remove(trial.id)}
+                      className="flex-1 rounded border border-red-200 bg-white py-0.5 text-[10px] font-medium text-red-700 hover:bg-red-50"
+                      aria-label={`Xóa ${trial.filename || 'ảnh thử'}`}
+                    >
+                      Xóa
+                    </button>
+                  </div>
                 </div>
-                <div className="space-y-1 px-2 py-1.5">
-                  <span className={`inline-flex rounded px-1.5 py-0.5 text-[10px] font-semibold ${engineClass(trial.engine)}`}>
-                    {ENGINE_LABEL[trial.engine] || trial.engine}
-                  </span>
-                  <p className="truncate text-[11px] text-gray-600">{trial.filename}</p>
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -520,6 +593,11 @@ function TrialDetail({
           <span className={`rounded px-2 py-0.5 text-xs font-semibold ${engineClass(trial.engine)}`}>
             {ENGINE_LABEL[trial.engine] || trial.engine}
           </span>
+          {productKindLabel(trial.product_kind) ? (
+            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+              {productKindLabel(trial.product_kind)}
+            </span>
+          ) : null}
           <span className="text-xs text-gray-600">{trial.model || 'Không gọi model ảnh'}</span>
           <span className="text-xs text-gray-400">{whenLabel(trial.created_at)}</span>
           <span className="text-xs text-gray-400">{expiresLabel(trial.expires_at)}</span>

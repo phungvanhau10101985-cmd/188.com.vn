@@ -53,6 +53,12 @@ logger = logging.getLogger(__name__)
 
 
 
+def _image_edit_uses_gemini(engine: Optional[str], gemini_mode: str) -> bool:
+    """Chuỗi gpt và openai đều là GPT Image. Các chế độ còn lại gọi Gemini."""
+    mode = (engine or gemini_mode or "api").strip().lower()
+    return mode not in {"openai", "gpt"}
+
+
 def resolve_allows_ai_image_models(
     product: Optional[Product],
     *,
@@ -1702,8 +1708,7 @@ class LegacyImageLocalizationPipeline:
         quality: Optional[str] = None,
         engine: Optional[str] = None,
     ) -> Tuple[bytes, str]:
-        mode = (engine or getattr(self, "gemini_mode", "api") or "api").strip().lower()
-        use_gemini = mode != "openai"
+        use_gemini = _image_edit_uses_gemini(engine, getattr(self, "gemini_mode", "api") or "api")
         try:
             if use_gemini:
                 adapter = getattr(self, "gemini", None)
@@ -1799,8 +1804,7 @@ class LegacyImageLocalizationPipeline:
                     message = f"{message} + DeepSeek vẽ chữ Trung còn sót"
                 else:
                     message = f"{message} + còn chữ Trung, giữ ảnh GPT"
-            mode = (engine or getattr(self, "gemini_mode", "api") or "api").strip().lower()
-            use_gemini = mode != "openai"
+            use_gemini = _image_edit_uses_gemini(engine, getattr(self, "gemini_mode", "api") or "api")
             return PartProcessOutcome(
                 "processed",
                 current,

@@ -4,10 +4,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.core.config import settings
+from types import SimpleNamespace
+
 from app.services.image_localization_trial import (
     describe_trial_engine,
     list_trials,
+    normalize_trial_product_kind,
     purge_expired_trials,
+    run_trial,
     trial_file_path,
 )
 
@@ -41,6 +45,47 @@ def test_expired_trial_folder_is_removed(tmp_path, monkeypatch):
     assert trial_file_path(fresh_id, "source") == fresh / "source.jpg"
     assert trial_file_path("../" + fresh_id, "source") is None
     assert trial_file_path(fresh_id, "result") is None
+
+
+def test_trial_product_kind_selects_the_same_branch_as_the_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "IMAGE_LOCALIZATION_RUNTIME_DIR", str(tmp_path))
+    captured = {}
+
+    class FakePipe:
+        def __init__(self, _language, _gemini, **kwargs):
+            captured["apparel_sheets"] = kwargs.get("apparel_sheets")
+            captured["allows_ai"] = kwargs.get("allows_ai_image_models")
+            captured["gemini_mode"] = kwargs.get("gemini_mode")
+
+        def process_single_image(self, _product, _url, _image_bytes, _filename):
+            return SimpleNamespace(status="kept", message="giữ", detail={}, consult_ocr_texts=[])
+
+    class FakeGemini:
+        def __init__(self, *_args, **_kwargs):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("app.services.image_localization_trial.LegacyImageLocalizationPipeline", FakePipe)
+    monkeypatch.setattr("app.services.image_localization_trial.GeminiApiImageAdapter", FakeGemini)
+
+    apparel = run_trial(b"sheet", "sheet.png", mode="local_only", product_kind="apparel")
+    assert captured == {"apparel_sheets": True, "allows_ai": False, "gemini_mode": "api"}
+    assert apparel["product_kind"] == "apparel"
+    assert "nhánh thời trang" in apparel["logs"][0]
+
+    other = run_trial(b"poster", "poster.png", mode="local_only", product_kind="other")
+    assert captured["apparel_sheets"] is False
+    assert other["product_kind"] == "other"
+    assert "không phải thời trang" in other["logs"][0]
+
+    try:
+        normalize_trial_product_kind("giay")
+    except ValueError as exc:
+        assert "apparel" in str(exc)
+    else:
+        raise AssertionError("loại lạ phải bị từ chối")
 
 
 def test_engine_label_follows_the_image_route():

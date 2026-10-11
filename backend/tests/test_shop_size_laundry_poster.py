@@ -1,5 +1,7 @@
 """Kho ảnh size/giặt và nhánh GPT Image."""
 
+from types import SimpleNamespace
+
 from app.services.image_localization_service import (
     ImageLocalizationFatalDependencyError,
     ImageLocalizationGptStopError,
@@ -201,6 +203,27 @@ def _apparel_pipe():
     pipe.image_classifier.classify_image = lambda *_a, **_k: {"type": "local", "details": {}}
     pipe._library_poster_outcome = lambda *_a, **_k: None
     return pipe
+
+
+def test_engine_gpt_calls_openai_image_not_gemini():
+    pipe = LegacyImageLocalizationPipeline.__new__(LegacyImageLocalizationPipeline)
+    pipe.gemini_mode = "api"
+    called = []
+
+    def gemini(*_args, **_kwargs):
+        called.append("gemini")
+        return "processed", b"g", "gemini"
+
+    def gpt(*_args, **_kwargs):
+        called.append("gpt")
+        return "processed", b"o", "gpt"
+
+    pipe.gemini = SimpleNamespace(process=gemini)
+    pipe.size_laundry_gpt = SimpleNamespace(process=gpt)
+    output, message = pipe._gpt_edit(b"img", "a.jpg", "u", "prompt", engine="gpt")
+    assert called == ["gpt"]
+    assert output == b"o"
+    assert message == "gpt"
 
 
 def test_apparel_size_and_laundry_use_gpt_when_job_is_local():

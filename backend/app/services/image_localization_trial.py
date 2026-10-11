@@ -29,6 +29,7 @@ TRIAL_TTL = timedelta(days=7)
 MAX_TRIAL_BYTES = 12 * 1024 * 1024
 _TRIAL_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 _MODES = {"local_only", "api", "openai"}
+_PRODUCT_KINDS = {"apparel", "other"}
 
 
 def _write_jpeg_copy(path: Path, image_bytes: bytes) -> None:
@@ -122,6 +123,7 @@ def _public_trial(meta: Dict[str, Any]) -> Dict[str, Any]:
         "expires_at": meta.get("expires_at") or "",
         "language": meta.get("language") or "vi",
         "mode": meta.get("mode") or "local_only",
+        "product_kind": meta.get("product_kind") or "other",
         "status": meta.get("status") or "error",
         "engine": meta.get("engine") or "local",
         "model": meta.get("model") or "",
@@ -237,12 +239,21 @@ def _append_stdout(sink: List[str], chunk: str) -> None:
             sink.append(text[:500])
 
 
+def normalize_trial_product_kind(value: str) -> str:
+    """apparel = nhánh thời trang của job. other = nhánh sản phẩm còn lại."""
+    kind = (value or "other").strip().lower()
+    if kind not in _PRODUCT_KINDS:
+        raise ValueError("Loại sản phẩm phải là apparel hoặc other")
+    return kind
+
+
 def run_trial(
     image_bytes: bytes,
     filename: str,
     *,
     language: str = "vi",
     mode: str = "local_only",
+    product_kind: str = "other",
     openai_image_model: str = "",
     openai_image_quality: str = "",
     openai_image_size: str = "",
@@ -255,13 +266,18 @@ def run_trial(
     chosen = (mode or "local_only").strip().lower()
     if chosen not in _MODES:
         raise ValueError("Chế độ phải là local_only, api hoặc openai")
+    kind = normalize_trial_product_kind(product_kind)
+    apparel = kind == "apparel"
     safe_name = Path(filename or "image.jpg").name[:180] or "image.jpg"
     trial_id = uuid.uuid4().hex
     folder = trials_root() / trial_id
     folder.mkdir(parents=True, exist_ok=False)
     source_path = folder / "source.jpg"
     _write_jpeg_copy(source_path, image_bytes)
-    logs: List[str] = [f"Nhận ảnh {safe_name} ({len(image_bytes)} byte), chế độ {chosen}."]
+    branch = "thời trang" if apparel else "không phải thời trang"
+    logs: List[str] = [
+        f"Nhận ảnh {safe_name} ({len(image_bytes)} byte), chế độ {chosen}, nhánh {branch}."
+    ]
     started = time.perf_counter()
     allow_ai = chosen != "local_only"
     gemini_mode = "openai" if chosen == "openai" else "api"
@@ -291,6 +307,7 @@ def run_trial(
             gemini,
             allows_ai_image_models=allow_ai,
             gemini_mode=gemini_mode,
+            apparel_sheets=apparel,
             dry_run=True,
         )
 
@@ -349,6 +366,7 @@ def run_trial(
         "expires_at": _iso(created + TRIAL_TTL),
         "language": language or "vi",
         "mode": chosen,
+        "product_kind": kind,
         "status": result_status,
         "engine": described["engine"],
         "model": described["model"],

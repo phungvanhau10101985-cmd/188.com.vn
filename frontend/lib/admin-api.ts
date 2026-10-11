@@ -857,6 +857,7 @@ export interface AdminImageLocalizationTrial {
   expires_at: string;
   language: string;
   mode: 'local_only' | 'api' | 'openai' | string;
+  product_kind?: 'apparel' | 'other' | string;
   status: string;
   engine: 'local' | 'gemini' | 'gpt' | 'kept' | 'deleted' | 'error' | string;
   model: string;
@@ -1902,6 +1903,7 @@ export const adminProductAPI = {
   runImageLocalizationTrial: async (file: File, payload: {
     language: string;
     mode: 'local_only' | 'api' | 'openai';
+    product_kind: 'apparel' | 'other';
     openai_image_model?: string;
     openai_image_quality?: string;
     openai_image_size?: string;
@@ -1912,6 +1914,7 @@ export const adminProductAPI = {
     form.append('file', file);
     form.append('language', payload.language);
     form.append('mode', payload.mode);
+    form.append('product_kind', payload.product_kind);
     if (payload.openai_image_model) form.append('openai_image_model', payload.openai_image_model);
     if (payload.openai_image_quality) form.append('openai_image_quality', payload.openai_image_quality);
     if (payload.openai_image_size) form.append('openai_image_size', payload.openai_image_size);
