@@ -137,15 +137,15 @@ def select_localization_engine(
 ) -> str:
     """delete | keep | local | ai.
 
-    Mặc định vẽ local. Model ảnh chỉ khi job bật AI và ảnh là bảng kích thước
-    hoặc hướng dẫn giặt tẩy. gemini_mode chọn Gemini (api) hay GPT (openai).
+    Radio local vẽ mọi ảnh. Radio Gemini hoặc GPT gửi mọi ảnh còn lại qua model đó.
+    Ảnh size và giặt của quần áo trên radio local đi GPT ở nhánh apparel, không qua hàm này.
     """
-    del gemini_mode, force_ai
+    del gemini_mode, force_ai, has_size_or_laundry
     if classification == "delete":
         return "delete"
     if classification == "keep":
         return "keep"
-    if allows_ai and has_size_or_laundry:
+    if allows_ai:
         return "ai"
     return "local"
 

@@ -223,9 +223,9 @@ class StartImageLocalizationPayload(BaseModel):
     allow_ai_image_models: Optional[bool] = Field(
         None,
         description=(
-            "false hoặc null = mọi ảnh OCR + DeepSeek + vẽ local, kể cả bảng size và hướng dẫn giặt. "
-            "true = chỉ bảng kích thước và hướng dẫn giặt tẩy gọi model ảnh. "
-            "gemini_mode=api dùng Gemini; gemini_mode=openai dùng GPT Image. Ảnh khác vẫn vẽ local."
+            "false hoặc null = mọi ảnh OCR + DeepSeek + vẽ local. "
+            "Quần áo vẫn gửi bảng size và hướng dẫn giặt qua GPT rồi lưu kho theo shop Trung Quốc và danh mục cấp 2. "
+            "true = mọi ảnh gọi model ảnh. gemini_mode=api dùng Gemini; gemini_mode=openai dùng GPT Image."
         ),
     )
 def _resolve_gemini_mode(raw: Optional[str]) -> str:

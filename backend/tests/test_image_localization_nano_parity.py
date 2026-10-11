@@ -54,7 +54,7 @@ def test_url_size_suffix_under_350_is_junk():
     assert merger.is_junk_thumbnail("https://img.alicdn.com/bao/a_sum.jpg") is True
 
 
-def test_only_size_or_laundry_uses_ai_and_only_when_enabled():
+def test_ai_job_sends_every_image_and_local_job_does_not():
     assert (
         select_localization_engine(
             classification="gemini",
@@ -88,7 +88,7 @@ def test_only_size_or_laundry_uses_ai_and_only_when_enabled():
             allows_ai=True,
             has_size_or_laundry=False,
         )
-        == "local"
+        == "ai"
     )
     assert (
         select_localization_engine(

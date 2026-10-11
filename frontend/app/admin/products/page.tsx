@@ -758,11 +758,8 @@ export default function AdminProductsPage() {
     return Boolean(geminiAuthStatus.openai?.ready);
   }, [geminiAuthStatus, imageLocalizationGeminiMode]);
 
-  /** GPT Image: backend cho phép + phải chọn ít nhất 1 SP trong bảng. Hàng loạt chỉ DeepSeek + vẽ local. */
-  const imageLocAiImageModesSelectable =
-    selectedProductIds.size > 0 &&
-    geminiAuthStatus != null &&
-    (geminiAuthStatus.ai_image_jobs_allowed ?? true);
+  /** Tạm khóa radio Gemini/GPT. Job dùng DeepSeek + vẽ local. */
+  const imageLocAiImageModesSelectable = false;
 
   const openaiImageModelPresetSelectValue = useMemo(() => {
     const id = resolveOpenaiImageModelPresetId(imageLocalizationOpenaiModel.trim());
@@ -1578,12 +1575,10 @@ export default function AdminProductsPage() {
   };
 
   useEffect(() => {
-    const aiBlocked = geminiAuthStatus?.ai_image_jobs_allowed === false;
-    const noSelection = selectedProductIds.size === 0;
-    if ((aiBlocked || noSelection) && imageLocalizationGeminiMode !== 'local_only') {
+    if (imageLocalizationGeminiMode !== 'local_only') {
       setImageLocalizationGeminiMode('local_only');
     }
-  }, [geminiAuthStatus?.ai_image_jobs_allowed, selectedProductIds.size, imageLocalizationGeminiMode]);
+  }, [imageLocalizationGeminiMode]);
 
   useEffect(() => {
     void loadImageLocalizationSummary();
@@ -3994,8 +3989,8 @@ export default function AdminProductsPage() {
               </>
             ) : (
               <>
-                Mặc định mọi ảnh đi <span className="font-medium">DeepSeek + vẽ local</span>, không gọi Gemini hay GPT.
-                Bật Gemini hoặc GPT thì chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy dùng model đó. Ảnh khác vẫn vẽ local.
+                <span className="font-medium">DeepSeek + vẽ local</span>: mọi ảnh vẽ local. Quần áo thì ảnh size và ảnh giặt đi GPT, lưu kho theo shop Trung Quốc và danh mục cấp 2. Sản phẩm sau trùng hai khóa đó lấy ảnh kho, không xử lý lại hai ảnh này.
+                Gemini và GPT Image đang tắt.
               </>
             )}
           </p>
@@ -4016,10 +4011,10 @@ export default function AdminProductsPage() {
                         disabled={localizationStartBusy}
                       />
                       <span>
-                        <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
+                        <span className="font-medium">DeepSeek + vẽ local</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>.
-                          Bảng kích thước và hướng dẫn giặt cũng vẽ local. Dưới 350px xóa.
+                          Mọi ảnh: OCR → DeepSeek → vẽ local.
+                          Quần áo: ảnh size và ảnh giặt đi GPT, lưu kho. Sản phẩm sau cùng shop Trung Quốc và cùng danh mục cấp 2 dùng ảnh kho, không xử lý lại.
                         </span>
                       </span>
                     </label>
@@ -4036,15 +4031,9 @@ export default function AdminProductsPage() {
                       />
                       <span>
                         <span className="font-medium">Gemini (GEMINI_API_KEY)</span>
-                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
-                        ) : selectedProductIds.size === 0 ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
-                        ) : null}
+                        <span className="ml-1 text-xs font-normal text-gray-400">(chưa dùng)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          Chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy đi Gemini
-                          {geminiAuthStatus?.image_model ? ` (${geminiAuthStatus.image_model})` : ''}. Ảnh khác vẫn vẽ local.
-                          Quần áo: xóa người mẫu và ảnh sản phẩm, giữ bảng và chữ.
+                          Tạm tắt. Mọi ảnh vẫn đi DeepSeek + vẽ local.
                         </span>
                       </span>
                     </label>
@@ -4061,14 +4050,9 @@ export default function AdminProductsPage() {
                       />
                       <span>
                         <span className="font-medium">OpenAI GPT Image (OPENAI_API_KEY)</span>
-                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
-                        ) : selectedProductIds.size === 0 ? (
-                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
-                        ) : null}
+                        <span className="ml-1 text-xs font-normal text-gray-400">(chưa dùng)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          Chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy đi GPT Image, mặc định{' '}
-                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}. Ảnh khác vẫn vẽ local.
+                          Tạm tắt. Mọi ảnh vẫn đi DeepSeek + vẽ local.
                         </span>
                       </span>
                     </label>

@@ -28,11 +28,11 @@ def test_shop_and_cat2_key():
     assert category_level2_slug_from_full_slug("thoi-trang-nu") == ""
 
 
-def test_ai_off_is_local_and_ai_on_only_sends_size_or_laundry():
+def test_ai_off_is_local_and_ai_on_sends_every_image():
     assert select_localization_engine(classification="gemini", allows_ai=False, has_size_or_laundry=True) == "local"
     assert select_localization_engine(classification="local", allows_ai=False) == "local"
     assert select_localization_engine(classification="gemini", allows_ai=True, has_size_or_laundry=True) == "ai"
-    assert select_localization_engine(classification="local", allows_ai=True, has_size_or_laundry=False) == "local"
+    assert select_localization_engine(classification="local", allows_ai=True, has_size_or_laundry=False) == "ai"
     assert select_localization_engine(classification="delete", allows_ai=True) == "delete"
     assert select_localization_engine(classification="keep", allows_ai=False) == "keep"
 
@@ -203,18 +203,43 @@ def _apparel_pipe():
     return pipe
 
 
-def test_apparel_size_sheet_stays_local_when_ai_is_off():
+def test_apparel_size_and_laundry_use_gpt_when_job_is_local():
     pipe = _apparel_pipe()
-    pipe._process_local = lambda *_a, **_k: ("processed", "drawn", "local")
-    pipe._run_gpt_image = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("không gọi model ảnh"))
-    out = pipe._process_image_part(
+    pipe.gemini_mode = "api"
+    seen = {}
+
+    def gpt(*_a, **kwargs):
+        seen["strip"] = kwargs.get("strip_photos")
+        seen["engine"] = kwargs.get("engine")
+        return PartProcessOutcome("processed", "out", "ok", detail={"gpt_image": True})
+
+    pipe._run_gpt_image = gpt
+    pipe._process_local = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("không vẽ local"))
+    size = pipe._process_image_part(
         {"image_data": "orig", "ocr_results": _SIZE_BLOCKS, "original_url": "u", "filename": "a.jpg"},
         None,
         None,
     )
-    assert out.action == "processed"
-    assert out.image == "drawn"
-    assert out.message == "local"
+    assert seen["strip"] is True
+    assert seen["engine"] == "gpt"
+    assert size.detail["apparel_sheet"] is True
+    assert size.detail["sheet_kinds"] == ["size"]
+
+    laundry = pipe._process_image_part(
+        {
+            "image_data": "orig",
+            "ocr_results": [
+                {"text": "洗涤说明", "bbox": [0, 0, 80, 16]},
+                {"text": "手洗", "bbox": [0, 20, 40, 32]},
+            ],
+            "original_url": "u",
+            "filename": "b.jpg",
+        },
+        None,
+        None,
+    )
+    assert seen["engine"] == "gpt"
+    assert laundry.detail["sheet_kinds"] == ["laundry"]
 
 
 def test_apparel_size_sheet_goes_to_model_when_ai_is_on():
@@ -225,6 +250,7 @@ def test_apparel_size_sheet_goes_to_model_when_ai_is_on():
 
     def gpt(*_a, **kwargs):
         seen["strip"] = kwargs.get("strip_photos")
+        seen["engine"] = kwargs.get("engine")
         return PartProcessOutcome("processed", "out", "ok", detail={"gpt_image": True})
 
     pipe._run_gpt_image = gpt
@@ -234,6 +260,7 @@ def test_apparel_size_sheet_goes_to_model_when_ai_is_on():
         None,
     )
     assert seen["strip"] is True
+    assert seen["engine"] is None
     assert out.detail["apparel_sheet"] is True
     assert out.detail["sheet_kinds"] == ["size"]
 
@@ -351,6 +378,34 @@ def test_ink_bleed_regenerates_twice_then_stops(monkeypatch):
     else:
         raise AssertionError("phải dừng sau 2 lần tạo lại")
     assert calls["n"] == 3
+
+
+def test_look_photo_goes_to_the_selected_model_when_ai_is_on():
+    pipe = _apparel_pipe()
+    pipe.allows_ai_image_models = True
+    pipe.gemini_mode = "api"
+    seen = {}
+
+    def gpt(*_a, **kwargs):
+        seen["strip"] = kwargs.get("strip_photos")
+        seen["engine"] = kwargs.get("engine")
+        return PartProcessOutcome("processed", "out", "ok", detail={"gemini_image": True})
+
+    pipe._run_gpt_image = gpt
+    pipe._process_local = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("không vẽ local"))
+    out = pipe._process_image_part(
+        {
+            "image_data": "orig",
+            "ocr_results": [{"text": "新款女装", "bbox": [0, 0, 40, 12]}],
+            "original_url": "u",
+            "filename": "a.jpg",
+        },
+        None,
+        None,
+    )
+    assert seen.get("strip") is not True
+    assert seen.get("engine") is None
+    assert out.action == "processed"
 
 
 def test_apparel_look_photo_stays_local_when_job_is_local():

@@ -61,7 +61,8 @@ def resolve_allows_ai_image_models(
     """
     Cho phép gọi Gemini/GPT Image trong job hiện tại.
 
-    - job_override=False: cấm hoàn toàn (chỉ OCR + DeepSeek + vẽ local), bất kể explicit_only.
+    - job_override=False: ảnh thường chỉ OCR + DeepSeek + vẽ local.
+      Quần áo vẫn gửi bảng size và hướng dẫn giặt qua GPT, rồi lưu kho theo shop Trung Quốc và danh mục cấp 2.
     - job_override=True: bật AI ảnh cho batch (vẫn cần key/cookie tùy chế độ).
     - job_override=None: mặc định tắt. Chỉ bật khi SP có product_info.image_localization.allow_ai_models.
       Ảnh thường vẫn vẽ local. Model ảnh chỉ nhận bảng kích thước và hướng dẫn giặt tẩy.
@@ -1617,32 +1618,41 @@ class LegacyImageLocalizationPipeline:
         kinds = image_loc_sheet_kinds(norm_ocr)
         apparel_kinds = apparel_sheet_kinds(norm_ocr) if self.apparel_sheets else []
         if apparel_kinds and cls.get("type") != "keep":
-            library = self._library_poster_outcome(apparel_kinds, apparel=True)
-            if library is not None:
-                return library
-            if self.allows_ai_image_models:
-                detail = {"sheet_kinds": apparel_kinds, "apparel_sheet": True}
-                logger.info(
-                    "%s bảng size/giặt quần áo: %s",
-                    "Gemini" if getattr(self, "gemini_mode", "api") != "openai" else "GPT Image",
-                    (data.get("original_url") or "")[:120],
+            # Radio local: lấy kho nếu đã có, chưa có thì GPT rồi lưu. Radio AI xử lý ảnh này như mọi ảnh khác.
+            if not self.allows_ai_image_models:
+                library = self._library_poster_outcome(apparel_kinds, apparel=True)
+                if library is not None:
+                    return library
+            force_gpt = not self.allows_ai_image_models
+            detail = {"sheet_kinds": apparel_kinds, "apparel_sheet": True}
+            logger.info(
+                "%s bảng size/giặt quần áo: %s",
+                "GPT Image" if force_gpt or getattr(self, "gemini_mode", "api") == "openai" else "Gemini",
+                (data.get("original_url") or "")[:120],
+            )
+            try:
+                outcome = self._run_gpt_image(
+                    data,
+                    translator,
+                    img_proc,
+                    image,
+                    filename,
+                    norm_ocr,
+                    strip_photos=True,
+                    engine="gpt" if force_gpt else None,
                 )
-                try:
-                    outcome = self._run_gpt_image(
-                        data, translator, img_proc, image, filename, norm_ocr, strip_photos=True,
-                    )
-                except ImageLocalizationGptStopError as exc:
-                    if "Mực loang vẫn còn sau" in str(exc):
-                        raise
-                    logger.warning("Model ảnh bảng size/giặt quần áo lỗi, giữ ảnh gốc: %s", exc)
-                    return PartProcessOutcome(
-                        "kept",
-                        image,
-                        f"Model ảnh bảng size/giặt lỗi, giữ ảnh gốc: {exc}",
-                    )
-                outcome.detail = {**(outcome.detail or {}), **detail}
-                return outcome
-        if cls.get("type") != "keep":
+            except ImageLocalizationGptStopError as exc:
+                if "Mực loang vẫn còn sau" in str(exc):
+                    raise
+                logger.warning("Model ảnh bảng size/giặt quần áo lỗi, giữ ảnh gốc: %s", exc)
+                return PartProcessOutcome(
+                    "kept",
+                    image,
+                    f"Model ảnh bảng size/giặt lỗi, giữ ảnh gốc: {exc}",
+                )
+            outcome.detail = {**(outcome.detail or {}), **detail}
+            return outcome
+        if cls.get("type") != "keep" and not self.allows_ai_image_models:
             library = self._library_poster_outcome(kinds)
             if library is not None:
                 return library
@@ -1657,7 +1667,7 @@ class LegacyImageLocalizationPipeline:
         detail = {"sheet_kinds": kinds}
         if route == "ai":
             logger.info(
-                "%s ảnh size/giặt: %s",
+                "%s mọi ảnh: %s",
                 "Gemini" if getattr(self, "gemini_mode", "api") != "openai" else "GPT Image",
                 (data.get("original_url") or "")[:120],
             )
@@ -1690,8 +1700,10 @@ class LegacyImageLocalizationPipeline:
         url: str,
         prompt: str,
         quality: Optional[str] = None,
+        engine: Optional[str] = None,
     ) -> Tuple[bytes, str]:
-        use_gemini = (getattr(self, "gemini_mode", "api") or "api") != "openai"
+        mode = (engine or getattr(self, "gemini_mode", "api") or "api").strip().lower()
+        use_gemini = mode != "openai"
         try:
             if use_gemini:
                 adapter = getattr(self, "gemini", None)
@@ -1729,6 +1741,7 @@ class LegacyImageLocalizationPipeline:
         filename: str,
         blocks: List[Dict[str, Any]],
         strip_photos: bool = False,
+        engine: Optional[str] = None,
     ) -> PartProcessOutcome:
         """GPT Image, rồi hậu kiểm. Chữ Trung còn sót thì vẽ local và nhận ảnh. Chỉ mực loang mới tạo lại."""
         url = data.get("original_url") or ""
@@ -1745,7 +1758,7 @@ class LegacyImageLocalizationPipeline:
         )
         original_bytes = _encode_image_bytes(image, filename)
         output_bytes, message = self._gpt_edit(
-            original_bytes, filename, url, prompt, quality=sheet_quality
+            original_bytes, filename, url, prompt, quality=sheet_quality, engine=engine
         )
         current = self._decode_image_bytes(output_bytes)
         regen = 0
@@ -1761,7 +1774,7 @@ class LegacyImageLocalizationPipeline:
                         f"Mực loang vẫn còn sau {regen_limit} lần tạo lại — {problem}"
                     )
                 again_bytes, again_msg = self._gpt_edit(
-                    original_bytes, filename, url, prompt, quality=sheet_quality
+                    original_bytes, filename, url, prompt, quality=sheet_quality, engine=engine
                 )
                 current = self._decode_image_bytes(again_bytes)
                 message = f"{again_msg} (tạo lại lần {regen} vì mực loang)"
@@ -1786,7 +1799,8 @@ class LegacyImageLocalizationPipeline:
                     message = f"{message} + DeepSeek vẽ chữ Trung còn sót"
                 else:
                     message = f"{message} + còn chữ Trung, giữ ảnh GPT"
-            use_gemini = (getattr(self, "gemini_mode", "api") or "api") != "openai"
+            mode = (engine or getattr(self, "gemini_mode", "api") or "api").strip().lower()
+            use_gemini = mode != "openai"
             return PartProcessOutcome(
                 "processed",
                 current,
