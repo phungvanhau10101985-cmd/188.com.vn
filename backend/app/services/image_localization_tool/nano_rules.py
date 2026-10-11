@@ -135,15 +135,19 @@ def select_localization_engine(
     has_size_or_laundry: bool = False,
     force_ai: bool = False,
 ) -> str:
-    """delete | keep | local | ai. Bật AI thì mọi ảnh còn lại đi GPT; tắt AI thì vẽ local."""
-    del gemini_mode, has_size_or_laundry, force_ai
+    """delete | keep | local | ai.
+
+    Mặc định vẽ local. Model ảnh chỉ khi job bật AI và ảnh là bảng kích thước
+    hoặc hướng dẫn giặt tẩy. gemini_mode chọn Gemini (api) hay GPT (openai).
+    """
+    del gemini_mode, force_ai
     if classification == "delete":
         return "delete"
     if classification == "keep":
         return "keep"
-    if not allows_ai:
-        return "local"
-    return "ai"
+    if allows_ai and has_size_or_laundry:
+        return "ai"
+    return "local"
 
 
 def image_loc_gpt_verify_attempts() -> int:

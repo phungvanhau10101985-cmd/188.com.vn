@@ -28,11 +28,11 @@ def test_shop_and_cat2_key():
     assert category_level2_slug_from_full_slug("thoi-trang-nu") == ""
 
 
-def test_ai_off_draws_local_and_ai_on_sends_every_image_to_gpt():
+def test_ai_off_is_local_and_ai_on_only_sends_size_or_laundry():
     assert select_localization_engine(classification="gemini", allows_ai=False, has_size_or_laundry=True) == "local"
     assert select_localization_engine(classification="local", allows_ai=False) == "local"
     assert select_localization_engine(classification="gemini", allows_ai=True, has_size_or_laundry=True) == "ai"
-    assert select_localization_engine(classification="local", allows_ai=True, has_size_or_laundry=False) == "ai"
+    assert select_localization_engine(classification="local", allows_ai=True, has_size_or_laundry=False) == "local"
     assert select_localization_engine(classification="delete", allows_ai=True) == "delete"
     assert select_localization_engine(classification="keep", allows_ai=False) == "keep"
 
@@ -84,6 +84,39 @@ def test_apparel_sheet_prompt_removes_model_and_product_photo():
     assert "Keep the size table" in prompt
     assert "Do not invent measurements" in prompt
     assert "Erase only the fashion model photograph" not in prompt
+
+
+def test_enabled_size_sheet_uses_gemini_unless_mode_is_openai():
+    pipe = LegacyImageLocalizationPipeline.__new__(LegacyImageLocalizationPipeline)
+    pipe.gemini_mode = "api"
+    seen = {}
+
+    class _Gem:
+        def process(self, _image_bytes, _filename, _url, prompt=None):
+            seen["via"] = "gemini"
+            seen["prompt"] = prompt
+            return "processed", b"gem", "Gemini đã xử lý ảnh"
+
+    pipe.gemini = _Gem()
+    out, msg = pipe._gpt_edit(b"in", "a.jpg", "u", "prompt-vi")
+    assert out == b"gem"
+    assert seen == {"via": "gemini", "prompt": "prompt-vi"}
+    assert msg == "Gemini đã xử lý ảnh"
+
+    pipe.gemini_mode = "openai"
+
+    class _Gpt:
+        def process(self, _image_bytes, _filename, _url, prompt=None, quality=None):
+            seen["via"] = "gpt"
+            seen["quality"] = quality
+            return "processed", b"gpt", "OpenAI GPT Image đã xử lý ảnh"
+
+    pipe.size_laundry_gpt = _Gpt()
+    out, msg = pipe._gpt_edit(b"in", "a.jpg", "u", "prompt-vi", quality="medium")
+    assert out == b"gpt"
+    assert seen["via"] == "gpt"
+    assert seen["quality"] == "medium"
+    assert msg == "OpenAI GPT Image đã xử lý ảnh"
 
 
 def test_size_laundry_gpt_quality_is_medium_and_other_images_stay_high():
@@ -170,8 +203,24 @@ def _apparel_pipe():
     return pipe
 
 
-def test_apparel_size_sheet_goes_to_gpt_when_job_is_local():
+def test_apparel_size_sheet_stays_local_when_ai_is_off():
     pipe = _apparel_pipe()
+    pipe._process_local = lambda *_a, **_k: ("processed", "drawn", "local")
+    pipe._run_gpt_image = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("không gọi model ảnh"))
+    out = pipe._process_image_part(
+        {"image_data": "orig", "ocr_results": _SIZE_BLOCKS, "original_url": "u", "filename": "a.jpg"},
+        None,
+        None,
+    )
+    assert out.action == "processed"
+    assert out.image == "drawn"
+    assert out.message == "local"
+
+
+def test_apparel_size_sheet_goes_to_model_when_ai_is_on():
+    pipe = _apparel_pipe()
+    pipe.allows_ai_image_models = True
+    pipe.gemini_mode = "openai"
     seen = {}
 
     def gpt(*_a, **kwargs):
@@ -191,6 +240,8 @@ def test_apparel_size_sheet_goes_to_gpt_when_job_is_local():
 
 def test_apparel_size_gpt_failure_keeps_the_original():
     pipe = _apparel_pipe()
+    pipe.allows_ai_image_models = True
+    pipe.gemini_mode = "openai"
 
     def gpt(*_a, **_k):
         raise ImageLocalizationGptStopError("Thiếu OPENAI_API_KEY")
@@ -207,6 +258,8 @@ def test_apparel_size_gpt_failure_keeps_the_original():
 
 def test_ink_bleed_after_two_regens_stops_the_apparel_job():
     pipe = _apparel_pipe()
+    pipe.allows_ai_image_models = True
+    pipe.gemini_mode = "openai"
 
     def gpt(*_a, **_k):
         raise ImageLocalizationGptStopError("Mực loang vẫn còn sau 2 lần tạo lại — mực loang")

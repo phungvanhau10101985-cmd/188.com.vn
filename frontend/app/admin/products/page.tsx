@@ -29,6 +29,7 @@ import {
 import { bulkDeleteAdminProducts } from '@/lib/admin-product-delete';
 import { getApiBaseUrl, getCatalogFeedApiBaseUrl, isNonPublicCatalogFeedBase, ngrokFetchHeaders } from '@/lib/api-base';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { ImageLocalizationTrial } from '@/app/admin/products/image-localization-trial';
 import { ImportDraftExcelCompare } from '@/components/admin/ImportDraftExcelCompare';
 import { ImportExcelReportDownload } from '@/components/admin/ImportExcelReportDownload';
 import {
@@ -688,7 +689,7 @@ export default function AdminProductsPage() {
   const [importBatchDeleting, setImportBatchDeleting] = useState(false);
   const [imageLocalizationLanguage, setImageLocalizationLanguage] = useState('vi');
   const [imageLocalizationGeminiMode, setImageLocalizationGeminiMode] = useState<
-    'openai' | 'local_only'
+    'api' | 'openai' | 'local_only'
   >('local_only');
   const [imageLocalizationOpenaiModel, setImageLocalizationOpenaiModel] = useState('');
   const [imageLocalizationOpenaiQuality, setImageLocalizationOpenaiQuality] = useState('high');
@@ -753,6 +754,7 @@ export default function AdminProductsPage() {
   const imageLocalizationGeminiReady = useMemo(() => {
     if (imageLocalizationGeminiMode === 'local_only') return true;
     if (!geminiAuthStatus) return false;
+    if (imageLocalizationGeminiMode === 'api') return Boolean(geminiAuthStatus.api?.ready);
     return Boolean(geminiAuthStatus.openai?.ready);
   }, [geminiAuthStatus, imageLocalizationGeminiMode]);
 
@@ -1369,9 +1371,9 @@ export default function AdminProductsPage() {
 
   const handleStartImageLocalization = async () => {
     setImageLocalizationError(null);
-    const isAiImageMode = imageLocalizationGeminiMode === 'openai';
+    const isAiImageMode = imageLocalizationGeminiMode !== 'local_only';
     if (isAiImageMode && selectedProductIds.size === 0) {
-      const msg = 'GPT Image chỉ chạy khi đã chọn ít nhất một sản phẩm trong bảng.';
+      const msg = 'Gemini/GPT chỉ chạy khi đã chọn ít nhất một sản phẩm trong bảng.';
       setImageLocalizationError(msg);
       showToast('err', msg, 8000);
       return;
@@ -1388,8 +1390,8 @@ export default function AdminProductsPage() {
         language: imageLocalizationLanguage,
         force: imageLocalizationForce,
         product_ids: productIds,
-        gemini_mode: 'openai',
-        allow_ai_image_models: imageLocalizationGeminiMode === 'openai',
+        gemini_mode: imageLocalizationGeminiMode === 'local_only' ? 'api' : imageLocalizationGeminiMode,
+        allow_ai_image_models: imageLocalizationGeminiMode !== 'local_only',
         ...(imageLocalizationGeminiMode === 'openai' && {
           openai_image_model: imageLocalizationOpenaiModel.trim() || undefined,
           openai_image_quality: imageLocalizationOpenaiQuality.trim() || undefined,
@@ -3992,8 +3994,8 @@ export default function AdminProductsPage() {
               </>
             ) : (
               <>
-                Tắt AI: ảnh thường đi <span className="font-medium">DeepSeek + vẽ local</span>. Quần áo vẫn gửi bảng size và hướng dẫn giặt cho GPT.
-                Bật GPT: mọi ảnh còn lại đi GPT Image. Bảng size quần áo xóa người mẫu và ảnh sản phẩm, giữ bảng và chữ.
+                Mặc định mọi ảnh đi <span className="font-medium">DeepSeek + vẽ local</span>, không gọi Gemini hay GPT.
+                Bật Gemini hoặc GPT thì chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy dùng model đó. Ảnh khác vẫn vẽ local.
               </>
             )}
           </p>
@@ -4017,7 +4019,32 @@ export default function AdminProductsPage() {
                         <span className="font-medium">DeepSeek + vẽ local (không AI ảnh Gemini/GPT)</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
                           OCR (Vision) → <span className="font-medium">DeepSeek</span> dịch → <span className="font-medium">vẽ local</span>.
-                          Quần áo: bảng size và hướng dẫn giặt từ 350px vẫn gửi GPT Image 2 chất lượng medium, xóa người mẫu và ảnh sản phẩm, lưu kho theo shop và danh mục cấp 2. Dưới 350px xóa.
+                          Bảng kích thước và hướng dẫn giặt cũng vẽ local. Dưới 350px xóa.
+                        </span>
+                      </span>
+                    </label>
+                    <label
+                      className={`flex items-start gap-2 ${imageLocAiImageModesSelectable ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}
+                    >
+                      <input
+                        type="radio"
+                        name="imageLocalizationGeminiMode"
+                        className="mt-1"
+                        checked={imageLocalizationGeminiMode === 'api'}
+                        onChange={() => setImageLocalizationGeminiMode('api')}
+                        disabled={localizationStartBusy || !imageLocAiImageModesSelectable}
+                      />
+                      <span>
+                        <span className="font-medium">Gemini (GEMINI_API_KEY)</span>
+                        {geminiAuthStatus?.ai_image_jobs_allowed === false ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(tạm tắt)</span>
+                        ) : selectedProductIds.size === 0 ? (
+                          <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
+                        ) : null}
+                        <span className="mt-0.5 block text-xs text-gray-500">
+                          Chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy đi Gemini
+                          {geminiAuthStatus?.image_model ? ` (${geminiAuthStatus.image_model})` : ''}. Ảnh khác vẫn vẽ local.
+                          Quần áo: xóa người mẫu và ảnh sản phẩm, giữ bảng và chữ.
                         </span>
                       </span>
                     </label>
@@ -4040,8 +4067,8 @@ export default function AdminProductsPage() {
                           <span className="ml-1 text-xs font-normal text-gray-400">(chọn SP trong bảng)</span>
                         ) : null}
                         <span className="mt-0.5 block text-xs text-gray-500">
-                          Mọi ảnh còn chữ Trung đi GPT Image, mặc định{' '}
-                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}, chất lượng high. Bảng size và hướng dẫn giặt dùng chất lượng medium.
+                          Chỉ ảnh bảng kích thước và ảnh hướng dẫn giặt tẩy đi GPT Image, mặc định{' '}
+                          {geminiAuthStatus?.openai_image_model || 'gpt-image-2'}. Ảnh khác vẫn vẽ local.
                         </span>
                       </span>
                     </label>
@@ -4567,6 +4594,13 @@ export default function AdminProductsPage() {
               </div>
             ) : null}
           </div>
+          <ImageLocalizationTrial
+            mode={imageLocalizationGeminiMode}
+            language={imageLocalizationLanguage}
+            openaiModel={imageLocalizationOpenaiModel}
+            openaiQuality={imageLocalizationOpenaiQuality}
+            openaiSize={imageLocalizationOpenaiSize}
+          />
         </div>
 
         {/* Toolbar: tìm kiếm & thao tác — ngay trên danh sách sản phẩm */}

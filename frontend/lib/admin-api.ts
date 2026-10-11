@@ -837,6 +837,24 @@ export interface AdminImageLocalizationJob {
   }>;
 }
 
+export interface AdminImageLocalizationTrial {
+  id: string;
+  filename: string;
+  created_at: string;
+  expires_at: string;
+  language: string;
+  mode: 'local_only' | 'api' | 'openai' | string;
+  status: string;
+  engine: 'local' | 'gemini' | 'gpt' | 'kept' | 'deleted' | 'error' | string;
+  model: string;
+  message: string;
+  elapsed_ms: number;
+  logs: string[];
+  detail?: Record<string, unknown>;
+  ocr_lines?: string[];
+  files: { source: boolean; result: boolean };
+}
+
 export interface AdminImageLocalizationSummary {
   pending: number;
   localized: number;
@@ -1837,6 +1855,56 @@ export const adminProductAPI = {
         method: 'DELETE',
         timeoutMs: 60_000,
       },
+    ),
+
+  listImageLocalizationTrials: () =>
+    fetchAdmin<{ items: AdminImageLocalizationTrial[]; ttl_days: number }>('/image-localization/trials', {
+      timeoutMs: 60_000,
+    }),
+
+  runImageLocalizationTrial: async (file: File, payload: {
+    language: string;
+    mode: 'local_only' | 'api' | 'openai';
+    openai_image_model?: string;
+    openai_image_quality?: string;
+    openai_image_size?: string;
+  }) => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const form = new FormData();
+    form.append('file', file);
+    form.append('language', payload.language);
+    form.append('mode', payload.mode);
+    if (payload.openai_image_model) form.append('openai_image_model', payload.openai_image_model);
+    if (payload.openai_image_quality) form.append('openai_image_quality', payload.openai_image_quality);
+    if (payload.openai_image_size) form.append('openai_image_size', payload.openai_image_size);
+    const res = await fetch(`${getApiBaseUrl()}/image-localization/trials`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders(), ...adminStepUpHeaders() },
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(formatFastApiDetail((err as { detail?: unknown }).detail) || `Lỗi ${res.status}`);
+    }
+    return res.json() as Promise<AdminImageLocalizationTrial>;
+  },
+
+  fetchImageLocalizationTrialFile: async (trialId: string, kind: 'source' | 'result') => {
+    const token = getAdminToken();
+    if (!token) throw new Error('Chưa đăng nhập admin');
+    const res = await fetch(
+      `${getApiBaseUrl()}/image-localization/trials/${encodeURIComponent(trialId)}/file/${kind}`,
+      { headers: { Authorization: `Bearer ${token}`, ...ngrokFetchHeaders() } },
+    );
+    if (!res.ok) throw new Error('Không tải được ảnh thử');
+    return res.blob();
+  },
+
+  deleteImageLocalizationTrial: (trialId: string) =>
+    fetchAdmin<{ deleted: boolean; id: string }>(
+      `/image-localization/trials/${encodeURIComponent(trialId)}`,
+      { method: 'DELETE', timeoutMs: 60_000 },
     ),
 
   importExcel: async (file: File, overwrite = false) => {

@@ -5,7 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -222,11 +223,9 @@ class StartImageLocalizationPayload(BaseModel):
     allow_ai_image_models: Optional[bool] = Field(
         None,
         description=(
-            "false = ảnh thường chỉ OCR + DeepSeek + vẽ local, bất kể IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY. "
-            "Bảng size và hướng dẫn giặt của quần áo từ 350px vẫn gửi GPT. "
-            "true = luôn cho phép gọi AI ảnh khi pipeline cần. "
-            "null = mặc định: nếu explicit_only bật thì chỉ AI khi SP có product_info.image_localization.allow_ai_models; "
-            "nếu explicit_only tắt thì cho phép AI như cũ."
+            "false hoặc null = mọi ảnh OCR + DeepSeek + vẽ local, kể cả bảng size và hướng dẫn giặt. "
+            "true = chỉ bảng kích thước và hướng dẫn giặt tẩy gọi model ảnh. "
+            "gemini_mode=api dùng Gemini; gemini_mode=openai dùng GPT Image. Ảnh khác vẫn vẽ local."
         ),
     )
 def _resolve_gemini_mode(raw: Optional[str]) -> str:
@@ -1396,4 +1395,76 @@ def product_image_localization_report(
     if not p:
         raise HTTPException(status_code=404, detail="Không tìm thấy sản phẩm")
     return build_image_localization_report(p)
+
+
+@router.get("/trials")
+def list_image_localization_trials(
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services.image_localization_trial import list_trials
+
+    return {"items": list_trials(), "ttl_days": 7}
+
+
+@router.post("/trials")
+def create_image_localization_trial(
+    file: UploadFile = File(...),
+    language: str = Form("vi"),
+    mode: str = Form("local_only"),
+    openai_image_model: str = Form(""),
+    openai_image_quality: str = Form(""),
+    openai_image_size: str = Form(""),
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services.image_localization_trial import MAX_TRIAL_BYTES, run_trial
+
+    raw = file.file.read(MAX_TRIAL_BYTES + 1)
+    if len(raw) > MAX_TRIAL_BYTES:
+        raise HTTPException(status_code=413, detail="Ảnh lớn hơn 12MB")
+    if not raw:
+        raise HTTPException(status_code=400, detail="Ảnh trống")
+    chosen = (mode or "local_only").strip().lower()
+    if chosen != "local_only" and not bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED", False)):
+        raise HTTPException(
+            status_code=400,
+            detail="Server đang tắt Gemini/GPT. Chọn DeepSeek + vẽ local, hoặc bật IMAGE_LOCALIZATION_AI_IMAGE_JOBS_ALLOWED.",
+        )
+    try:
+        return run_trial(
+            raw,
+            file.filename or "image.jpg",
+            language=language,
+            mode=mode,
+            openai_image_model=openai_image_model,
+            openai_image_quality=openai_image_quality,
+            openai_image_size=openai_image_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/trials/{trial_id}/file/{kind}")
+def image_localization_trial_file(
+    trial_id: str,
+    kind: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services.image_localization_trial import trial_file_path
+
+    path = trial_file_path(trial_id, kind)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Không có file ảnh thử")
+    return FileResponse(path, media_type="image/jpeg", filename=path.name)
+
+
+@router.delete("/trials/{trial_id}")
+def delete_image_localization_trial(
+    trial_id: str,
+    _: AdminUser = Depends(require_module_permission("products")),
+):
+    from app.services.image_localization_trial import delete_trial
+
+    if not delete_trial(trial_id):
+        raise HTTPException(status_code=404, detail="Không tìm thấy ảnh thử")
+    return {"deleted": True, "id": trial_id}
 
