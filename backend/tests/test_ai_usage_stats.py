@@ -112,3 +112,9 @@ def test_report_aggregates_without_touching_database():
     assert build_api_usage_report(Db(), "2026-10-01", "2026-10-02", ensure_table=False, commerce=blocked)["profitVnd"] is None
     assert report["byFeature"][0]["label"] == "SEO danh mục"
     assert report["byModel"][0]["listedPrice"] is True
+    detail = report["detailByFeature"][0]
+    assert detail["key"] == "category-seo"
+    assert detail["models"][0]["key"] == "gemini-2.5-flash"
+    assert detail["models"][0]["promptTokens"] == 1_000_000
+    assert detail["models"][0]["inputCostVnd"] == 7500
+    assert detail["models"][0]["costVnd"] == 7500

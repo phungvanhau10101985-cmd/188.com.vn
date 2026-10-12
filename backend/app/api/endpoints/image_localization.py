@@ -224,7 +224,7 @@ class StartImageLocalizationPayload(BaseModel):
         None,
         description=(
             "false hoặc null = mọi ảnh OCR + DeepSeek + vẽ local. "
-            "Quần áo vẫn gửi bảng size và hướng dẫn giặt qua GPT rồi lưu kho theo shop Trung Quốc và danh mục cấp 2. "
+            "Quần áo vẫn gửi bảng size, hướng dẫn giặt và bảng thông số qua GPT rồi lưu kho theo shop Trung Quốc và danh mục cấp 2. "
             "true = mọi ảnh gọi model ảnh. gemini_mode=api dùng Gemini; gemini_mode=openai dùng GPT Image."
         ),
     )
@@ -1109,7 +1109,7 @@ def check_gemini_auth(
         "ai_image_explicit_only": bool(getattr(settings, "IMAGE_LOCALIZATION_AI_IMAGE_EXPLICIT_ONLY", False)),
         "ai_image_explicit_help": (
             "Bật AI thì mọi ảnh còn lại đi GPT Image. Tắt AI thì ảnh thường DeepSeek vẽ local. "
-            "Quần áo: bảng size và hướng dẫn giặt từ 350px vẫn gửi GPT, dưới 350px xóa."
+            "Quần áo: bảng size, hướng dẫn giặt và bảng thông số từ 350px vẫn gửi GPT, dưới 350px xóa."
         ),
         "gemini_api_image_sizes": ["2K", "4K"],
         "openai_image_qualities": ["high", "auto"],

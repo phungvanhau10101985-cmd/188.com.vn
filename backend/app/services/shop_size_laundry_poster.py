@@ -1,4 +1,4 @@
-"""Kho ảnh size/giặt đã dịch theo shop Trung Quốc + danh mục cấp 2."""
+"""Kho ảnh size, giặt và bảng thông số đã dịch theo shop Trung Quốc + danh mục cấp 2."""
 
 from __future__ import annotations
 
@@ -237,6 +237,12 @@ def _ensure_sheet_kind_columns(db) -> None:
     db.execute(
         text(
             "ALTER TABLE shop_cat2_size_laundry_posters "
+            "ADD COLUMN IF NOT EXISTS params_image_url VARCHAR(800)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE shop_cat2_size_laundry_posters "
             "ADD COLUMN IF NOT EXISTS render_version VARCHAR(40)"
         )
     )
@@ -275,6 +281,7 @@ def lookup_stored_sheets(shop_norm: str, cat2_slug: str, *, render_version: Opti
                 return {}
         size_url = (getattr(row, "size_image_url", None) or "").strip()
         laundry_url = (getattr(row, "laundry_image_url", None) or "").strip()
+        params_url = (getattr(row, "params_image_url", None) or "").strip()
         legacy = (getattr(row, "image_url", None) or "").strip()
         if not size_url and not laundry_url and legacy:
             size_url = laundry_url = legacy
@@ -283,6 +290,8 @@ def lookup_stored_sheets(shop_norm: str, cat2_slug: str, *, render_version: Opti
             stored["size"] = size_url
         if laundry_url:
             stored["laundry"] = laundry_url
+        if params_url:
+            stored["params"] = params_url
         return stored
     except Exception as exc:
         logger.warning("Đọc kho ảnh size/giặt lỗi: %s", exc)
@@ -303,7 +312,7 @@ def save_sheet_kinds(
     shop = (shop_norm or "").strip()
     slug = (cat2_slug or "").strip()
     url = (image_url or "").strip()
-    kind_list = [kind for kind in kinds if kind in ("size", "laundry")]
+    kind_list = [kind for kind in kinds if kind in ("size", "laundry", "params")]
     if not shop or not slug or not url or not kind_list:
         return False
     from app.db.session import SessionLocal
@@ -338,6 +347,8 @@ def save_sheet_kinds(
             row.size_image_url = url[:800]
         if "laundry" in kind_list:
             row.laundry_image_url = url[:800]
+        if "params" in kind_list:
+            row.params_image_url = url[:800]
         if render_version:
             row.render_version = render_version[:40]
         db.commit()

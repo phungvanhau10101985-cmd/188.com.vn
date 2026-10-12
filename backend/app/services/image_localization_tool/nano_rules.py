@@ -96,6 +96,7 @@ _STRIP_PHOTOS = (
     "Also erase product photographs: the garment on a hanger, flat lay, mannequin, and fabric close-ups. "
     "Fill those photo areas with the surrounding plain background. "
     "Keep the size table, centimeter measurements, size labels, product specification text, "
+    "the fit, softness, thickness, and stretch index bars, "
     "laundry icons, and care instruction text. "
     "Replace each Chinese text string with its translation in the same position and size. "
     "Do not keep the original Chinese beside, above, or under the translation. "
@@ -138,7 +139,7 @@ def select_localization_engine(
     """delete | keep | local | ai.
 
     Radio local vẽ mọi ảnh. Radio Gemini hoặc GPT gửi mọi ảnh còn lại qua model đó.
-    Ảnh size và giặt của quần áo trên radio local đi GPT ở nhánh apparel, không qua hàm này.
+    Ảnh size, giặt và bảng thông số của quần áo trên radio local đi GPT ở nhánh apparel, không qua hàm này.
     """
     del gemini_mode, force_ai, has_size_or_laundry
     if classification == "delete":
@@ -299,6 +300,27 @@ def has_laundry_care_context(blocks: Sequence[Any]) -> bool:
     return bool(re.search(r"手洗|机洗|水洗|干洗|漂白|熨烫|烘干|handwash|machinewash|dryclean|bleach|iron|tumbledry", compact))
 
 
+_PRODUCT_PARAM_STEMS = ("版型", "柔软", "厚度", "弹力", "弹性", "厚薄")
+_PRODUCT_PARAM_SCALES = ("紧身", "合体", "宽松", "修身", "超柔", "薄款", "超薄", "无弹", "微弹", "超弹")
+_PRODUCT_PARAM_TITLES = ("商品参数", "产品参数", "productparameters")
+
+
+def has_product_parameter_chart(blocks: Sequence[Any]) -> bool:
+    """Bảng chỉ số dáng / mềm / dày / co giãn. Không tính poster thông số chất liệu thông thường."""
+    rows = _as_blocks(blocks)
+    texts = [row["text"] for row in rows if str(row["text"]).strip()]
+    if not texts:
+        return False
+    compact = _compact_text(texts)
+    stem_hits = sum(1 for stem in _PRODUCT_PARAM_STEMS if stem in compact)
+    scale_hits = sum(1 for scale in _PRODUCT_PARAM_SCALES if scale in compact)
+    has_index = "指数" in compact
+    has_title = any(title in compact for title in _PRODUCT_PARAM_TITLES)
+    if stem_hits >= 3 and scale_hits >= 3:
+        return True
+    return stem_hits >= 2 and scale_hits >= 2 and (has_index or has_title)
+
+
 def is_laundry_instruction_image(blocks: Sequence[Any]) -> bool:
     if has_laundry_care_context(blocks):
         return True
@@ -318,12 +340,14 @@ def image_loc_sheet_kinds(blocks: Sequence[Any]) -> List[str]:
 
 
 def apparel_sheet_kinds(blocks: Sequence[Any]) -> List[str]:
-    """Bảng size hoặc hướng dẫn giặt đủ ngữ cảnh. Một chữ giặt lẻ không tính."""
+    """Bảng size, hướng dẫn giặt, hoặc bảng thông số dáng/mềm/dày/co giãn. Một chữ giặt lẻ không tính."""
     kinds: List[str] = []
     if has_size_table_context(blocks):
         kinds.append("size")
     if has_laundry_care_context(blocks):
         kinds.append("laundry")
+    if has_product_parameter_chart(blocks):
+        kinds.append("params")
     return kinds
 
 

@@ -68,10 +68,10 @@ def resolve_allows_ai_image_models(
     Cho phép gọi Gemini/GPT Image trong job hiện tại.
 
     - job_override=False: ảnh thường chỉ OCR + DeepSeek + vẽ local.
-      Quần áo vẫn gửi bảng size và hướng dẫn giặt qua GPT, rồi lưu kho theo shop Trung Quốc và danh mục cấp 2.
+      Quần áo vẫn gửi bảng size, hướng dẫn giặt và bảng thông số dáng/mềm/dày/co giãn qua GPT, rồi lưu kho theo shop Trung Quốc và danh mục cấp 2.
     - job_override=True: bật AI ảnh cho batch (vẫn cần key/cookie tùy chế độ).
     - job_override=None: mặc định tắt. Chỉ bật khi SP có product_info.image_localization.allow_ai_models.
-      Ảnh thường vẫn vẽ local. Model ảnh chỉ nhận bảng kích thước và hướng dẫn giặt tẩy.
+      Ảnh thường vẫn vẽ local. Model ảnh chỉ nhận bảng kích thước, hướng dẫn giặt tẩy và bảng thông số.
     """
     if job_override is False:
         return False
@@ -1470,7 +1470,7 @@ class LegacyImageLocalizationPipeline:
         return PartProcessOutcome(
             "processed",
             None,
-            "Dùng ảnh size/giặt đã lưu cho cùng shop Trung Quốc và danh mục cấp 2",
+            "Dùng ảnh size/giặt/thông số đã lưu cho cùng shop Trung Quốc và danh mục cấp 2",
             final_url=hit,
             detail={
                 "library_poster": True,
@@ -1632,7 +1632,7 @@ class LegacyImageLocalizationPipeline:
             force_gpt = not self.allows_ai_image_models
             detail = {"sheet_kinds": apparel_kinds, "apparel_sheet": True}
             logger.info(
-                "%s bảng size/giặt quần áo: %s",
+                "%s bảng size/giặt/thông số quần áo: %s",
                 "GPT Image" if force_gpt or getattr(self, "gemini_mode", "api") == "openai" else "Gemini",
                 (data.get("original_url") or "")[:120],
             )
@@ -1650,11 +1650,11 @@ class LegacyImageLocalizationPipeline:
             except ImageLocalizationGptStopError as exc:
                 if "Mực loang vẫn còn sau" in str(exc):
                     raise
-                logger.warning("Model ảnh bảng size/giặt quần áo lỗi, giữ ảnh gốc: %s", exc)
+                logger.warning("Model ảnh bảng size/giặt/thông số quần áo lỗi, giữ ảnh gốc: %s", exc)
                 return PartProcessOutcome(
                     "kept",
                     image,
-                    f"Model ảnh bảng size/giặt lỗi, giữ ảnh gốc: {exc}",
+                    f"Model ảnh bảng size/giặt/thông số lỗi, giữ ảnh gốc: {exc}",
                 )
             outcome.detail = {**(outcome.detail or {}), **detail}
             return outcome

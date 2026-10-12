@@ -347,8 +347,8 @@ export function ImageLocalizationTrial({
           </h3>
           <p className="mt-1 max-w-2xl text-xs leading-relaxed text-gray-600">
             Cùng pipeline với job thật, chế độ{' '}
-            <span className="font-medium text-gray-800">{modeLabel(mode)}</span>. Thời trang thì bảng size và hướng dẫn
-            giặt đi nhánh quần áo. Loại khác đi nhánh còn lại. Ảnh thử tự xóa sau 7 ngày.
+            <span className="font-medium text-gray-800">{modeLabel(mode)}</span>. Thời trang thì bảng size, hướng dẫn
+            giặt và bảng thông số đi nhánh quần áo. Loại khác đi nhánh còn lại. Ảnh thử tự xóa sau 7 ngày.
           </p>
         </div>
         <button

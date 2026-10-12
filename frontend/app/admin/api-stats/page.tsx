@@ -152,7 +152,7 @@ function AdminApiStatsBody() {
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <h1 className="text-xl font-bold text-slate-900">Thống kê chi phí API</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Chọn hôm nay, tuần hoặc tháng. Chi phí model AI và lợi nhuận của kỳ đó hiện ngay bên dưới. Bảng chi tiết và biểu đồ nằm phía dưới.
+        Chọn hôm nay, tuần hoặc tháng. Chi phí model AI và lợi nhuận của kỳ đó hiện ngay bên dưới. Phần chi tiết liệt kê từng chức năng, model, token và số tiền đã quy đổi sang VND.
       </p>
 
       {error ? (
@@ -296,6 +296,8 @@ function AdminApiStatsBody() {
               )}
             />
 
+            <FeatureModelDetail groups={report.detailByFeature ?? []} usdToVnd={report.usdToVnd} />
+
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <header className="border-b border-slate-100 px-4 py-3">
                 <h2 className="text-sm font-semibold text-slate-800">Theo độ phân giải ảnh</h2>
@@ -338,7 +340,9 @@ function AdminApiStatsBody() {
             <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <header className="border-b border-slate-100 px-4 py-3">
                 <h2 className="text-sm font-semibold text-slate-800">Chi tiết gần đây</h2>
-                <p className="mt-0.5 text-xs text-slate-500">100 bản ghi mới nhất. Bấm một dòng để xem chi tiết lượt gọi.</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  100 lượt gọi mới nhất. Mỗi ô token có số tiền VND tương ứng. Bấm một dòng để xem đủ input, output và tổng.
+                </p>
               </header>
               {report.recentLogs.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-slate-500">
@@ -355,7 +359,7 @@ function AdminApiStatsBody() {
                         <th className="px-4 py-2 font-medium">Ảnh</th>
                         <th className="px-4 py-2 text-right font-medium">Input</th>
                         <th className="px-4 py-2 text-right font-medium">Output</th>
-                        <th className="px-4 py-2 text-right font-medium">Tổng</th>
+                        <th className="px-4 py-2 text-right font-medium">Tổng token</th>
                         <th className="px-4 py-2 text-right font-medium">Chi phí</th>
                       </tr>
                     </thead>
@@ -389,8 +393,8 @@ function AdminApiStatsBody() {
                             <td className="px-4 py-2.5">
                               {log.imageSize ? <SizeBadge label={log.imageSize} sizeKey={log.imageSize} /> : <span className="text-xs text-slate-400">—</span>}
                             </td>
-                            <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(log.promptTokens)}</td>
-                            <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(log.outputTokens)}</td>
+                            <TokenCell tokens={log.promptTokens} cost={log.inputCostVnd} />
+                            <TokenCell tokens={log.outputTokens} cost={log.outputCostVnd} />
                             <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatNum(log.totalTokens)}</td>
                             <td className={`px-4 py-2.5 text-right font-semibold tabular-nums ${active ? 'text-[#ea580c]' : 'text-slate-900'}`}>
                               {formatVnd(log.costVnd)}
@@ -502,6 +506,81 @@ function MiniStat({ label, value, hint }: { label: string; value: string; hint?:
       <p className="mt-1 text-base font-bold tabular-nums text-[#ea580c]">{value}</p>
       {hint ? <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p> : null}
     </div>
+  );
+}
+
+function FeatureModelDetail({
+  groups,
+  usdToVnd,
+}: {
+  groups: Array<ApiStatsBucket & { models: ApiStatsBucket[] }>;
+  usdToVnd: number;
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="Chi tiết API đã dùng">
+      <header className="border-b border-slate-100 px-4 py-3">
+        <h2 className="text-sm font-semibold text-slate-800">Chi tiết API đã dùng</h2>
+        <p className="mt-0.5 text-xs text-slate-500">
+          Từng chức năng, model đã gọi, số token input/output và chi phí quy đổi sang VND. Tỷ giá 1 USD ={' '}
+          {usdToVnd.toLocaleString('vi-VN')}₫.
+        </p>
+      </header>
+      {groups.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-slate-500">Chưa có dữ liệu thống kê.</p>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {groups.map((group) => (
+            <div key={group.key}>
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-4 py-2.5">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{group.label}</p>
+                  <p className="text-xs text-slate-500">{group.key}</p>
+                </div>
+                <p className="text-right text-xs text-slate-600">
+                  {formatNum(group.calls)} lượt · {formatNum(group.totalTokens)} token
+                  <span className="ml-2 font-semibold text-[#ea580c]">{formatVnd(group.costVnd)}</span>
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500">
+                    <tr>
+                      <th className="px-4 py-2 font-medium">Model</th>
+                      <th className="px-4 py-2 text-right font-medium">Lượt gọi</th>
+                      <th className="px-4 py-2 text-right font-medium">Input</th>
+                      <th className="px-4 py-2 text-right font-medium">Output</th>
+                      <th className="px-4 py-2 text-right font-medium">Tổng token</th>
+                      <th className="px-4 py-2 text-right font-medium">Chi phí</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.models.map((model) => (
+                      <tr key={`${group.key}:${model.key}`} className="border-t border-slate-100 hover:bg-orange-50/40">
+                        <td className="px-4 py-2.5">
+                          <span className="font-medium text-slate-900">{model.label}</span>
+                          <br />
+                          <span className="inline-flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs text-slate-500">{model.key}</span>
+                            {model.listedPrice === false ? (
+                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">Giá tạm</span>
+                            ) : null}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">{formatNum(model.calls)}</td>
+                        <TokenCell tokens={model.promptTokens} cost={model.inputCostVnd} />
+                        <TokenCell tokens={model.outputTokens} cost={model.outputCostVnd} />
+                        <td className="px-4 py-2.5 text-right font-medium tabular-nums">{formatNum(model.totalTokens)}</td>
+                        <CostCell cost={model.costVnd} calls={model.calls} />
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

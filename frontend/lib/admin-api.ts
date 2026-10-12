@@ -3035,6 +3035,7 @@ export type ApiStatsReport = {
   };
   byModel: ApiStatsBucket[];
   byFeature: ApiStatsBucket[];
+  detailByFeature: Array<ApiStatsBucket & { models: ApiStatsBucket[] }>;
   byImageSize: ApiStatsBucket[];
   recentLogs: Array<{
     id: number;

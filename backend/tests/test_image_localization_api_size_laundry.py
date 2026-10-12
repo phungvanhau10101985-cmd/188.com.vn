@@ -29,6 +29,32 @@ LAUNDRY_OCR = [
 ]
 
 
+PARAM_OCR = [
+    {"text": "PRODUCT PARAMETERS", "bbox": [80, 0, 220, 18]},
+    {"text": "商品参数", "bbox": [100, 20, 180, 36]},
+    {"text": "版型指数：", "bbox": [0, 50, 80, 66]},
+    {"text": "紧身", "bbox": [10, 74, 40, 90]},
+    {"text": "合体", "bbox": [50, 74, 80, 90]},
+    {"text": "宽松", "bbox": [90, 74, 120, 90]},
+    {"text": "柔软指数：", "bbox": [160, 50, 240, 66]},
+    {"text": "超柔", "bbox": [220, 74, 250, 90]},
+    {"text": "厚度指数：", "bbox": [0, 110, 80, 126]},
+    {"text": "薄款", "bbox": [50, 134, 80, 150]},
+    {"text": "超薄", "bbox": [90, 134, 120, 150]},
+    {"text": "弹力指数：", "bbox": [160, 110, 240, 126]},
+    {"text": "无弹", "bbox": [160, 134, 190, 150]},
+    {"text": "超弹", "bbox": [220, 134, 250, 150]},
+]
+
+
+def test_product_parameter_chart_is_a_sheet():
+    flags = _translator().size_laundry_flags(PARAM_OCR)
+    assert flags.is_params is True
+    assert flags.is_size is False
+    assert flags.is_laundry is False
+    assert flags.is_size_or_laundry is True
+
+
 def test_comprehensive_poster_needs_size_and_laundry():
     tr = _translator()
     flags = tr.size_laundry_flags(SIZE_OCR + LAUNDRY_OCR)

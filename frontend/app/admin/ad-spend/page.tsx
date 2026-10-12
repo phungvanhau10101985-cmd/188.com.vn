@@ -283,12 +283,13 @@ function dayTotal(google: number | undefined, facebook: number | undefined, sour
 
 export default function AdminAdSpendPage() {
   const initial = rangeFor('30');
+  const today = rangeFor('today');
   const [settings, setSettings] = useState<AdSpendSettingsView | null>(null);
   const [report, setReport] = useState<AdSpendReport | null>(null);
   const [periodFrom, setPeriodFrom] = useState(initial.from);
   const [periodTo, setPeriodTo] = useState(initial.to);
-  const [focusFrom, setFocusFrom] = useState(initial.from);
-  const [focusTo, setFocusTo] = useState(initial.to);
+  const [focusFrom, setFocusFrom] = useState(today.from);
+  const [focusTo, setFocusTo] = useState(today.to);
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -562,8 +563,8 @@ export default function AdminAdSpendPage() {
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <h1 className="text-xl font-bold text-slate-900">Chi phí và lợi nhuận</h1>
       <p className="mt-1 max-w-3xl text-sm text-slate-600">
-        Chọn hôm nay, tuần hoặc tháng. Chi phí quảng cáo, lợi nhuận và tỷ lệ hoàn của kỳ đó hiện ngay bên dưới, màu cam.
-        Bảng chi tiết nằm phía dưới.
+        Mở sẵn số của hôm nay. Bấm từng ngày trên thanh 30 ngày, hoặc chọn tuần và tháng, để xem kỳ khác.
+        Chi phí quảng cáo, lợi nhuận và tỷ lệ hoàn hiện ngay bên dưới, màu cam.
       </p>
 
       {error ? (

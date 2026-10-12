@@ -16,6 +16,7 @@ from nano_rules import (  # noqa: E402
     has_size_table_context,
     image_loc_gpt_verify_attempts,
     apparel_sheet_kinds,
+    has_product_parameter_chart,
     image_loc_sheet_kinds,
     language_prompt,
     local_blocks_need_draw,
@@ -229,6 +230,23 @@ def test_local_draw_keeps_size_laundry_and_erases_return_and_factory():
     assert next(block for block in factory["blocks"] if block["bbox"][1] == 120)["text"] == "杰仕西服"
 
 
+_PARAM_BLOCKS = [
+    {"text": "商品参数", "bbox": [0, 0, 80, 16]},
+    {"text": "版型指数", "bbox": [0, 30, 70, 44]},
+    {"text": "紧身", "bbox": [0, 50, 30, 64]},
+    {"text": "合体", "bbox": [40, 50, 70, 64]},
+    {"text": "宽松", "bbox": [80, 50, 110, 64]},
+    {"text": "柔软指数", "bbox": [140, 30, 210, 44]},
+    {"text": "超柔", "bbox": [180, 50, 210, 64]},
+    {"text": "厚度指数", "bbox": [0, 90, 70, 104]},
+    {"text": "薄款", "bbox": [40, 110, 70, 124]},
+    {"text": "超薄", "bbox": [80, 110, 110, 124]},
+    {"text": "弹力指数", "bbox": [140, 90, 210, 104]},
+    {"text": "无弹", "bbox": [140, 110, 170, 124]},
+    {"text": "超弹", "bbox": [200, 110, 230, 124]},
+]
+
+
 def test_sheet_reuse_needs_every_kind_on_the_same_url():
     assert resolve_stored_image_loc_sheet(["size"], {"size": "https://cdn.example/size.jpg"}) == "https://cdn.example/size.jpg"
     assert resolve_stored_image_loc_sheet(["laundry"], {"size": "https://cdn.example/size.jpg"}) is None
@@ -240,6 +258,8 @@ def test_sheet_reuse_needs_every_kind_on_the_same_url():
         == "https://cdn.example/both.jpg"
     )
     assert resolve_stored_image_loc_sheet(["size", "laundry"], {"size": "https://cdn.example/size.jpg"}) is None
+    assert resolve_stored_image_loc_sheet(["params"], {"params": "https://cdn.example/params.jpg"}) == "https://cdn.example/params.jpg"
+    assert resolve_stored_image_loc_sheet(["params"], {"size": "https://cdn.example/size.jpg"}) is None
     assert image_loc_sheet_kinds(
         [
             {"text": "尺码表", "bbox": [0, 0, 40, 12]},
@@ -252,4 +272,15 @@ def test_sheet_reuse_needs_every_kind_on_the_same_url():
     ) == ["size"]
     assert apparel_sheet_kinds([{"text": "洗涤", "bbox": [0, 0, 20, 10]}]) == []
     assert image_loc_sheet_kinds([{"text": "洗涤", "bbox": [0, 0, 20, 10]}]) == ["laundry"]
+    assert has_product_parameter_chart(_PARAM_BLOCKS) is True
+    assert apparel_sheet_kinds(_PARAM_BLOCKS) == ["params"]
+    assert image_loc_sheet_kinds(_PARAM_BLOCKS) == []
+    assert has_product_parameter_chart([{"text": "弹力面料", "bbox": [0, 0, 40, 12]}]) is False
+    assert has_product_parameter_chart(
+        [
+            {"text": "商品参数", "bbox": [0, 0, 80, 16]},
+            {"text": "材质", "bbox": [0, 24, 40, 36]},
+            {"text": "颜色", "bbox": [0, 40, 40, 52]},
+        ]
+    ) is False
     assert "Also erase product photographs" in language_prompt("vi", strip_photos=True)

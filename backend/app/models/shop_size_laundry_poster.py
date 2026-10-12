@@ -1,4 +1,4 @@
-"""Ảnh size + giặt tẩy đã dịch, dùng lại theo shop Trung Quốc và danh mục cấp 2."""
+"""Ảnh size, giặt tẩy và bảng thông số đã dịch, dùng lại theo shop Trung Quốc và danh mục cấp 2."""
 
 from sqlalchemy import Column, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.sql import func
@@ -22,6 +22,7 @@ class ShopCat2SizeLaundryPoster(Base):
     image_url = Column(String(800), nullable=False)
     size_image_url = Column(String(800), nullable=True)
     laundry_image_url = Column(String(800), nullable=True)
+    params_image_url = Column(String(800), nullable=True)
     render_version = Column(String(40), nullable=True)
     source_product_id = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

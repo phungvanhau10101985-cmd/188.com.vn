@@ -23,10 +23,11 @@ class SizeLaundryFlags:
     is_size: bool = False
     is_laundry: bool = False
     comprehensive: bool = False
+    is_params: bool = False
 
     @property
     def is_size_or_laundry(self) -> bool:
-        return self.is_size or self.is_laundry
+        return self.is_size or self.is_laundry or self.is_params
 
 
 class TextTranslator:
@@ -521,19 +522,25 @@ class TextTranslator:
         return self.size_laundry_flags(ocr_results).is_size_or_laundry
 
     def size_laundry_flags(self, ocr_results: List[Any]) -> SizeLaundryFlags:
-        """Size, giặt tẩy, và poster đủ cả bảng size (>=3 cỡ + nhãn số đo) lẫn hướng dẫn giặt."""
+        """Size, giặt tẩy, bảng thông số dáng/mềm/dày/co giãn, và poster đủ cả size lẫn giặt."""
         items = self._normalize_ocr_items(ocr_results)
         if not items:
             return SizeLaundryFlags()
         is_size = self._has_size_table_context(items)
         is_laundry = self._has_laundry_care_context(items)
+        try:
+            from nano_rules import has_product_parameter_chart
+
+            is_params = has_product_parameter_chart(ocr_results)
+        except Exception:
+            is_params = False
         comprehensive = False
         if is_size and is_laundry:
             texts = [str(text or "") for text, _ in items if str(text or "").strip()]
             size_token_count = sum(1 for text in texts if self._is_size_token_text(text))
             size_label_count = sum(1 for text in texts if self._is_size_dimension_label(text))
             comprehensive = size_token_count >= 3 and size_label_count >= 1
-        return SizeLaundryFlags(is_size, is_laundry, comprehensive)
+        return SizeLaundryFlags(is_size, is_laundry, comprehensive, is_params)
     
     def classify_and_process_blocks(
         self,

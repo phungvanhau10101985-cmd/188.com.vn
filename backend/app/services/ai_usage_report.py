@@ -218,6 +218,7 @@ def build_api_usage_report(
 
     by_model: Dict[str, Dict[str, int]] = {}
     by_feature: Dict[str, Dict[str, int]] = {}
+    by_feature_model: Dict[str, Dict[str, Dict[str, int]]] = {}
     by_image: Dict[str, Dict[str, int]] = {}
     totals = _empty_bucket()
     prepared: List[Dict[str, Any]] = []
@@ -251,6 +252,9 @@ def build_api_usage_report(
         _apply_log(by_model[log.model], prompt, output, total, split, image_size, True)
         by_feature.setdefault(log.feature, _empty_bucket())
         _apply_log(by_feature[log.feature], prompt, output, total, split, image_size, True)
+        feature_models = by_feature_model.setdefault(log.feature, {})
+        feature_models.setdefault(log.model, _empty_bucket())
+        _apply_log(feature_models[log.model], prompt, output, total, split, image_size, True)
         size_key = image_size or "no-image"
         by_image.setdefault(size_key, _empty_bucket())
         _apply_log(by_image[size_key], prompt, output, total, split, image_size, False)
@@ -266,6 +270,20 @@ def build_api_usage_report(
     )
     feature_rows = sort_rows(
         [_bucket_row(feature, feature_label(feature), bucket) for feature, bucket in by_feature.items()]
+    )
+    detail_by_feature = sort_rows(
+        [
+            {
+                **_bucket_row(feature, feature_label(feature), by_feature[feature]),
+                "models": sort_rows(
+                    [
+                        _bucket_row(model, model_display_label(model), bucket, listed=is_listed_api_cost_model(model))
+                        for model, bucket in models.items()
+                    ]
+                ),
+            }
+            for feature, models in by_feature_model.items()
+        ]
     )
     image_order = ("1K", "2K", "4K", "no-image")
     image_rows = []
@@ -370,6 +388,7 @@ def build_api_usage_report(
         },
         "byModel": model_rows,
         "byFeature": feature_rows,
+        "detailByFeature": detail_by_feature,
         "byImageSize": image_rows,
         "recentLogs": recent,
         "charts": {

@@ -1936,6 +1936,9 @@ class MigrationManager:
         results['shop_cat2_size_laundry_posters_create'] = self._create_table_if_not_exists(
             "shop_cat2_size_laundry_posters", ShopCat2SizeLaundryPoster
         )
+        results['shop_cat2_size_laundry_posters_sync'] = self._sync_table_columns(
+            "shop_cat2_size_laundry_posters", ShopCat2SizeLaundryPoster
+        )
 
         return results
 

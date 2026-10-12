@@ -3989,7 +3989,7 @@ export default function AdminProductsPage() {
               </>
             ) : (
               <>
-                <span className="font-medium">DeepSeek + vẽ local</span>: mọi ảnh vẽ local. Quần áo thì ảnh size và ảnh giặt đi GPT, lưu kho theo shop Trung Quốc và danh mục cấp 2. Sản phẩm sau trùng hai khóa đó lấy ảnh kho, không xử lý lại hai ảnh này.
+                <span className="font-medium">DeepSeek + vẽ local</span>: mọi ảnh vẽ local. Quần áo thì ảnh size, ảnh giặt và ảnh thông số đi GPT, lưu kho theo shop Trung Quốc và danh mục cấp 2. Sản phẩm sau trùng hai khóa đó lấy ảnh kho, không xử lý lại các ảnh này.
                 Gemini và GPT Image đang tắt.
               </>
             )}
@@ -4014,7 +4014,7 @@ export default function AdminProductsPage() {
                         <span className="font-medium">DeepSeek + vẽ local</span>
                         <span className="mt-0.5 block text-xs text-gray-500">
                           Mọi ảnh: OCR → DeepSeek → vẽ local.
-                          Quần áo: ảnh size và ảnh giặt đi GPT, lưu kho. Sản phẩm sau cùng shop Trung Quốc và cùng danh mục cấp 2 dùng ảnh kho, không xử lý lại.
+                          Quần áo: ảnh size, ảnh giặt và ảnh thông số đi GPT, lưu kho. Sản phẩm sau cùng shop Trung Quốc và cùng danh mục cấp 2 dùng ảnh kho, không xử lý lại.
                         </span>
                       </span>
                     </label>

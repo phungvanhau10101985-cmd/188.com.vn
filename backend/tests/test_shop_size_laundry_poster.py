@@ -181,6 +181,23 @@ def test_apparel_category_is_clothing_not_shoes_or_bags():
     assert is_apparel_category(None, cat2_name="Giày cao gót") is False
 
 
+_PARAM_BLOCKS = [
+    {"text": "商品参数", "bbox": [0, 0, 80, 16]},
+    {"text": "版型指数", "bbox": [0, 30, 70, 44]},
+    {"text": "紧身", "bbox": [0, 50, 30, 64]},
+    {"text": "合体", "bbox": [40, 50, 70, 64]},
+    {"text": "宽松", "bbox": [80, 50, 110, 64]},
+    {"text": "柔软指数", "bbox": [140, 30, 210, 44]},
+    {"text": "超柔", "bbox": [180, 50, 210, 64]},
+    {"text": "厚度指数", "bbox": [0, 90, 70, 104]},
+    {"text": "薄款", "bbox": [40, 110, 70, 124]},
+    {"text": "超薄", "bbox": [80, 110, 110, 124]},
+    {"text": "弹力指数", "bbox": [140, 90, 210, 104]},
+    {"text": "无弹", "bbox": [140, 110, 170, 124]},
+    {"text": "超弹", "bbox": [200, 110, 230, 124]},
+]
+
+
 _SIZE_BLOCKS = [
     {"text": "尺码表", "bbox": [0, 0, 40, 12]},
     {"text": "胸围", "bbox": [0, 20, 40, 32]},
@@ -263,6 +280,16 @@ def test_apparel_size_and_laundry_use_gpt_when_job_is_local():
     )
     assert seen["engine"] == "gpt"
     assert laundry.detail["sheet_kinds"] == ["laundry"]
+
+    params = pipe._process_image_part(
+        {"image_data": "orig", "ocr_results": _PARAM_BLOCKS, "original_url": "u", "filename": "c.jpg"},
+        None,
+        None,
+    )
+    assert seen["strip"] is True
+    assert seen["engine"] == "gpt"
+    assert params.detail["apparel_sheet"] is True
+    assert params.detail["sheet_kinds"] == ["params"]
 
 
 def test_apparel_size_sheet_goes_to_model_when_ai_is_on():
