@@ -24,6 +24,9 @@ export const SHIPPING_FEE_VND = 30_000;
 export const DEPOSIT_PERCENT = 30;
 /** Sàn tiền cọc một phần. Cài đặt quản trị không được thấp hơn số này. */
 export const DEPOSIT_MIN_VND = 100_000;
+/** Đơn giá từ mốc này: cọc một phần không thấp hơn HIGH_UNIT_MIN_PERCENT. */
+export const HIGH_UNIT_PRICE_VND = 3_000_000;
+export const HIGH_UNIT_MIN_PERCENT = 30;
 
 export const RETURN_POLICY_URL = "/info/doi-tra-hoan-tien";
 export const SHIPPING_POLICY_URL = "/info/chinh-sach-giao-hang";

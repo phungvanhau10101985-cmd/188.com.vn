@@ -18,7 +18,12 @@ from app.models.order import (
 )
 from app.models.product import Product
 from app.schemas.order import OrderCreate, OrderUpdate
-from app.crud.deposit_settings import apply_partial_deposit, clamp_partial_percent, get_rule
+from app.crud.deposit_settings import (
+    apply_partial_deposit,
+    get_rule,
+    line_requires_deposit,
+    partial_percent_for_lines,
+)
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
 from app.services.fulfillment_transition_contract import (
@@ -40,11 +45,12 @@ def calculate_deposit(
     min_amount: int = 100_000,
 ) -> Decimal:
     """Calculate deposit amount for a product"""
-    if not product.deposit_require:
+    unit_price = getattr(product, "price", None)
+    if not line_requires_deposit(product.deposit_require, unit_price):
         return Decimal('0')
     
     if deposit_type == DepositType.PERCENT_30.value:
-        pct = clamp_partial_percent(partial_percent)
+        pct = partial_percent_for_lines(partial_percent, [{"unit_price": unit_price}])
         return apply_partial_deposit(Decimal(product.price or 0), pct, min_amount)
     elif deposit_type == DepositType.PERCENT_100.value:
         return product.price
@@ -202,6 +208,8 @@ def update_order_deposit_type(
         order.remaining_amount = total - deposit_base
     else:
         partial, minimum = get_rule(db)
+        lines = list(getattr(order, "items", None) or [])
+        partial = partial_percent_for_lines(partial, lines)
         order.deposit_percentage = partial
         order.deposit_amount = apply_partial_deposit(deposit_base, partial, minimum)
         order.remaining_amount = (total - order.deposit_amount).quantize(Decimal('0.01'))

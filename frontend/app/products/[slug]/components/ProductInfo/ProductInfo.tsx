@@ -18,7 +18,12 @@ import BirthdayPromoBanner from '@/components/BirthdayPromoBanner';
 import BirthdaySavingsCard from '@/components/BirthdaySavingsCard';
 import ProductPromoPriceBlock from '@/components/product-detail/ProductPromoPriceBlock';
 import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
-import { formatDepositMinVnd } from '@/lib/order-deposit';
+import {
+  formatDepositMinVnd,
+  HIGH_UNIT_PRICE_VND,
+  lineHitsHighUnitPrice,
+  partialPercentForLines,
+} from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 import { mergeProductFlashSale, mergeProductSiteSaleFromCalendar, resolveProductDisplayPricing, stackedSaleProgramLabel } from '@/lib/site-sale';
 import { applyCatalogStackedDiscount } from '@/lib/order-discount-limits';
@@ -155,6 +160,8 @@ export default function ProductInfo({
   );
   const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;
+  const highUnitDeposit = lineHitsHighUnitPrice(displayPrice);
+  const shownDepositPercent = partialPercentForLines(depositPercent, highUnitDeposit);
   const birthdayOnPdp = !googleDiscount && !isClearancePdp && birthdayDiscount.active;
   const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
 
@@ -680,7 +687,11 @@ export default function ProductInfo({
       <div className="border-t border-gray-100 pt-3">
         <p className="text-xs text-gray-900 leading-snug">
           🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k (phí ship 30k nếu dưới 500k). 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
-          💳 Một số đơn yêu cầu đặt cọc {depositPercent}% giá trị hàng, tối thiểu {formatDepositMinVnd(depositMinAmount)} —{' '}
+          💳{' '}
+          {highUnitDeposit
+            ? `Đơn giá từ ${formatDepositMinVnd(HIGH_UNIT_PRICE_VND)} đặt cọc tối thiểu ${shownDepositPercent}% giá trị hàng`
+            : `Một số đơn yêu cầu đặt cọc ${depositPercent}% giá trị hàng, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`}{' '}
+          —{' '}
           <Link href="/info/huong-dan-mua-hang" className="text-[#ea580c] hover:underline font-medium">
             xem hướng dẫn
           </Link>

@@ -7,6 +7,7 @@ import re
 from app.models.cart import CartItem, Cart
 from app.models.product import Product
 from app.schemas.cart import CartItemCreate, CartItemUpdate
+from app.crud.deposit_settings import line_requires_deposit as _line_requires_deposit
 
 
 def _warehouse_stock_cap(product: Product) -> Optional[int]:
@@ -263,6 +264,7 @@ class CartItemCRUD:
                     )
             existing.unit_price = unit_sale
             existing.product_price = unit_sale
+            existing.requires_deposit = _line_requires_deposit(product.deposit_require, unit_sale)
             existing.quantity = new_qty
             if color_name:
                 existing.selected_color_name = color_name
@@ -365,7 +367,7 @@ class CartItemCRUD:
             product_name=product.name,
             product_price=unit_sale,
             product_image=line_image,
-            requires_deposit=product.deposit_require,
+            requires_deposit=_line_requires_deposit(product.deposit_require, unit_sale),
             created_at=now,  # Đảm bảo có giá trị, tránh Pydantic datetime_type lỗi
         )
         
@@ -421,6 +423,9 @@ class CartItemCRUD:
                     db_cart_item.quantity = qty
                 db_cart_item.unit_price = unit_sale
                 db_cart_item.product_price = unit_sale
+                db_cart_item.requires_deposit = _line_requires_deposit(
+                    product.deposit_require, unit_sale
+                )
                 if isinstance(db_cart_item.product_data, dict):
                     pd = {**db_cart_item.product_data}
                     pd["price"] = unit_sale

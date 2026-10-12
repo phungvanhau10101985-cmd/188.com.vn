@@ -10,6 +10,9 @@ DEFAULT_PARTIAL_PERCENT = 30
 DEFAULT_MIN_AMOUNT = 100_000
 MIN_AMOUNT_FLOOR = 100_000
 MIN_AMOUNT_CEILING = 50_000_000
+# Đơn giá từ mốc này: cọc một phần không thấp hơn HIGH_UNIT_MIN_PERCENT.
+HIGH_UNIT_PRICE_VND = 3_000_000
+HIGH_UNIT_MIN_PERCENT = 30
 _SINGLETON_ID = 1
 _CACHE_KEY = "deposit_settings:rule"
 _CACHE_TTL_SECONDS = 60
@@ -36,6 +39,37 @@ def clamp_min_amount(raw: object, default: int = DEFAULT_MIN_AMOUNT) -> int:
     if n > MIN_AMOUNT_CEILING:
         return MIN_AMOUNT_CEILING
     return n
+
+
+def line_hits_high_unit_price(unit_price: object) -> bool:
+    """Đơn giá >= 3.000.000đ thì dòng hàng thuộc nhóm cọc tối thiểu 30%."""
+    try:
+        price = Decimal(str(0 if unit_price is None else unit_price))
+    except Exception:
+        return False
+    return price >= Decimal(HIGH_UNIT_PRICE_VND)
+
+
+def _row_unit_price(row: object) -> object:
+    if isinstance(row, dict):
+        return row.get("unit_price")
+    return getattr(row, "unit_price", None)
+
+
+def group_has_high_unit_price(rows: list) -> bool:
+    return any(line_hits_high_unit_price(_row_unit_price(row)) for row in rows)
+
+
+def partial_percent_for_lines(configured: int, rows: list) -> int:
+    """% cọc một phần. Có đơn giá >= 3.000.000đ thì không thấp hơn 30%."""
+    pct = clamp_partial_percent(configured)
+    if group_has_high_unit_price(rows):
+        return max(pct, HIGH_UNIT_MIN_PERCENT)
+    return pct
+
+
+def line_requires_deposit(product_flag: object, unit_price: object) -> bool:
+    return bool(product_flag) or line_hits_high_unit_price(unit_price)
 
 
 def apply_partial_deposit(goods: Decimal, percent: int, min_amount: object = DEFAULT_MIN_AMOUNT) -> Decimal:

@@ -1,4 +1,35 @@
-import { DEPOSIT_MIN_VND, DEPOSIT_PERCENT } from '@/lib/business-info';
+import {
+  DEPOSIT_MIN_VND,
+  DEPOSIT_PERCENT,
+  HIGH_UNIT_MIN_PERCENT,
+  HIGH_UNIT_PRICE_VND,
+} from '@/lib/business-info';
+
+export { HIGH_UNIT_MIN_PERCENT, HIGH_UNIT_PRICE_VND };
+
+/** Đơn giá >= 3.000.000đ thì dòng hàng thuộc nhóm cọc tối thiểu 30%. */
+export function lineHitsHighUnitPrice(unitPrice: number): boolean {
+  const price = Math.round(Number(unitPrice) || 0);
+  return price >= HIGH_UNIT_PRICE_VND;
+}
+
+export function cartLineUnitPrice(item: {
+  unit_price?: number | null;
+  product_price?: number | null;
+  product_data?: { price?: number | null } | null;
+}): number {
+  const raw = item.unit_price ?? item.product_price ?? item.product_data?.price ?? 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** % cọc một phần. Có đơn giá >= 3.000.000đ thì không thấp hơn 30%. */
+export function partialPercentForLines(configured: number, hasHighUnitPrice: boolean): number {
+  const pct = Math.round(Number(configured));
+  const applied = pct >= 1 && pct <= 99 ? pct : DEPOSIT_PERCENT;
+  if (hasHighUnitPrice) return Math.max(applied, HIGH_UNIT_MIN_PERCENT);
+  return applied;
+}
 
 /** Cọc một phần: % giá trị hàng, không thấp hơn sàn, không vượt giá trị hàng. */
 export function partialDepositAmount(

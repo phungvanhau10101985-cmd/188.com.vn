@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 
 from app import crud, models, schemas
 from app.crud import promotion as crud_promotion
-from app.crud.deposit_settings import apply_partial_deposit, clamp_partial_percent, get_rule
+from app.crud.deposit_settings import (
+    apply_partial_deposit,
+    get_rule,
+    group_has_high_unit_price,
+    line_requires_deposit,
+    partial_percent_for_lines,
+)
 from app.crud.cart import _resolve_cart_line_image, cart as cart_crud
 from app.crud.promotion import PromoValidationError
 from app.models.order import PaymentMethod as PaymentMethodEnum
@@ -115,11 +121,14 @@ def build_group_financial_plan(
     subtotal = sum((_dec(row["total_price"]) for row in rows), Decimal("0"))
     discounted_subtotal = max(Decimal("0"), subtotal - discount)
     total = discounted_subtotal + shipping_fee
-    requires_deposit = any(bool(row.get("requires_deposit")) for row in rows)
+    high_unit = group_has_high_unit_price(rows)
+    requires_deposit = any(bool(row.get("requires_deposit")) for row in rows) or high_unit
     deposit_type = requested_deposit_type
-    if requires_deposit and not deposit_type:
+    if high_unit and (not deposit_type or deposit_type == schemas.DepositType.NONE.value):
         deposit_type = schemas.DepositType.PERCENT_30.value
-    if deposit_type == schemas.DepositType.NONE.value:
+    elif requires_deposit and not deposit_type:
+        deposit_type = schemas.DepositType.PERCENT_30.value
+    elif deposit_type == schemas.DepositType.NONE.value:
         requires_deposit = False
 
     percentage = 0
@@ -130,7 +139,7 @@ def build_group_financial_plan(
             deposit = discounted_subtotal
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
-            percentage = clamp_partial_percent(partial_percent)
+            percentage = partial_percent_for_lines(partial_percent, rows)
             deposit = apply_partial_deposit(discounted_subtotal, percentage, min_amount)
     return {
         "subtotal": subtotal,
@@ -278,8 +287,12 @@ def _create_checkout_fulfillment(
                 "selected_size": requested.selected_size,
                 "selected_color": requested.selected_color,
                 "selected_color_name": _checkout_color_name(product, requested, cart_line),
-                "requires_deposit": product.deposit_require,
-                "deposit_amount": unit_price * Decimal("0.3") if product.deposit_require else Decimal("0"),
+                "requires_deposit": line_requires_deposit(product.deposit_require, unit_price),
+                "deposit_amount": (
+                    unit_price * Decimal("0.3")
+                    if line_requires_deposit(product.deposit_require, unit_price)
+                    else Decimal("0")
+                ),
                 "fulfillment_source": fulfillment_source,
                 "source_platform": source_platform_from_url(source_url),
                 "source_url": source_url,

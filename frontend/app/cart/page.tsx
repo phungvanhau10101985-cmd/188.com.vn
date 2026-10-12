@@ -87,7 +87,13 @@ import {
   SHIPPING_POLICY_URL,
   TERMS_URL,
 } from '@/lib/business-info';
-import { formatDepositMinVnd } from '@/lib/order-deposit';
+import {
+  cartLineUnitPrice,
+  formatDepositMinVnd,
+  HIGH_UNIT_PRICE_VND,
+  lineHitsHighUnitPrice,
+  partialPercentForLines,
+} from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 import { useToast } from '@/components/ToastProvider';
 
@@ -561,13 +567,18 @@ export default function CartPage() {
     });
   };
 
+  const highUnitPriceSelected = selectedCartItems.some((item) =>
+    lineHitsHighUnitPrice(cartLineUnitPrice(item)),
+  );
   const depositRequiredForSelected =
+    highUnitPriceSelected ||
     selectedCartItems.some(
       (item) =>
         item.requires_deposit === true || item.product_data?.deposit_require === true
-    ) || false;
+    );
+  const checkoutDepositPercent = partialPercentForLines(depositPercent, highUnitPriceSelected);
   const paymentMethodLabel = depositRequiredForSelected
-    ? `Chuyển khoản cọc ${depositPercent}%, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`
+    ? `Chuyển khoản cọc ${checkoutDepositPercent}%, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`
     : 'Thanh toán khi nhận hàng (COD)';
 
   const customerAddressLine = selectedAddress
@@ -1668,9 +1679,20 @@ export default function CartPage() {
             {depositRequiredForSelected && selectedCartItems.length > 0 ? (
               <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-[11px] text-blue-900 md:text-sm">
                 <p>
-                  Đơn có sản phẩm yêu cầu đặt cọc{' '}
-                  <strong>{depositPercent}%</strong> giá trị hàng, tối thiểu{' '}
-                  <strong>{formatDepositMinVnd(depositMinAmount)}</strong>, trước khi xử lý. Số tiền chính xác của từng đơn sẽ hiển thị sau khi tách; phần còn lại thanh toán khi nhận hàng.
+                  {highUnitPriceSelected ? (
+                    <>
+                      Đơn có sản phẩm đơn giá từ{' '}
+                      <strong>{formatDepositMinVnd(HIGH_UNIT_PRICE_VND)}</strong> cần đặt cọc tối thiểu{' '}
+                      <strong>{checkoutDepositPercent}%</strong> giá trị hàng
+                    </>
+                  ) : (
+                    <>
+                      Đơn có sản phẩm yêu cầu đặt cọc <strong>{checkoutDepositPercent}%</strong> giá trị
+                      hàng, tối thiểu <strong>{formatDepositMinVnd(depositMinAmount)}</strong>
+                    </>
+                  )}
+                  , trước khi xử lý. Số tiền chính xác của từng đơn sẽ hiển thị sau khi tách; phần còn
+                  lại thanh toán khi nhận hàng.
                 </p>
                 <p className="mt-1">
                   <Link href={PURCHASE_GUIDE_URL} className="text-blue-700 underline font-medium">

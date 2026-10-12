@@ -249,6 +249,79 @@ def test_partial_deposit_floor_does_not_exceed_goods():
     assert deposit["remaining_amount"] == Decimal("30000.00")
 
 
+def test_high_unit_price_forces_deposit_of_at_least_30_percent():
+    deposit = build_group_financial_plan(
+        [{
+            "fulfillment_source": "china",
+            "unit_price": Decimal("4000000"),
+            "total_price": Decimal("4000000"),
+            "requires_deposit": False,
+        }],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+        min_amount=100_000,
+    )
+    assert deposit["requires_deposit"] is True
+    assert deposit["initial_status"] == "waiting_deposit"
+    assert deposit["deposit_percentage"] == 30
+    assert deposit["deposit_amount"] == Decimal("1200000.00")
+
+
+def test_high_unit_price_threshold_is_inclusive():
+    deposit = build_group_financial_plan(
+        [{
+            "fulfillment_source": "vietnam",
+            "unit_price": Decimal("3000000"),
+            "total_price": Decimal("3000000"),
+            "requires_deposit": False,
+        }],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type="none",
+        partial_percent=10,
+    )
+    assert deposit["requires_deposit"] is True
+    assert deposit["deposit_percentage"] == 30
+    assert deposit["deposit_amount"] == Decimal("900000.00")
+
+
+def test_high_unit_price_keeps_higher_configured_percent():
+    deposit = build_group_financial_plan(
+        [{
+            "fulfillment_source": "vietnam",
+            "unit_price": Decimal("3000000"),
+            "total_price": Decimal("3000000"),
+            "requires_deposit": True,
+        }],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("30000"),
+        requested_deposit_type=None,
+        partial_percent=40,
+    )
+    assert deposit["deposit_percentage"] == 40
+    assert deposit["deposit_amount"] == Decimal("1200000.00")
+
+
+def test_unit_price_below_threshold_does_not_force_deposit():
+    deposit = build_group_financial_plan(
+        [{
+            "fulfillment_source": "china",
+            "unit_price": Decimal("2999999"),
+            "total_price": Decimal("2999999"),
+            "requires_deposit": False,
+        }],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+    )
+    assert deposit["requires_deposit"] is False
+    assert deposit["deposit_amount"] == Decimal("0")
+    assert deposit["initial_status"] == "confirmed"
+
+
 def test_full_deposit_ignores_min_amount():
     deposit = build_group_financial_plan(
         [{"fulfillment_source": "china", "total_price": Decimal("80000"), "requires_deposit": True}],
