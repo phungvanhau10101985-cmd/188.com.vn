@@ -273,6 +273,8 @@ def refresh_ems_record_by_id(db: Session, record_id: int, *, admin_id: Optional[
         "recipient_label": record.recipient_label or "",
         "order_code": record.order_code,
         "cod_amount": int(record.cod_amount) if record.cod_amount is not None else None,
+        "ems_tracking_code": record.ems_tracking_code,
+        "ems_reference_code": record.ems_reference_code,
     }
     result = ems_import_svc.process_ems_import_row(
         db,

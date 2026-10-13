@@ -850,16 +850,72 @@ def _dedupe_rows_by_reference(rows: list[dict[str, Any]]) -> tuple[list[dict[str
     return deduped, warnings
 
 
-def _ems_lookup_candidates(reference_code: str, order: Optional[Order]) -> list[str]:
-    candidates: list[str] = []
+def _ems_lookup_candidates(
+    reference_code: str,
+    order: Optional[Order] = None,
+    *,
+    known_ems_code: Optional[str] = None,
+    known_ems_reference: Optional[str] = None,
+) -> list[str]:
+    """Chỉ tra đúng mã vận đơn này, hoặc mã EMS đã gắn đúng mã đó.
+
+    Không lấy tracking đang lưu trên đơn shop. Một DH có thể vừa có mã hoàn
+    vừa có mã gửi lại chưa có EMS — suy từ DH sẽ gắn nhầm hành trình hoàn.
+    """
+    del order
     ref = (reference_code or "").strip().upper()
+    candidates: list[str] = []
     if ref:
         candidates.append(ref)
-    if order:
-        saved = (order.tracking_number or "").strip().upper()
-        if saved and saved not in candidates:
-            candidates.append(saved)
+    ems = (known_ems_code or "").strip().upper()
+    ems_ref = (known_ems_reference or "").strip().upper()
+    if ems and ems not in candidates and (not ems_ref or ems_ref == ref):
+        candidates.append(ems)
     return candidates
+
+
+def _ems_payload_belongs_to_reference(payload: dict[str, Any], reference_code: str) -> bool:
+    """Hành trình EMS chỉ thuộc dòng này khi mã tra là chính vận đơn hoặc mã EMS của nó."""
+    ref = (reference_code or "").strip().upper()
+    if not ref:
+        return False
+    tracking = (payload.get("tracking_code") or "").strip().upper()
+    foreign_ref = (payload.get("reference_code") or "").strip().upper()
+    if tracking == ref:
+        return True
+    if not foreign_ref or foreign_ref == ref:
+        return True
+    return False
+
+
+def _shipment_order_status(order: Optional[Order]) -> Optional[str]:
+    """Trạng thái đơn để ghi lên vận đơn. Không copy RETURNED — hoàn tính theo từng mã."""
+    if order is None:
+        return None
+    st = getattr(order.status, "value", order.status)
+    text = (st or "").strip()
+    if text.lower() == OrderStatus.RETURNED.value:
+        return None
+    return text or None
+
+
+def _saved_tracking_for_shipment(
+    order: Optional[Order],
+    reference_code: str,
+    ems_tracking: Optional[str] = None,
+) -> Optional[str]:
+    """Mã lưu trên đơn chỉ hiện khi trùng mã vận đơn này hoặc mã EMS của nó."""
+    if order is None:
+        return None
+    saved = (getattr(order, "tracking_number", None) or "").strip()
+    if not saved:
+        return None
+    saved_up = saved.upper()
+    ref = (reference_code or "").strip().upper()
+    ems = (ems_tracking or "").strip().upper()
+    if saved_up == ref or (ems and saved_up == ems):
+        return saved
+    return None
 
 
 def _fetch_ems_with_fallback(codes: list[str]) -> dict[str, Any]:
@@ -916,8 +972,8 @@ def process_ems_import_row(
         result["ems_reference_code"] = reference_code
         if order:
             result["order_id"] = order.id
-            result["order_status"] = getattr(order.status, "value", order.status)
-            result["tracking_number_saved"] = order.tracking_number
+            result["order_status"] = _shipment_order_status(order)
+            result["tracking_number_saved"] = _saved_tracking_for_shipment(order, reference_code)
             step_key, _ = _order_timeline_summary(db, order)
             result["current_step_key"] = step_key
             synced, handoff_msg = _try_sync_shop_on_ems_import(
@@ -930,8 +986,8 @@ def process_ems_import_row(
             result["order_sync_message"] = handoff_msg
             if synced:
                 db.refresh(order)
-                result["order_status"] = getattr(order.status, "value", order.status)
-                result["tracking_number_saved"] = order.tracking_number
+                result["order_status"] = _shipment_order_status(order)
+                result["tracking_number_saved"] = _saved_tracking_for_shipment(order, reference_code)
                 step_key, _ = _order_timeline_summary(db, order)
                 result["current_step_key"] = step_key
             result["sync_status"] = "in_progress"
@@ -944,8 +1000,37 @@ def process_ems_import_row(
             ems_status="",
         )
 
-    ems = _fetch_ems_with_fallback(_ems_lookup_candidates(reference_code, order))
+    ems = _fetch_ems_with_fallback(
+        _ems_lookup_candidates(
+            reference_code,
+            known_ems_code=row.get("ems_tracking_code"),
+            known_ems_reference=row.get("ems_reference_code"),
+        )
+    )
+    rejected_foreign = bool(
+        (ems.get("events") or not ems.get("error"))
+        and not _ems_payload_belongs_to_reference(ems, reference_code)
+    )
+    if rejected_foreign:
+        foreign_ref = (ems.get("reference_code") or "").strip()
+        ems = {
+            "available": False,
+            "events": [],
+            "error": (
+                f"Mã {reference_code} không phải vận đơn EMS"
+                + (f" «{foreign_ref}»" if foreign_ref else "")
+                + ". Không lấy hành trình từ mã khác của cùng đơn shop."
+            ),
+        }
+        result["ems_tracking_rejected_foreign"] = True
     has_ems = not (ems.get("error") and not ems.get("events"))
+    stored_ems_ref = (row.get("ems_reference_code") or "").strip().upper()
+    if not has_ems and stored_ems_ref and stored_ems_ref != reference_code:
+        result["ems_tracking_rejected_foreign"] = True
+        result["ems_error"] = (
+            f"Mã {reference_code} không lấy hành trình của {stored_ems_ref}. "
+            "Đối soát hoàn chỉ theo đúng mã này hoặc mã EMS của nó, không theo mã đơn shop."
+        )
 
     if has_ems:
         ems_status = ems.get("current_status_description") or ""
@@ -971,8 +1056,10 @@ def process_ems_import_row(
         )
 
     result["order_id"] = order.id
-    result["order_status"] = getattr(order.status, "value", order.status)
-    result["tracking_number_saved"] = order.tracking_number
+    result["order_status"] = _shipment_order_status(order)
+    result["tracking_number_saved"] = _saved_tracking_for_shipment(
+        order, reference_code, result.get("ems_tracking_code")
+    )
     step_key, _ = _order_timeline_summary(db, order)
     result["current_step_key"] = step_key
 
@@ -987,8 +1074,10 @@ def process_ems_import_row(
         result["order_sync_message"] = handoff_msg
         if synced:
             db.refresh(order)
-            result["order_status"] = getattr(order.status, "value", order.status)
-            result["tracking_number_saved"] = order.tracking_number
+            result["order_status"] = _shipment_order_status(order)
+            result["tracking_number_saved"] = _saved_tracking_for_shipment(
+                order, reference_code, result.get("ems_tracking_code")
+            )
             step_key, _ = _order_timeline_summary(db, order)
             result["current_step_key"] = step_key
         result["sync_status"] = "in_progress"
@@ -1009,8 +1098,10 @@ def process_ems_import_row(
         result["order_sync_message"] = sync_msg
         if synced:
             db.refresh(order)
-            result["order_status"] = getattr(order.status, "value", order.status)
-            result["tracking_number_saved"] = order.tracking_number
+            result["order_status"] = _shipment_order_status(order)
+            result["tracking_number_saved"] = _saved_tracking_for_shipment(
+                order, reference_code, result.get("ems_tracking_code")
+            )
             step_key, _ = _order_timeline_summary(db, order)
             result["current_step_key"] = step_key
 
@@ -1028,7 +1119,7 @@ def process_ems_import_row(
     if result.get("order_sync_message") and not result.get("order_synced"):
         result["sync_message"] = result["order_sync_message"]
 
-    saved_tracking = (order.tracking_number or "").strip().upper()
+    saved_tracking = (result.get("tracking_number_saved") or "").strip().upper()
     ems_tracking = (result["ems_tracking_code"] or "").strip().upper()
     if ems_tracking and saved_tracking and saved_tracking != ems_tracking:
         result["sync_status"] = "mismatch"
@@ -1203,6 +1294,18 @@ def _upsert_record(
         record = EmsShippingRecord(reference_code=ref)
         db.add(record)
 
+    if result.get("ems_tracking_rejected_foreign"):
+        record.ems_tracking_code = None
+        record.ems_status = None
+        record.ems_phase = None
+        record.ems_reference_code = None
+        record.ems_error = result.get("ems_error")
+        record.shop_return_received_at = None
+        if (record.order_status or "").strip().lower() == OrderStatus.RETURNED.value:
+            record.order_status = None
+        record.sync_status = "in_progress"
+        record.sync_message = result.get("ems_error") or record.sync_message
+
     record.recipient_label = result.get("recipient_label") or ""
     pc = warehouse_sku_from_col_h_cell(result.get("product_code")) or ""
     if not pc:
@@ -1322,9 +1425,7 @@ def _apply_return_to_shop_on_record(record: EmsShippingRecord) -> None:
 
 def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, Any]:
     """Cập nhật trạng thái đơn shop mới nhất khi hiển thị bảng (không cần import lại)."""
-    if row.get("shop_return_received_at") or (
-        (row.get("order_status") or "").strip().lower() == OrderStatus.RETURNED.value
-    ):
+    if row.get("shop_return_received_at"):
         row["order_status"] = OrderStatus.RETURNED.value
         return _apply_return_to_shop_fields(row)
 
@@ -1335,19 +1436,30 @@ def _enrich_row_from_live_order(db: Session, row: dict[str, Any]) -> dict[str, A
     if not order:
         return _apply_return_to_shop_fields(row)
     row["order_id"] = order.id
-    st = getattr(order.status, "value", order.status)
-    if (st or "").strip().lower() == OrderStatus.RETURNED.value:
-        row["order_status"] = OrderStatus.RETURNED.value
-        return _apply_return_to_shop_fields(row)
-    row["order_status"] = st
-    row["tracking_number_saved"] = order.tracking_number
+    st = _shipment_order_status(order)
+    if st:
+        row["order_status"] = st
+    saved = _saved_tracking_for_shipment(
+        order,
+        row.get("reference_code") or "",
+        row.get("ems_tracking_code"),
+    )
+    if saved:
+        row["tracking_number_saved"] = saved
+    else:
+        stored = (row.get("tracking_number_saved") or "").strip().upper()
+        order_tracking = (getattr(order, "tracking_number", None) or "").strip().upper()
+        ref = (row.get("reference_code") or "").strip().upper()
+        ems = (row.get("ems_tracking_code") or "").strip().upper()
+        if stored and stored == order_tracking and stored not in {ref, ems}:
+            row["tracking_number_saved"] = None
     step_key, _ = _order_timeline_summary(db, order)
     row["current_step_key"] = step_key
     ems_phase = (row.get("ems_phase") or "").strip()
     if ems_phase and ems_phase != "unknown":
         sync_status, sync_message = _compare_ems_with_order(
             ems_phase=ems_phase,
-            order_status=row["order_status"],
+            order_status=row.get("order_status"),
             current_step_key=step_key,
         )
         row["sync_status"] = sync_status
