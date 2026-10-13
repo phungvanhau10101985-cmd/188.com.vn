@@ -5,13 +5,17 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
 from app.models.order import Order, OrderItem, OrderStatus, PaymentStatus, DepositType
-from app.crud.order import get_order_stats
+from app.models.order_shipment import EmsShippingRecord
+from app.crud.order import get_order_stats, summarize_deposited_without_ems
 from app.schemas.order import AdminOrderStats
 
 
 def test_get_order_stats_deposited_metrics():
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[Order.__table__, OrderItem.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[Order.__table__, OrderItem.__table__, EmsShippingRecord.__table__],
+    )
     TestingSessionLocal = sessionmaker(bind=engine)
     db = TestingSessionLocal()
 
@@ -114,6 +118,12 @@ def test_get_order_stats_deposited_metrics():
         assert schema_stats.deposited_orders == 2
         assert schema_stats.deposited_revenue == Decimal("3500000")
         assert schema_stats.deposited_amount == Decimal("2100000")
+        assert schema_stats.deposited_no_ems_orders == 2
+        receivable = summarize_deposited_without_ems(db)
+        assert receivable["order_count"] == 2
+        assert receivable["order_total"] == Decimal("3500000")
+        assert receivable["deposit_collected"] == Decimal("2100000")
+        assert receivable["amount_due"] == Decimal("1400000")
         assert schema_stats.waiting_deposit_orders == 1
         assert schema_stats.cancelled_orders == 1
         by_percent = {row.percent: row for row in schema_stats.deposit_percent_breakdown}
@@ -146,7 +156,10 @@ def _item(order: Order, product_id: int, qty: int = 1, unit: str = "2160000") ->
 def test_get_order_stats_counts_duplicate_orders_once():
     """Cùng SĐT + cùng hàng + cùng tổng tiền chỉ tính 1 lần; ưu tiên đơn đã cọc."""
     engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine, tables=[Order.__table__, OrderItem.__table__])
+    Base.metadata.create_all(
+        engine,
+        tables=[Order.__table__, OrderItem.__table__, EmsShippingRecord.__table__],
+    )
     db = sessionmaker(bind=engine)()
 
     try:

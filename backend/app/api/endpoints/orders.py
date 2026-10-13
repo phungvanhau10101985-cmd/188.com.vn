@@ -492,7 +492,7 @@ def admin_get_orders(
     fulfillment_source: Optional[str] = Query(None, pattern="^(china|vietnam)$"),
     deposit_hold_overdue: Optional[bool] = None,
     fulfillment_needs_review: Optional[bool] = None,
-    preset: Optional[str] = Query(None, pattern="^china_no_deposit$"),
+    preset: Optional[str] = Query(None, pattern="^(china_no_deposit|deposited_no_ems)$"),
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = Query(None, description="Tra mã đơn, tên hoặc SĐT khách"),
@@ -518,7 +518,7 @@ def admin_get_orders(
     from app.services.order_sla import enrich_admin_orders_sla
 
     enrich_admin_orders_sla(db, items)
-    return {
+    payload = {
         "items": items,
         "pagination": {
             "skip": skip,
@@ -526,6 +526,9 @@ def admin_get_orders(
             "filtered_total": filtered_total,
         },
     }
+    if preset == "deposited_no_ems":
+        payload["receivable"] = crud.order.summarize_deposited_without_ems(db)
+    return payload
 
 @router.get("/admin/stats", response_model=schemas.AdminOrderStats)
 def admin_order_stats(

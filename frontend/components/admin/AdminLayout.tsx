@@ -119,7 +119,18 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <div className="space-y-0.5">
           {group.items.map(({ href, label }) => {
             const hrefPath = adminNavPathFromHref(href);
-            const active = pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
+            const hrefPaths = visibleGroups.flatMap((g) =>
+              g.items.map((item) => adminNavPathFromHref(item.href)),
+            );
+            const matches = pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
+            const active =
+              matches &&
+              !hrefPaths.some(
+                (other) =>
+                  other !== hrefPath &&
+                  other.length > hrefPath.length &&
+                  (pathname === other || pathname.startsWith(`${other}/`)),
+              );
             return (
               <Link
                 key={href}

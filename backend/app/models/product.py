@@ -77,6 +77,8 @@ class Product(Base):
     source_stock_error = Column(Text, nullable=True)
     # PDP/batch đã đọc kết quả qua nền nào (cssbuy | vipomall | cssbuy+vipomall…) — chỉ báo cáo/đối soát.
     source_stock_check_platform = Column(String(80), nullable=True)
+    # Bản colors/sizes order nguồn, cất khi nguồn hết hàng nhưng kho thanh lý còn tồn.
+    source_variant_snapshot = Column(JSON, nullable=True)
     # Trang admin Kiểm tra nguồn (DB): thời điểm đã xếp hàng chạy lần gần nhất; qua N ngày mới vào lại vòng.
     admin_source_batch_scanned_at = Column(DateTime(timezone=True), nullable=True, index=True)
     # Hàng kho thanh lý duyệt hoàn — product_id dạng HN256/XL; base_sku = HN256

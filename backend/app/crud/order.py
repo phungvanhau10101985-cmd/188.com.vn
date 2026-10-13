@@ -1,6 +1,6 @@
 # backend/app/crud/order.py - COMPLETE ORDER CRUD WITH DEPOSIT
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy import or_, func, desc
+from sqlalchemy import and_, case, exists, or_, func, desc, nullslast
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -284,6 +284,8 @@ def _admin_orders_filtered_query(
             Order.status.in_([OrderStatus.CONFIRMED.value, OrderStatus.PROCESSING.value]),
             Order.shipped_at.is_(None),
         )
+    elif preset == "deposited_no_ems":
+        query = query.filter(deposited_without_ems_clause())
 
     if date_from:
         query = query.filter(Order.created_at >= date_from)
@@ -303,6 +305,64 @@ def _admin_orders_filtered_query(
         )
 
     return query
+
+
+def deposited_without_ems_clause():
+    """Đơn khách đã cọc, chưa gửi: chưa có mã vận chuyển EMS và chưa sang trạng thái giao."""
+    from app.models.order_shipment import EmsShippingRecord
+
+    has_ems_code = exists().where(
+        EmsShippingRecord.order_id == Order.id,
+        func.length(func.trim(func.coalesce(EmsShippingRecord.ems_tracking_code, ""))) > 0,
+    )
+    has_tracking_number = func.length(func.trim(func.coalesce(Order.tracking_number, ""))) > 0
+    deposited = or_(
+        Order.deposit_paid_at.isnot(None),
+        Order.deposit_paid > 0,
+        Order.payment_status == PaymentStatus.DEPOSIT_PAID.value,
+        Order.status == OrderStatus.DEPOSIT_PAID.value,
+    )
+    awaiting_ship = Order.status.in_(
+        [
+            OrderStatus.DEPOSIT_PAID.value,
+            OrderStatus.CONFIRMED.value,
+            OrderStatus.PROCESSING.value,
+        ]
+    )
+    return and_(deposited, awaiting_ship, ~has_ems_code, ~has_tracking_number)
+
+
+def _admin_orders_ordered(query, preset: Optional[str]):
+    if preset == "deposited_no_ems":
+        return query.order_by(
+            nullslast(Order.deposit_paid_at.asc()),
+            Order.created_at.asc(),
+            Order.id.asc(),
+        )
+    return query.order_by(desc(Order.created_at))
+
+
+def summarize_deposited_without_ems(db: Session) -> Dict[str, Any]:
+    """Tổng tiền còn phải thu của đơn đã cọc, chưa có mã EMS."""
+    paid = func.coalesce(Order.deposit_paid, 0)
+    total = func.coalesce(Order.total_amount, 0)
+    due = case((total > paid, total - paid), else_=0)
+    order_count, order_total, deposit_collected, amount_due = (
+        db.query(
+            func.count(Order.id),
+            func.coalesce(func.sum(total), 0),
+            func.coalesce(func.sum(paid), 0),
+            func.coalesce(func.sum(due), 0),
+        )
+        .filter(deposited_without_ems_clause())
+        .one()
+    )
+    return {
+        "order_count": int(order_count or 0),
+        "order_total": order_total or 0,
+        "deposit_collected": deposit_collected or 0,
+        "amount_due": amount_due or 0,
+    }
 
 
 def get_orders_admin(
@@ -334,7 +394,7 @@ def get_orders_admin(
         date_to=date_to,
         q=q,
     )
-    return query.order_by(desc(Order.created_at)).offset(skip).limit(limit).all()
+    return _admin_orders_ordered(query, preset).offset(skip).limit(limit).all()
 
 
 def get_orders_admin_paginated(
@@ -367,7 +427,7 @@ def get_orders_admin_paginated(
         q=q,
     )
     filtered_total = query.count()
-    items = query.order_by(desc(Order.created_at)).offset(skip).limit(limit).all()
+    items = _admin_orders_ordered(query, preset).offset(skip).limit(limit).all()
     return items, filtered_total
 
 def admin_update_order(
@@ -971,6 +1031,16 @@ def get_order_stats(
     )
     deposit_by_percent = deposit_percent_breakdown(deposited_orders_list)
 
+    ems_count_query = db.query(func.count(Order.id))
+    if start_dt is not None and end_dt is not None:
+        ems_count_query = ems_count_query.filter(
+            Order.created_at >= start_dt,
+            Order.created_at <= end_dt,
+        )
+    deposited_no_ems_orders = (
+        ems_count_query.filter(deposited_without_ems_clause()).scalar() or 0
+    )
+
     return {
         "total_orders": total_orders,
         "total_revenue": total_revenue,
@@ -979,6 +1049,7 @@ def get_order_stats(
         "deposited_revenue": deposited_revenue,
         "deposited_amount": deposited_amount,
         "deposit_percent_breakdown": deposit_by_percent,
+        "deposited_no_ems_orders": deposited_no_ems_orders,
         "period_label": period_label,
         "date_from": iso_from,
         "date_to": iso_to,

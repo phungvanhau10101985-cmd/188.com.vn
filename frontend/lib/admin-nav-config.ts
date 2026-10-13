@@ -21,6 +21,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: '/admin/orders', label: 'Đơn hàng', moduleKey: 'orders' },
       {
+        href: '/admin/orders/unshipped',
+        label: 'Cần thu chưa gửi',
+        moduleKey: 'orders',
+        skipModuleCatalog: true,
+      },
+      {
         href: '/admin/ad-spend',
         label: 'Chi phí và lợi nhuận',
         moduleKey: 'ad_spend',

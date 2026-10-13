@@ -402,6 +402,7 @@ export interface AdminOrder {
   requires_deposit: boolean;
   deposit_amount: number;
   deposit_paid: number;
+  deposit_paid_at?: string | null;
   deposit_percentage?: number;
   deposit_type?: string | null;
   shipping_fee?: number;
@@ -427,9 +428,17 @@ export interface AdminOrderListPagination {
   filtered_total: number;
 }
 
+export interface DepositedNoEmsReceivable {
+  order_count: number;
+  order_total: number;
+  deposit_collected: number;
+  amount_due: number;
+}
+
 export interface AdminOrderListResponse {
   items: AdminOrder[];
   pagination: AdminOrderListPagination;
+  receivable?: DepositedNoEmsReceivable | null;
 }
 
 export interface DepositPercentStat {
@@ -456,6 +465,7 @@ export interface AdminOrderStats {
   deposited_orders?: number;
   deposited_revenue?: number;
   deposited_amount?: number;
+  deposited_no_ems_orders?: number;
   deposit_percent_breakdown?: DepositPercentStat[];
   period_label?: string | null;
   date_from?: string | null;
@@ -3079,7 +3089,7 @@ export const adminOrderAPI = {
     fulfillment_source?: 'china' | 'vietnam';
     deposit_hold_overdue?: boolean;
     fulfillment_needs_review?: boolean;
-    preset?: 'china_no_deposit';
+    preset?: 'china_no_deposit' | 'deposited_no_ems';
     q?: string;
     limit?: number;
     skip?: number;

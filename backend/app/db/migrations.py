@@ -1485,6 +1485,45 @@ class MigrationManager:
             logger.warning("migrate_product_search_document_trgm: %s", e)
             return True
 
+    def migrate_strip_oos_source_variants_with_warehouse(self) -> bool:
+        """Một lần: SP gốc đang hết nguồn nhưng còn kho thanh lý thì cất và xóa colors/sizes."""
+        backfill_name = "strip_oos_source_variants_warehouse_v1"
+        try:
+            inspector = inspect(engine)
+            if "products" not in inspector.get_table_names():
+                return True
+            cols = {c["name"] for c in inspector.get_columns("products")}
+            if "source_variant_snapshot" not in cols:
+                logger.warning("products.source_variant_snapshot missing; skip variant backfill")
+                return True
+            with engine.connect() as conn:
+                done = conn.execute(
+                    text(
+                        "SELECT 1 FROM migration_history "
+                        "WHERE migration_name = :name AND status = 'SUCCESS' LIMIT 1"
+                    ),
+                    {"name": backfill_name},
+                ).first()
+            if done:
+                return True
+            from app.db.session import SessionLocal
+            from app.services.source_variant_oos import backfill_oos_parents_with_warehouse_stock
+
+            db = SessionLocal()
+            try:
+                changed = backfill_oos_parents_with_warehouse_stock(db)
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+            self.log_migration(backfill_name, "SUCCESS", f"stripped={changed}")
+            logger.info("strip oos source variants with warehouse: %s", changed)
+            return True
+        except Exception as e:
+            logger.warning("migrate_strip_oos_source_variants_with_warehouse: %s", e)
+            return True
+
     def migrate_all_tables(self) -> Dict[str, bool]:
         """Chạy tất cả migrations cần thiết"""
         results = {}
@@ -1525,6 +1564,9 @@ class MigrationManager:
         results['categories_sync_columns'] = self._sync_table_columns("categories", Category)
         results['categories_rating_group_unique'] = self.migrate_category_rating_group_unique()
         results['products_sync_columns'] = self._sync_table_columns("products", Product)
+        results['strip_oos_source_variants_with_warehouse'] = (
+            self.migrate_strip_oos_source_variants_with_warehouse()
+        )
         results['product_import_cost_numeric'] = self.migrate_product_import_cost_numeric()
         results['product_deletions_create'] = self._create_table_if_not_exists(
             "product_deletions", ProductDeletion

@@ -218,9 +218,18 @@ class AdminOrderListPagination(BaseModel):
     filtered_total: int = 0
 
 
+class DepositedNoEmsReceivable(BaseModel):
+    """Tổng tiền còn phải thu của đơn đã cọc, chưa gửi (chưa có mã EMS)."""
+    order_count: int = 0
+    order_total: Decimal = Decimal("0")
+    deposit_collected: Decimal = Decimal("0")
+    amount_due: Decimal = Decimal("0")
+
+
 class AdminOrderListResponse(BaseModel):
     items: List[AdminOrderResponse]
     pagination: AdminOrderListPagination
+    receivable: Optional[DepositedNoEmsReceivable] = None
 
 
 class DepositConfirmedEmailOut(BaseModel):
@@ -260,6 +269,7 @@ class AdminOrderStats(BaseModel):
     deposited_orders: int = 0
     deposited_revenue: Decimal = Decimal("0")
     deposited_amount: Decimal = Decimal("0")
+    deposited_no_ems_orders: int = 0
     deposit_percent_breakdown: List[DepositPercentStat] = []
     period_label: Optional[str] = None
     date_from: Optional[str] = None

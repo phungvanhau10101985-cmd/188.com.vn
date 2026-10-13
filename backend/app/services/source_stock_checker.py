@@ -27,6 +27,7 @@ from app.services.import_source_ids import (
     legacy_mirror_link_markers,
     normalize_product_import_url,
 )
+from app.services.source_variant_oos import apply_source_stock_variant_policy
 from app.services.vipomall_source_stock import (
     evaluate_vipomall_source_stock_from_url,
 )
@@ -979,10 +980,15 @@ def check_product_source_stock(product_id: int) -> Optional[SourceStockCheckResu
             else settings.SOURCE_STOCK_CHECK_STALE_MINUTES
         )
         product.source_stock_next_check_at = now + timedelta(minutes=retry_minutes)
-        if result.status == "out_of_stock":
+        if getattr(product, "is_warehouse_clearance", False):
+            pass
+        elif result.status == "out_of_stock":
             product.available = 0
-        elif result.status == "in_stock" and (product.available or 0) <= 0 and previous_status == "out_of_stock":
-            product.available = 500
+            apply_source_stock_variant_policy(db2, product, new_status="out_of_stock")
+        elif result.status == "in_stock":
+            if (product.available or 0) <= 0 and previous_status == "out_of_stock":
+                product.available = 500
+            apply_source_stock_variant_policy(db2, product, new_status="in_stock")
         db2.commit()
         if result.status == "blocked":
             from app.services.source_stock_block_alert import maybe_notify_admin_all_platforms_blocked

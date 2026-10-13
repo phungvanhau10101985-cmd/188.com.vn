@@ -29,6 +29,10 @@ from app.services.import_cssbuy_client import (
     cssbuy_item_page_to_item_slug,
     evaluate_cssbuy_pdp_stock,
 )
+from app.services.source_variant_oos import (
+    apply_source_stock_variant_policy,
+    restore_source_variants,
+)
 from app.services.import_source_ids import (
     extract_abb_offer_digits,
     is_legacy_placeholder_slug,
@@ -918,10 +922,15 @@ def _finalize_scan_commit_and_serialise(
                 continue
             seen.add(pid)
             previous_status = (p.source_stock_status or "").strip().lower()
-            if classified_oos:
+            if getattr(p, "is_warehouse_clearance", False):
+                pass
+            elif classified_oos:
                 p.available = 0
-            elif scan_status == "in_stock" and int(p.available or 0) <= 0 and previous_status == "out_of_stock":
-                p.available = 500
+                apply_source_stock_variant_policy(db, p, new_status="out_of_stock")
+            elif scan_status == "in_stock":
+                if int(p.available or 0) <= 0 and previous_status == "out_of_stock":
+                    p.available = 500
+                apply_source_stock_variant_policy(db, p, new_status="in_stock")
             p.source_stock_status = scan_status
             p.source_stock_checked_at = now
             p.source_stock_check_platform = plat
@@ -1235,6 +1244,12 @@ def admin_clear_false_source_oos_flags_bulk(
         )
 
     try:
+        for row in (
+            db.query(Product)
+            .filter(*oos_filters, Product.source_variant_snapshot.isnot(None))
+            .all()
+        ):
+            restore_source_variants(row)
         restored = int(
             db.query(Product)
             .filter(*oos_filters)
@@ -1279,6 +1294,7 @@ def admin_clear_false_source_oos_flag(db: Session, *, db_id: int) -> Dict[str, A
         row.source_stock_checked_at = None
         row.source_stock_next_check_at = None
         row.source_stock_check_platform = None
+        restore_source_variants(row)
         if int(row.available or 0) <= 0:
             row.available = 500
         db.commit()

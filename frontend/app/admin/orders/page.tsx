@@ -234,6 +234,24 @@ function todayIsoVn(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 }
 
+/** Số ngày lịch (giờ VN) kể từ lúc khách đặt cọc. */
+function daysSinceDepositStart(order: AdminOrder): number | null {
+  const deposited =
+    Number(order.deposit_paid || 0) > 0 ||
+    !!order.deposit_paid_at ||
+    order.payment_status === 'deposit_paid' ||
+    order.status === 'deposit_paid';
+  if (!deposited) return null;
+  const iso = order.deposit_paid_at || order.created_at;
+  if (!iso) return null;
+  const start = new Date(iso);
+  if (Number.isNaN(start.getTime())) return null;
+  const startDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(start);
+  const elapsed = Date.parse(`${todayIsoVn()}T00:00:00Z`) - Date.parse(`${startDay}T00:00:00Z`);
+  if (!Number.isFinite(elapsed)) return null;
+  return Math.max(0, Math.round(elapsed / 86_400_000));
+}
+
 function monthInputToDateRange(value: string): { from: string; to: string } | null {
   if (!/^\d{4}-\d{2}$/.test(value)) return null;
   const [year, month] = value.split('-').map(Number);
@@ -311,11 +329,18 @@ export default function AdminOrdersPage() {
     setLoading(true);
     try {
       const skip = (listPage - 1) * listPageSize;
+      const listKey = statusFilter || activeTab;
+      const preset =
+        specialFilter === 'china_no_deposit'
+          ? 'china_no_deposit'
+          : listKey === 'waiting_ship'
+            ? 'deposited_no_ems'
+            : undefined;
       const data = await adminOrderAPI.getAllOrders({
-        status: resolveAdminOrderStatusParam(activeTab, statusFilter),
+        status: preset ? undefined : resolveAdminOrderStatusParam(activeTab, statusFilter),
         payment_status: paymentFilter || undefined,
         fulfillment_source: (sourceFilter || undefined) as 'china' | 'vietnam' | undefined,
-        preset: specialFilter === 'china_no_deposit' ? 'china_no_deposit' : undefined,
+        preset,
         deposit_hold_overdue: specialFilter === 'deposit_hold_overdue' ? true : undefined,
         fulfillment_needs_review: specialFilter === 'source_review' ? true : undefined,
         q: appliedSearch || undefined,
@@ -1132,7 +1157,7 @@ export default function AdminOrdersPage() {
                   activeTab === t.key ? 'bg-[#ea580c] text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {t.label} ({statusCounts != null ? (t.countKey === 'total_orders' ? (statusCounts.orders_including_cancelled ?? (statusCounts.total_orders ?? 0) + (statusCounts.cancelled_orders ?? 0)) : t.countKey === 'waiting_ship' ? (statusCounts.deposit_paid_orders ?? 0) + (statusCounts.confirmed_orders ?? 0) + (statusCounts.processing_orders ?? 0) : statusCounts[t.countKey] ?? 0) : '—'})
+                {t.label} ({statusCounts != null ? (t.countKey === 'total_orders' ? (statusCounts.orders_including_cancelled ?? (statusCounts.total_orders ?? 0) + (statusCounts.cancelled_orders ?? 0)) : t.countKey === 'waiting_ship' ? (statusCounts.deposited_no_ems_orders ?? 0) : statusCounts[t.countKey] ?? 0) : '—'})
               </button>
             ))}
           </div>
@@ -1250,7 +1275,9 @@ export default function AdminOrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map((order) => (
+                  {orders.map((order) => {
+                    const depositDays = daysSinceDepositStart(order);
+                    return (
                     <tr key={order.id} className="border-b hover:bg-gray-50">
                       <td className="p-3 text-sm">
                         <div className="font-mono">{order.order_code}</div>
@@ -1277,7 +1304,17 @@ export default function AdminOrdersPage() {
                         <div className="font-medium">{order.customer_name}</div>
                         <div className="text-gray-500 text-sm">{order.customer_phone}</div>
                       </td>
-                      <td className="p-3 font-semibold">{formatVnd(order.total_amount)}</td>
+                      <td className="p-3 font-semibold">
+                        <div>{formatVnd(order.total_amount)}</div>
+                        {depositDays != null ? (
+                          <div
+                            className="mt-0.5 text-xs font-medium text-amber-700"
+                            title="Số ngày kể từ ngày bắt đầu đặt cọc"
+                          >
+                            {depositDays} ngày
+                          </div>
+                        ) : null}
+                      </td>
                       <td className="p-3 text-sm">
                         {depositRequiredDisplay(order) > 0 || adminOrderExpectsDeposit(order) ? (
                           <>
@@ -1351,7 +1388,8 @@ export default function AdminOrdersPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             )}
