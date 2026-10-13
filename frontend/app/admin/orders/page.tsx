@@ -1,7 +1,7 @@
 // frontend/app/admin/orders/page.tsx - ADMIN ORDER MANAGEMENT (Tailwind only, no antd)
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { adminOrderAPI, type AdminOrder, type AdminOrderStats, type AdminOrderStatsPreset, type PaymentRecord } from '@/lib/admin-api';
 import OrderItemVariantMeta, { orderItemImageLink } from '@/components/orders/OrderItemVariantMeta';
@@ -462,6 +462,9 @@ export default function AdminOrdersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const openDetailCode = searchParams.get('open') === '1' ? (searchParams.get('q') || '').trim() : '';
+  const openedDetailRef = useRef('');
+
   useEffect(() => {
     const q = (searchParams.get('q') || searchParams.get('highlight') || '').trim();
     if (q) {
@@ -469,6 +472,16 @@ export default function AdminOrdersPage() {
       setAppliedSearch(q);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (!openDetailCode || loading) return;
+    if (openedDetailRef.current === openDetailCode) return;
+    const match = orders.find((order) => order.order_code.toLowerCase() === openDetailCode.toLowerCase());
+    if (!match) return;
+    openedDetailRef.current = openDetailCode;
+    setSelectedOrder(match);
+    setDetailOpen(true);
+  }, [openDetailCode, loading, orders]);
 
   const loadShipmentTimeline = useCallback(async (orderId: number) => {
     setShipmentLoading(true);

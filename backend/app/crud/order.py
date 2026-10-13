@@ -252,6 +252,7 @@ def _admin_orders_filtered_query(
     deposit_hold_overdue: Optional[bool] = None,
     fulfillment_needs_review: Optional[bool] = None,
     preset: Optional[str] = None,
+    deposit_preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -286,6 +287,7 @@ def _admin_orders_filtered_query(
         )
     elif preset == "deposited_no_ems":
         query = query.filter(deposited_without_ems_clause())
+        query = _filter_by_deposit_preset(query, deposit_preset)
 
     if date_from:
         query = query.filter(Order.created_at >= date_from)
@@ -342,12 +344,35 @@ def _admin_orders_ordered(query, preset: Optional[str]):
     return query.order_by(desc(Order.created_at))
 
 
-def summarize_deposited_without_ems(db: Session) -> Dict[str, Any]:
-    """Tổng tiền còn phải thu của đơn đã cọc, chưa có mã EMS."""
+def _aware_vn(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_VN_TZ)
+    return value
+
+
+def _filter_by_deposit_preset(query, deposit_preset: Optional[str]):
+    """Lọc đơn chưa gửi theo ngày bắt đầu đặt cọc (giờ Việt Nam)."""
+    key = (deposit_preset or "").strip().lower()
+    if not key:
+        return query
+    start, end, *_rest = resolve_order_stats_range(preset=key)
+    anchor = func.coalesce(Order.deposit_paid_at, Order.created_at)
+    start_at = _aware_vn(start)
+    end_at = _aware_vn(end)
+    if start_at is not None:
+        query = query.filter(anchor >= start_at)
+    if end_at is not None:
+        query = query.filter(anchor <= end_at)
+    return query
+
+
+def _receivable_totals(db: Session, deposit_preset: Optional[str] = None) -> Dict[str, Any]:
     paid = func.coalesce(Order.deposit_paid, 0)
     total = func.coalesce(Order.total_amount, 0)
     due = case((total > paid, total - paid), else_=0)
-    order_count, order_total, deposit_collected, amount_due = (
+    query = (
         db.query(
             func.count(Order.id),
             func.coalesce(func.sum(total), 0),
@@ -355,14 +380,28 @@ def summarize_deposited_without_ems(db: Session) -> Dict[str, Any]:
             func.coalesce(func.sum(due), 0),
         )
         .filter(deposited_without_ems_clause())
-        .one()
     )
+    query = _filter_by_deposit_preset(query, deposit_preset)
+    order_count, order_total, deposit_collected, amount_due = query.one()
     return {
         "order_count": int(order_count or 0),
         "order_total": order_total or 0,
         "deposit_collected": deposit_collected or 0,
         "amount_due": amount_due or 0,
     }
+
+
+def summarize_deposited_without_ems(db: Session) -> Dict[str, Any]:
+    """Tổng tiền còn phải thu của đơn đã cọc, chưa có mã EMS, kèm kỳ ngày/tuần/tháng."""
+    overall = _receivable_totals(db)
+    periods = []
+    for key, label in (
+        ("today", "Hôm nay"),
+        ("this_week", "Tuần này"),
+        ("this_month", "Tháng này"),
+    ):
+        periods.append({"key": key, "label": label, **_receivable_totals(db, key)})
+    return {**overall, "periods": periods}
 
 
 def get_orders_admin(
@@ -376,6 +415,7 @@ def get_orders_admin(
     deposit_hold_overdue: Optional[bool] = None,
     fulfillment_needs_review: Optional[bool] = None,
     preset: Optional[str] = None,
+    deposit_preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -390,6 +430,7 @@ def get_orders_admin(
         deposit_hold_overdue=deposit_hold_overdue,
         fulfillment_needs_review=fulfillment_needs_review,
         preset=preset,
+        deposit_preset=deposit_preset,
         date_from=date_from,
         date_to=date_to,
         q=q,
@@ -408,6 +449,7 @@ def get_orders_admin_paginated(
     deposit_hold_overdue: Optional[bool] = None,
     fulfillment_needs_review: Optional[bool] = None,
     preset: Optional[str] = None,
+    deposit_preset: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = None,
@@ -422,6 +464,7 @@ def get_orders_admin_paginated(
         deposit_hold_overdue=deposit_hold_overdue,
         fulfillment_needs_review=fulfillment_needs_review,
         preset=preset,
+        deposit_preset=deposit_preset,
         date_from=date_from,
         date_to=date_to,
         q=q,

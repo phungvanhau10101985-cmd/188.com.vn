@@ -428,11 +428,21 @@ export interface AdminOrderListPagination {
   filtered_total: number;
 }
 
+export interface ReceivablePeriodStat {
+  key: string;
+  label: string;
+  order_count: number;
+  order_total: number;
+  deposit_collected: number;
+  amount_due: number;
+}
+
 export interface DepositedNoEmsReceivable {
   order_count: number;
   order_total: number;
   deposit_collected: number;
   amount_due: number;
+  periods?: ReceivablePeriodStat[];
 }
 
 export interface AdminOrderListResponse {
@@ -3090,6 +3100,7 @@ export const adminOrderAPI = {
     deposit_hold_overdue?: boolean;
     fulfillment_needs_review?: boolean;
     preset?: 'china_no_deposit' | 'deposited_no_ems';
+    deposit_preset?: 'today' | 'this_week' | 'this_month';
     q?: string;
     limit?: number;
     skip?: number;
@@ -3101,6 +3112,7 @@ export const adminOrderAPI = {
     if (params?.deposit_hold_overdue != null) sp.set('deposit_hold_overdue', String(params.deposit_hold_overdue));
     if (params?.fulfillment_needs_review != null) sp.set('fulfillment_needs_review', String(params.fulfillment_needs_review));
     if (params?.preset) sp.set('preset', params.preset);
+    if (params?.deposit_preset) sp.set('deposit_preset', params.deposit_preset);
     if (params?.q?.trim()) sp.set('q', params.q.trim());
     sp.set('limit', String(params?.limit ?? 100));
     sp.set('skip', String(params?.skip ?? 0));

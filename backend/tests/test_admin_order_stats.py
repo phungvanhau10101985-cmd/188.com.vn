@@ -124,6 +124,11 @@ def test_get_order_stats_deposited_metrics():
         assert receivable["order_total"] == Decimal("3500000")
         assert receivable["deposit_collected"] == Decimal("2100000")
         assert receivable["amount_due"] == Decimal("1400000")
+        by_period = {row["key"]: row for row in receivable["periods"]}
+        assert by_period["today"]["order_count"] == 2
+        assert by_period["today"]["amount_due"] == Decimal("1400000")
+        assert by_period["this_week"]["order_count"] == 2
+        assert by_period["this_month"]["order_count"] == 2
         assert schema_stats.waiting_deposit_orders == 1
         assert schema_stats.cancelled_orders == 1
         by_percent = {row.percent: row for row in schema_stats.deposit_percent_breakdown}

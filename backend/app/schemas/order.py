@@ -218,12 +218,22 @@ class AdminOrderListPagination(BaseModel):
     filtered_total: int = 0
 
 
+class ReceivablePeriodStat(BaseModel):
+    key: str
+    label: str
+    order_count: int = 0
+    order_total: Decimal = Decimal("0")
+    deposit_collected: Decimal = Decimal("0")
+    amount_due: Decimal = Decimal("0")
+
+
 class DepositedNoEmsReceivable(BaseModel):
     """Tổng tiền còn phải thu của đơn đã cọc, chưa gửi (chưa có mã EMS)."""
     order_count: int = 0
     order_total: Decimal = Decimal("0")
     deposit_collected: Decimal = Decimal("0")
     amount_due: Decimal = Decimal("0")
+    periods: List[ReceivablePeriodStat] = []
 
 
 class AdminOrderListResponse(BaseModel):
