@@ -3153,7 +3153,7 @@ export const adminOrderAPI = {
     deposit_hold_overdue?: boolean;
     fulfillment_needs_review?: boolean;
     preset?: 'china_no_deposit' | 'deposited_no_ems';
-    deposit_preset?: 'today' | 'this_week' | 'this_month';
+    deposit_preset?: 'today' | 'this_week' | 'last_week' | 'this_month' | 'last_month';
     q?: string;
     limit?: number;
     skip?: number;

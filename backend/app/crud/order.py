@@ -397,7 +397,9 @@ def summarize_deposited_without_ems(db: Session) -> Dict[str, Any]:
     for key, label in (
         ("today", "Hôm nay"),
         ("this_week", "Tuần này"),
+        ("last_week", "Tuần trước"),
         ("this_month", "Tháng này"),
+        ("last_month", "Tháng trước"),
     ):
         periods.append({"key": key, "label": label, **_receivable_totals(db, key)})
     return {**overall, "periods": periods}

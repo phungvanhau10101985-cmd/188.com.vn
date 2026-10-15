@@ -493,7 +493,9 @@ def admin_get_orders(
     deposit_hold_overdue: Optional[bool] = None,
     fulfillment_needs_review: Optional[bool] = None,
     preset: Optional[str] = Query(None, pattern="^(china_no_deposit|deposited_no_ems)$"),
-    deposit_preset: Optional[str] = Query(None, pattern="^(today|this_week|this_month)$"),
+    deposit_preset: Optional[str] = Query(
+        None, pattern="^(today|this_week|last_week|this_month|last_month)$"
+    ),
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     q: Optional[str] = Query(None, description="Tra mã đơn, tên hoặc SĐT khách"),

@@ -6,13 +6,15 @@ import { adminOrderAPI, type AdminOrder, type DepositedNoEmsReceivable } from '@
 
 const PAGE_SIZE = 25;
 
-type DepositPeriod = 'all' | 'today' | 'this_week' | 'this_month';
+type DepositPeriod = 'all' | 'today' | 'this_week' | 'last_week' | 'this_month' | 'last_month';
 
 const PERIOD_OPTIONS: { key: DepositPeriod; label: string }[] = [
   { key: 'all', label: 'Tất cả' },
   { key: 'today', label: 'Hôm nay' },
   { key: 'this_week', label: 'Tuần này' },
+  { key: 'last_week', label: 'Tuần trước' },
   { key: 'this_month', label: 'Tháng này' },
+  { key: 'last_month', label: 'Tháng trước' },
 ];
 
 function formatVnd(n: number | string) {
@@ -143,7 +145,7 @@ export default function UnshippedReceivablePage() {
         </p>
       </section>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Thống kê theo kỳ">
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6" role="group" aria-label="Thống kê theo kỳ">
         {PERIOD_OPTIONS.map((option) => {
           const stat =
             option.key === 'all'

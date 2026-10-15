@@ -223,8 +223,8 @@ export default async function RootLayout({
                   <AppShell initialCategoryTree={initialCategoryTree}>
                     <Suspense fallback={null}>
                       <AnalyticsTracker />
-                      <SiteErrorReporter />
                     </Suspense>
+                    <SiteErrorReporter />
                     <Suspense
                       fallback={
                         <div
