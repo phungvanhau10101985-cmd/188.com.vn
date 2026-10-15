@@ -28,6 +28,7 @@ import { getCdnPublicBase } from "@/lib/site-config";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { getSiteOrigin } from "@/lib/site-origin";
 import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/site-json-ld";
+import { getInitialSiteSaleCalendar } from "@/lib/site-sale-public";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -52,6 +53,21 @@ const inter = Inter({
 });
 
 const CDN_ORIGIN = getCdnPublicBase();
+
+function resourceOrigin(raw: string): string | null {
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return null;
+  }
+}
+
+const SITE_ORIGIN = resourceOrigin(METADATA_BASE_URL);
+const CDN_RESOURCE_ORIGIN = resourceOrigin(CDN_ORIGIN.endsWith("/") ? CDN_ORIGIN : `${CDN_ORIGIN}/`);
+/** Preconnect chỉ khi CDN khác host trang. Cùng origin (cdn-media trên 188.com.vn) không cần, và Lighthouse cảnh báo khi quá 4 hint. */
+const PRECONNECT_CDN = Boolean(
+  CDN_RESOURCE_ORIGIN && SITE_ORIGIN && CDN_RESOURCE_ORIGIN !== SITE_ORIGIN
+);
 
 // Fonts: next/font — tối ưu tải, giảm CSS chặn render và CLS so với @fontsource toàn trang.
 
@@ -154,10 +170,11 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [initialCategoryTree, siteEmbeds, currentAppIcon] = await Promise.all([
+  const [initialCategoryTree, siteEmbeds, currentAppIcon, initialSiteSale] = await Promise.all([
     getCategoryTreeForLayout(),
     fetchPublicSiteEmbeds(),
     fetchCurrentAppWebIcon(),
+    getInitialSiteSaleCalendar(),
   ]);
   const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
   const siteOrigin = getSiteOrigin();
@@ -170,11 +187,13 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <link rel="preconnect" href={CDN_ORIGIN} crossOrigin="anonymous" />
-        <link rel="dns-prefetch" href={CDN_ORIGIN} />
-        <link rel="preconnect" href="https://img.alicdn.com" crossOrigin="anonymous" />
+        {PRECONNECT_CDN ? (
+          <>
+            <link rel="preconnect" href={CDN_RESOURCE_ORIGIN!} crossOrigin="anonymous" />
+            <link rel="dns-prefetch" href={CDN_RESOURCE_ORIGIN!} />
+          </>
+        ) : null}
         <link rel="dns-prefetch" href="https://img.alicdn.com" />
-        <link rel="dns-prefetch" href="https://cbu01.alicdn.com" />
         <SiteEmbedsSsrScripts specs={ssrScripts} />
         {currentAppIcon.is_sale && currentAppIcon.icon_url ? (
           <>
@@ -220,7 +239,7 @@ export default async function RootLayout({
             <CartProvider>
               <FavoriteProvider>
                 <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
-                  <AppShell initialCategoryTree={initialCategoryTree}>
+                  <AppShell initialCategoryTree={initialCategoryTree} initialSiteSale={initialSiteSale}>
                     <Suspense fallback={null}>
                       <AnalyticsTracker />
                     </Suspense>

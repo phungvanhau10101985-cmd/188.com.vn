@@ -204,7 +204,7 @@ export default function CategoryCatalogMarquee({
           heightClass={heightClass}
           borderClass={borderClass}
           duplicateKey="a"
-          priorityFirst
+          priorityFirst={false}
         />
         <TileGrid
           tiles={displayTiles}

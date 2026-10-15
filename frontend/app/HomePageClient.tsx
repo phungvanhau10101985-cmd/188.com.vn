@@ -34,6 +34,7 @@ import type {
   NanoaiSearchProduct,
   SameAgeGenderCohortMode,
   HeroCategoryTilesResponse,
+  MarketingBannerItem,
 } from '@/types/api';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useFavorites } from '@/features/favorites/hooks/useFavorites';
@@ -124,9 +125,11 @@ function favoritePayloadFromProduct(p: Product): Record<string, unknown> {
 export default function HomePageClient({
   initialPlainHome,
   initialHeroCategories = null,
+  initialBanners = null,
 }: {
   initialPlainHome: ProductListResponse | null;
   initialHeroCategories?: HeroCategoryTilesResponse | null;
+  initialBanners?: MarketingBannerItem[] | null;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1451,6 +1454,7 @@ export default function HomePageClient({
           <>
             <MarketingBannerCarousel
               refreshKey={`${isAuthenticated ? 'user' : 'guest'}:${user?.id ?? ''}`}
+              initialItems={initialBanners}
             />
             <PersonalizedHeroBanner
               apiStatus={apiStatus}
@@ -1647,30 +1651,23 @@ export default function HomePageClient({
             />
             <div className="mt-3">
               {showRecommendationSkeleton || (isGuestWithoutSignal && guestCategoryInterest) ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {[...Array(12)].map((_, i) => (
-                    <div key={i} className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse">
-                      <div className="aspect-square bg-gray-100" />
-                      <div className="p-3 space-y-2">
-                        <div className="h-3 bg-gray-100 rounded w-3/4" />
-                        <div className="h-3 bg-gray-100 rounded w-full" />
-                        <div className="h-4 bg-gray-100 rounded w-2/5" />
-                      </div>
-                    </div>
+                <div className="flex flex-wrap gap-2" aria-hidden>
+                  {[...Array(8)].map((_, i) => (
+                    <div key={i} className="h-9 w-24 animate-pulse rounded-full bg-gray-100" />
                   ))}
                 </div>
               ) : isGuestWithoutSignal ? (
                 <GuestCategoryPicker />
               ) : displayedRecommendationProducts.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {displayedRecommendationProducts.map((product, index) => (
+                  {displayedRecommendationProducts.map((product) => (
                     <SimpleProductCard
                       key={product.id}
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
                       showPersonalizedBadge={cohortBadgeProductIds.has(product.id)}
-                      priority={index < 2}
+                      priority={false}
                     />
                   ))}
                 </div>
@@ -1732,7 +1729,7 @@ export default function HomePageClient({
                       product={product}
                       onFavorite={handleFavorite}
                       isFavorited={favoriteIds.has(product.id)}
-                      priority={index < 2 && sameShopProducts.length === 0}
+                      priority={false}
                     />
                   ))}
                 </div>

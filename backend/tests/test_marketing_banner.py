@@ -37,6 +37,17 @@ def test_campaign_key_reuses_month_day_and_changes_with_real_discount():
     assert svc.campaign_key("warehouse", 0, 0, 60) == "warehouse-p60"
 
 
+def test_fit_banner_bytes_shrinks_wide_image_and_keeps_narrow_bytes():
+    wide = svc.fit_banner_bytes(_png_bytes())
+    with Image.open(BytesIO(wide)) as image:
+        assert image.size == (1600, 686)
+        assert image.format == "JPEG"
+    narrow_buf = BytesIO()
+    Image.new("RGB", (800, 400), "#ffffff").save(narrow_buf, format="PNG")
+    narrow = narrow_buf.getvalue()
+    assert svc.fit_banner_bytes(narrow) == narrow
+
+
 def test_prompts_lock_date_percent_and_single_21_9_image():
     sale = svc.build_banner_prompt(
         kind="sale",
@@ -145,8 +156,8 @@ def test_generate_deduplicates_and_force_replaces_previous_image(monkeypatch):
     assert [row.id for row in remaining] == [replacement.id]
     assert db.query(MarketingBannerAsset).filter_by(id=first_id).first() is None
     assert first_url in deleted_urls
-    assert replacement.image_width == 2100
-    assert replacement.image_height == 900
+    assert replacement.image_width == 1600
+    assert replacement.image_height == 686
 
 
 def test_failed_force_keeps_previous_ready_image(monkeypatch):

@@ -88,6 +88,7 @@ def current_marketing_banners(
                 discount_percent=birthday.percent,
             )
 
+        birthday_asset = banner_svc.ensure_banner_web_size(db, birthday_asset)
         if birthday_asset and birthday_asset.image_url and birthday_event_date:
             display_name = (current_user.full_name or "Quý khách").strip()
             greeting = f"Món quà sinh nhật dành riêng cho {display_name}"
@@ -108,6 +109,7 @@ def current_marketing_banners(
             month=sale.event_date.month,
             discount_percent=sale.discount_percent,
         )
+        sale_asset = banner_svc.ensure_banner_web_size(db, sale_asset)
         if sale_asset and sale_asset.image_url:
             items.append(
                 _public_item(sale_asset, event_date=sale.event_date.isoformat())
@@ -118,6 +120,7 @@ def current_marketing_banners(
     warehouse_enabled, warehouse_pct = get_warehouse_clearance_settings(db)
     if warehouse_enabled and warehouse_pct > 0:
         warehouse_asset = banner_svc.find_active_warehouse_asset(db, warehouse_pct)
+        warehouse_asset = banner_svc.ensure_banner_web_size(db, warehouse_asset)
         if warehouse_asset and warehouse_asset.image_url:
             items.append(_public_item(warehouse_asset))
     return MarketingBannerCurrentResponse(items=items)

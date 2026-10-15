@@ -14,28 +14,38 @@ import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
 
 type Props = {
   refreshKey: string;
+  /** SSR: banner đã biết. null = chưa có, client tự tải. */
+  initialItems?: MarketingBannerItem[] | null;
 };
 
-export default function MarketingBannerCarousel({ refreshKey }: Props) {
-  const [items, setItems] = useState<MarketingBannerItem[]>([]);
+export default function MarketingBannerCarousel({ refreshKey, initialItems = null }: Props) {
+  const hasInitial = initialItems != null;
+  const [items, setItems] = useState<MarketingBannerItem[]>(initialItems ?? []);
   const [activeIndex, setActiveIndex] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!hasInitial);
   const [error, setError] = useState(false);
   const [paused, setPaused] = useState(false);
   const viewedCampaign = useRef<string | null>(null);
   const touchStartX = useRef<number | null>(null);
   const didSwipe = useRef(false);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const keepVisible = itemsRef.current.length > 0;
+    if (!keepVisible) {
+      setLoading(true);
+    }
     setError(false);
     try {
       const response = await apiClient.getCurrentMarketingBanners();
       setItems(response.items ?? []);
-      setActiveIndex(0);
+      setActiveIndex((current) => ((response.items ?? [])[current] ? current : 0));
     } catch {
-      setItems([]);
-      setError(true);
+      if (!keepVisible) {
+        setItems([]);
+        setError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -164,10 +174,11 @@ export default function MarketingBannerCarousel({ refreshKey }: Props) {
             <img
               src={item.image_url}
               alt={bannerAlt(item)}
-              width={2100}
-              height={900}
+              width={1600}
+              height={686}
               className="block h-full w-full object-contain"
-              loading="eager"
+              loading={index === 0 ? 'eager' : 'lazy'}
+              fetchPriority={index === 0 ? 'high' : 'low'}
               decoding="async"
               onError={() =>
                 setItems((current) => current.filter((candidate) => candidate.id !== item.id))

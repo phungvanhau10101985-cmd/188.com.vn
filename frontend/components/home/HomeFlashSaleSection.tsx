@@ -47,7 +47,7 @@ export default function HomeFlashSaleSection({
   const countdownLive =
     countdown && !countdown.expired ? formatHeaderCountdown(countdown) : null;
 
-  if (!loading && !error && products.length === 0) {
+  if (!error && (loading || products.length === 0)) {
     return null;
   }
 
@@ -81,31 +81,15 @@ export default function HomeFlashSaleSection({
               Thử lại
             </button>
           </div>
-        ) : loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-            {[...Array(8)].map((_, i) => (
-              <div
-                key={i}
-                className="bg-white rounded-xl border border-gray-100 overflow-hidden animate-pulse"
-                aria-hidden
-              >
-                <div className="aspect-square bg-gray-100" />
-                <div className="p-3 space-y-2">
-                  <div className="h-3 bg-gray-100 rounded w-3/4" />
-                  <div className="h-4 bg-gray-100 rounded w-2/5" />
-                </div>
-              </div>
-            ))}
-          </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6 gap-4">
-            {products.map((product, index) => (
+            {products.map((product) => (
               <SimpleProductCard
                 key={product.id}
                 product={product}
                 onFavorite={onFavorite}
                 isFavorited={favoriteIds.has(product.id)}
-                priority={index < 2}
+                priority={false}
               />
             ))}
           </div>

@@ -2,11 +2,18 @@ import { preload } from 'react-dom';
 import { LISTING_CARD_IMAGE, getOptimizedImage } from '@/lib/image-utils';
 import type { HeroCategoryTilesResponse, ProductListResponse } from '@/types/api';
 
-/** Gọi từ server page — preload ảnh LCP tiềm năng, không đổi UI. */
+/** Gọi từ server page — preload ảnh LCP (banner nếu có), không đổi UI. */
 export function preloadHomeLcpImages(
   initialPlainHome: ProductListResponse | null,
-  initialHeroCategories: HeroCategoryTilesResponse | null
+  initialHeroCategories: HeroCategoryTilesResponse | null,
+  bannerImageUrl?: string | null
 ): void {
+  const bannerHref = (bannerImageUrl || '').trim();
+  if (bannerHref && !bannerHref.startsWith('data:')) {
+    preload(bannerHref, { as: 'image', fetchPriority: 'high' });
+    return;
+  }
+
   const heroTile = initialHeroCategories?.tiles?.find(
     (t) => (t.level === 2 || t.level === 3) && t.image_url
   );

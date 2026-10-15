@@ -1,38 +1,45 @@
 'use client';
 
 import { useMemo, useState, useEffect } from 'react';
-import { useClientMounted } from '@/lib/use-client-mounted';
 import type { SiteSaleCalendarState } from '@/types/api';
 import { calendarSaleProgramLabel, siteSaleBannerMessage } from '@/lib/site-sale';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 
 type Props = {
   state: SiteSaleCalendarState | null;
+  loading?: boolean;
+  /** Bản SSR — hiện ngay, không chờ client fetch (tránh đẩy layout). */
+  initialState?: SiteSaleCalendarState | null;
   className?: string;
 };
 
-export default function SiteSaleBanner({ state, className = '' }: Props) {
+export default function SiteSaleBanner({
+  state,
+  loading = false,
+  initialState = null,
+  className = '',
+}: Props) {
+  const visibleState = loading ? initialState : state;
   const storageKey = useMemo(
-    () => `188_site_sale_banner_${state?.event_date ?? 'none'}_${state?.phase ?? 'off'}`,
-    [state?.event_date, state?.phase],
+    () =>
+      `188_site_sale_banner_${visibleState?.event_date ?? 'none'}_${visibleState?.phase ?? 'off'}`,
+    [visibleState?.event_date, visibleState?.phase],
   );
-  const clientMounted = useClientMounted();
   const [closed, setClosed] = useState(false);
 
   useEffect(() => {
-    if (!clientMounted) return;
     try {
       if (sessionStorage.getItem(storageKey) === '1') setClosed(true);
     } catch {
       /* noop */
     }
-  }, [clientMounted, storageKey]);
+  }, [storageKey]);
 
-  const message = clientMounted ? siteSaleBannerMessage(state) : null;
+  const message = siteSaleBannerMessage(visibleState);
 
-  if (!clientMounted || !message || closed) return null;
+  if (!message || closed) return null;
 
-  const isTeaser = state?.phase === 'teaser';
+  const isTeaser = visibleState?.phase === 'teaser';
 
   return (
     <div
@@ -60,17 +67,21 @@ export default function SiteSaleBanner({ state, className = '' }: Props) {
         ×
       </button>
       <div className="pr-8">
-        <p className="font-semibold">{calendarSaleProgramLabel(null, state)}</p>
-        <p className="text-xs sm:text-sm opacity-90">{message}</p>
-        {state?.countdown_to && state?.phase ? (
-          <SiteSaleLiveCountdown
-            countdownTo={state.countdown_to}
-            phase={state.phase}
-            eventLabel={calendarSaleProgramLabel(null, state)}
-            size="sm"
-            inline
-            className="mt-1 block opacity-95"
-          />
+        <p className="font-semibold">{calendarSaleProgramLabel(null, visibleState)}</p>
+        <p className="text-xs sm:text-sm opacity-90" suppressHydrationWarning>
+          {message}
+        </p>
+        {visibleState?.countdown_to && visibleState?.phase ? (
+          <div className="mt-1 min-h-[1.25rem]">
+            <SiteSaleLiveCountdown
+              countdownTo={visibleState.countdown_to}
+              phase={visibleState.phase}
+              eventLabel={calendarSaleProgramLabel(null, visibleState)}
+              size="sm"
+              inline
+              className="block opacity-95"
+            />
+          </div>
         ) : null}
       </div>
     </div>

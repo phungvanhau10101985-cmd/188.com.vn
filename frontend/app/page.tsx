@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import HomePageClient from "./HomePageClient";
 import { getInitialHomeProductList } from "@/lib/home-initial-feed";
 import { getInitialHomeHeroCategories } from "@/lib/home-hero-categories";
+import { getInitialMarketingBanners } from "@/lib/home-marketing-banners";
 import { preloadHomeLcpImages } from '@/lib/preload-home-lcp';
 import {
   buildHomeCanonicalWithFilters,
@@ -71,11 +72,18 @@ export default async function HomePage({
   const skip = (currentPage - 1) * PAGE_SIZE;
 
   const hasFilters = homeHasListingFilters(resolvedSearchParams);
-  const initialPlainHome = hasFilters ? null : await getInitialHomeProductList(skip, PAGE_SIZE);
-  const initialHeroCategories = hasFilters ? null : await getInitialHomeHeroCategories('Nam', 16);
+  const [initialPlainHome, initialHeroCategories, initialBanners] = await Promise.all([
+    hasFilters ? Promise.resolve(null) : getInitialHomeProductList(skip, PAGE_SIZE),
+    hasFilters ? Promise.resolve(null) : getInitialHomeHeroCategories('Nam', 16),
+    hasFilters ? Promise.resolve(null) : getInitialMarketingBanners(),
+  ]);
 
   if (!hasFilters) {
-    preloadHomeLcpImages(initialPlainHome, initialHeroCategories);
+    preloadHomeLcpImages(
+      initialPlainHome,
+      initialHeroCategories,
+      initialBanners?.[0]?.image_url
+    );
   }
 
   /** Nội dung không bọc Suspense riêng: layout đã có Suspense `{children}` với skeleton ổn định hơn. */
@@ -83,6 +91,7 @@ export default async function HomePage({
     <HomePageClient
       initialPlainHome={initialPlainHome}
       initialHeroCategories={initialHeroCategories}
+      initialBanners={initialBanners}
     />
   );
 }

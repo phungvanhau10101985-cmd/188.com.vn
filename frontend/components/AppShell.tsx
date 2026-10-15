@@ -37,7 +37,7 @@ import { useFavorites } from '@/features/favorites/hooks/useFavorites';
 import { apiClient } from '@/lib/api-client';
 import { navigateProductTextSearch } from '@/lib/navigate-product-text-search';
 import { searchParamsToEncodedQueryString } from '@/lib/product-related-tabs';
-import type { CategoryLevel1 } from '@/types/api';
+import type { CategoryLevel1, SiteSaleCalendarState } from '@/types/api';
 import { usePersonalizedCategoryTree } from '@/lib/use-personalized-category-tree';
 import {
   captureReferralFromUrl,
@@ -60,9 +60,11 @@ interface AppShellProps {
   children: React.ReactNode;
   /** Cây danh mục từ server (layout) để thanh danh mục hiển thị ngay, không phụ thuộc fetch client */
   initialCategoryTree?: CategoryLevel1[];
+  /** Sale lịch từ server — banner có chiều cao ngay, không đẩy trang sau hydrate */
+  initialSiteSale?: SiteSaleCalendarState | null;
 }
 
-export default function AppShell({ children, initialCategoryTree }: AppShellProps) {
+export default function AppShell({ children, initialCategoryTree, initialSiteSale = null }: AppShellProps) {
   const categoryTree = usePersonalizedCategoryTree(initialCategoryTree);
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -70,10 +72,33 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
   const { isAuthenticated } = useAuth();
   const { getCartItemCount } = useCart();
   const { favoriteCount } = useFavorites();
-  const { state: siteSaleState } = useSiteSale();
+  const { state: siteSaleState, loading: siteSaleLoading } = useSiteSale();
   const [viewedProductsCount, setViewedProductsCount] = useState(0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [headerVisible, setHeaderVisible] = useState(true);
+
+  useEffect(() => {
+    const labelFrame = (el: HTMLIFrameElement) => {
+      if ((el.getAttribute('title') || '').trim()) return;
+      el.setAttribute('title', 'Nội dung nhúng');
+    };
+    const run = () => {
+      document.querySelectorAll('iframe').forEach((node) => labelFrame(node as HTMLIFrameElement));
+    };
+    let debounce = 0;
+    const observer = new MutationObserver(() => {
+      window.clearTimeout(debounce);
+      debounce = window.setTimeout(run, 250);
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    run();
+    const stop = window.setTimeout(() => observer.disconnect(), 8000);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(stop);
+      window.clearTimeout(debounce);
+    };
+  }, []);
 
   const qFromUrl = searchParams.get('q') ?? '';
   const isAuthPage = pathname?.startsWith('/auth/');
@@ -470,7 +495,11 @@ export default function AppShell({ children, initialCategoryTree }: AppShellProp
       )}
 
       {!isAdminPage && !isAuthPage && !isCartAddLandingPage && !isShopVideoFeedPage && !isMobileSearchComposePage && (
-        <SiteSaleBanner state={siteSaleState} />
+        <SiteSaleBanner
+          state={siteSaleState}
+          loading={siteSaleLoading}
+          initialState={initialSiteSale}
+        />
       )}
 
       <main

@@ -11,6 +11,7 @@ import calendar
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from PIL import Image
 import requests
@@ -36,6 +37,9 @@ from app.services.sale_calendar import list_upcoming_events
 logger = logging.getLogger(__name__)
 VN_TZ = timezone(timedelta(hours=7))
 ASPECT_RATIO = "21:9"
+# Banner vẽ 2K (~3168px) nhưng ô web tối đa ~1200px CSS. Giữ q90, chỉ hạ pixel khi vượt 1600.
+WEB_BANNER_MAX_WIDTH = 1600
+WEB_BANNER_JPEG_QUALITY = 90
 BANNER_KINDS = ("sale", "birthday", "warehouse")
 WAREHOUSE_DATE_KEY = "kho"
 MAX_BANNER_CREATE_ATTEMPTS = 3
@@ -268,6 +272,91 @@ def _probe_bunny_before_image(*, kind: str, key: str, version: int) -> None:
     finally:
         if uploaded:
             _delete_bunny_probe(zone, access_key, remote_path)
+
+
+def fit_banner_bytes(data: bytes) -> bytes:
+    """Thu banner về tối đa 1600px, JPEG q90. File đã đủ nhỏ thì giữ nguyên byte."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if width <= WEB_BANNER_MAX_WIDTH or height <= 0:
+                return data
+            new_h = max(1, round(height * (WEB_BANNER_MAX_WIDTH / width)))
+            fitted = image.convert("RGB").resize(
+                (WEB_BANNER_MAX_WIDTH, new_h),
+                Image.Resampling.LANCZOS,
+            )
+            buf = io.BytesIO()
+            save_kwargs = {
+                "format": "JPEG",
+                "quality": WEB_BANNER_JPEG_QUALITY,
+                "optimize": True,
+                "subsampling": 0,
+            }
+            try:
+                fitted.save(buf, **save_kwargs)
+            except TypeError:
+                save_kwargs.pop("subsampling", None)
+                buf = io.BytesIO()
+                fitted.save(buf, **save_kwargs)
+            return buf.getvalue()
+    except Exception:
+        logger.warning("Không thu được kích thước banner, giữ file gốc", exc_info=True)
+        return data
+
+
+def _is_managed_banner_url(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return host.endswith("188.com.vn") or host.endswith(".b-cdn.net")
+
+
+def ensure_banner_web_size(
+    db: Session,
+    row: Optional[MarketingBannerAsset],
+) -> Optional[MarketingBannerAsset]:
+    """Banner cũ còn bản 2K thì xuất một file vừa khung web rồi đổi URL. Ảnh đã ≤1600px không encode lại."""
+    if row is None or not (row.image_url or "").strip():
+        return row
+    if row.image_width and int(row.image_width) <= WEB_BANNER_MAX_WIDTH:
+        return row
+    if not _is_managed_banner_url(row.image_url):
+        return row
+    try:
+        response = requests.get(row.image_url, timeout=20)
+        response.raise_for_status()
+        raw = response.content
+        if not raw or len(raw) > 12_000_000:
+            return row
+        fitted = fit_banner_bytes(raw)
+        width, height, _ = _image_dimensions(fitted)
+        if fitted == raw:
+            if width and row.image_width != width:
+                row.image_width = width
+                row.image_height = height
+                db.commit()
+            return row
+        if not width or width > WEB_BANNER_MAX_WIDTH:
+            return row
+        image_url = _upload_banner(
+            fitted,
+            kind=row.kind,
+            key=row.campaign_key,
+            version=int(row.version or 1),
+        )
+        row.image_url = image_url
+        row.image_width = width
+        row.image_height = height
+        db.commit()
+        logger.info(
+            "Đã thu banner %s về %sx%s (%s byte)",
+            row.id,
+            width,
+            height,
+            len(fitted),
+        )
+    except Exception:
+        logger.warning("Giữ banner gốc id=%s vì không thu được file web", getattr(row, "id", None), exc_info=True)
+    return row
 
 
 def _upload_banner(data: bytes, *, kind: str, key: str, version: int) -> str:
@@ -746,8 +835,9 @@ def generate_banner(
             image_size="2K",
             aspect_ratio=ASPECT_RATIO,
         )
-        width, height, _ = _image_dimensions(raw)
-        image_url = _upload_banner(raw, kind=kind, key=key, version=version)
+        fitted = fit_banner_bytes(raw)
+        width, height, _ = _image_dimensions(fitted)
+        image_url = _upload_banner(fitted, kind=kind, key=key, version=version)
         row = (
             db.query(MarketingBannerAsset)
             .filter(MarketingBannerAsset.id == asset_id)
