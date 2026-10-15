@@ -282,16 +282,15 @@ function dayTotal(google: number | undefined, facebook: number | undefined, sour
 }
 
 export default function AdminAdSpendPage() {
-  const initial = rangeFor('30');
   const today = rangeFor('today');
   const [settings, setSettings] = useState<AdSpendSettingsView | null>(null);
   const [report, setReport] = useState<AdSpendReport | null>(null);
-  const [periodFrom, setPeriodFrom] = useState(initial.from);
-  const [periodTo, setPeriodTo] = useState(initial.to);
+  const [periodFrom, setPeriodFrom] = useState(today.from);
+  const [periodTo, setPeriodTo] = useState(today.to);
   const [focusFrom, setFocusFrom] = useState(today.from);
   const [focusTo, setFocusTo] = useState(today.to);
-  const [draftFrom, setDraftFrom] = useState(initial.from);
-  const [draftTo, setDraftTo] = useState(initial.to);
+  const [draftFrom, setDraftFrom] = useState(today.from);
+  const [draftTo, setDraftTo] = useState(today.to);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [loadingReport, setLoadingReport] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -299,10 +298,10 @@ export default function AdminAdSpendPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [profitRefreshKey, setProfitRefreshKey] = useState(0);
-  const [chosenPreset, setChosenPreset] = useState<RangeKey | null>('30');
+  const [chosenPreset, setChosenPreset] = useState<RangeKey | null>('today');
   const [profitSummary, setProfitSummary] = useState<AdSpendProfitSummary | null>(null);
   const reportSeq = useRef(0);
-  const periodRef = useRef({ from: initial.from, to: initial.to });
+  const periodRef = useRef({ from: today.from, to: today.to });
   const selectedChipRef = useRef<HTMLButtonElement | null>(null);
   periodRef.current = { from: periodFrom, to: periodTo };
 
@@ -608,7 +607,7 @@ export default function AdminAdSpendPage() {
               >
                 Cả kỳ
               </button>
-              {periodDays.map((iso) => {
+              {[...periodDays].reverse().map((iso) => {
                 const parts = dayParts(iso);
                 const active = focusFrom === iso && focusTo === iso;
                 return (
