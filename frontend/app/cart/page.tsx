@@ -88,10 +88,9 @@ import {
   TERMS_URL,
 } from '@/lib/business-info';
 import {
-  cartLineUnitPrice,
   formatDepositMinVnd,
   HIGH_UNIT_PRICE_VND,
-  lineHitsHighUnitPrice,
+  orderHitsHighValue,
   partialPercentForLines,
 } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
@@ -567,16 +566,30 @@ export default function CartPage() {
     });
   };
 
-  const highUnitPriceSelected = selectedCartItems.some((item) =>
-    lineHitsHighUnitPrice(cartLineUnitPrice(item)),
+  const goodsForSource = (source: 'china' | 'vietnam') => {
+    let regular = 0;
+    let warehouse = 0;
+    for (const item of selectedCartItems) {
+      const itemSource = item.product_data?.fulfillment_source === 'china' ? 'china' : 'vietnam';
+      if (itemSource !== source) continue;
+      const line = resolveCartLineCheckoutTotal(item, siteSaleState);
+      if (isWarehouseCartLine(item)) warehouse += line;
+      else regular += line;
+    }
+    const regularDiscount = Math.max(0, regularSubtotal - regularFinalPrice);
+    const share = regularSubtotal > 0 ? (regularDiscount * regular) / regularSubtotal : 0;
+    return Math.max(0, regular - share) + warehouse;
+  };
+  const highOrderValueSelected = (['vietnam', 'china'] as const).some((source) =>
+    orderHitsHighValue(goodsForSource(source)),
   );
   const depositRequiredForSelected =
-    highUnitPriceSelected ||
+    highOrderValueSelected ||
     selectedCartItems.some(
       (item) =>
         item.requires_deposit === true || item.product_data?.deposit_require === true
     );
-  const checkoutDepositPercent = partialPercentForLines(depositPercent, highUnitPriceSelected);
+  const checkoutDepositPercent = partialPercentForLines(depositPercent, highOrderValueSelected);
   const paymentMethodLabel = depositRequiredForSelected
     ? `Chuyển khoản cọc ${checkoutDepositPercent}%, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`
     : 'Thanh toán khi nhận hàng (COD)';
@@ -1679,9 +1692,9 @@ export default function CartPage() {
             {depositRequiredForSelected && selectedCartItems.length > 0 ? (
               <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-[11px] text-blue-900 md:text-sm">
                 <p>
-                  {highUnitPriceSelected ? (
+                  {highOrderValueSelected ? (
                     <>
-                      Đơn có sản phẩm đơn giá từ{' '}
+                      Đơn từ{' '}
                       <strong>{formatDepositMinVnd(HIGH_UNIT_PRICE_VND)}</strong> cần đặt cọc tối thiểu{' '}
                       <strong>{checkoutDepositPercent}%</strong> giá trị hàng
                     </>

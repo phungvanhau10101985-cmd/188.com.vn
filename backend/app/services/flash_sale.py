@@ -34,6 +34,8 @@ FLASH_SALE_CANDIDATE_LIMIT = 240
 FLASH_SALE_MIN_SHOW = 4
 FLASH_SALE_ENABLED_CACHE_KEY = "flash-sale:enabled"
 FLASH_SALE_ENABLED_TTL_SECONDS = 5.0
+# Payload đã serialize — cùng SP trong lượt, tránh mỗi lần mở trang lại query pool.
+FLASH_SALE_BLOCK_CACHE_SECONDS = 30.0
 
 _identity_ctx: ContextVar[Tuple[Optional[int], Optional[str]]] = ContextVar(
     "flash_sale_identity", default=(None, None)
@@ -360,6 +362,48 @@ def _build_assignment(
 
 def _cache_key(identity: str, slot_key: str) -> str:
     return f"flash-sale:{identity}:{slot_key}"
+
+
+def _block_cache_key(
+    user_id: Optional[int], guest_session_id: Optional[str], slot_key: str
+) -> Optional[str]:
+    identity = _identity_key(user_id, guest_session_id)
+    if not identity or not slot_key:
+        return None
+    return f"flash-sale-block:{identity}:{slot_key}"
+
+
+def peek_flash_sale_block(
+    user_id: Optional[int], guest_session_id: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """Bản flash sale vừa dựng, không mở DB. Không có hoặc đã hết hạn thì None."""
+    slot = resolve_flash_slot()
+    key = _block_cache_key(user_id, guest_session_id, slot.key)
+    if not key:
+        return None
+    cached = ttl_cache.get(key, FLASH_SALE_BLOCK_CACHE_SECONDS)
+    if not isinstance(cached, dict):
+        return None
+    products = cached.get("products") or []
+    if len(products) < FLASH_SALE_MIN_SHOW or cached.get("slot_key") != slot.key:
+        return None
+    return cached
+
+
+def remember_flash_sale_block(
+    user_id: Optional[int],
+    guest_session_id: Optional[str],
+    payload: Dict[str, Any],
+) -> None:
+    """Chỉ nhớ khối đã có đủ SP. Khối rỗng không khóa — lượt xem mới phải hiện ngay."""
+    products = payload.get("products") or []
+    if len(products) < FLASH_SALE_MIN_SHOW:
+        return
+    slot_key = str(payload.get("slot_key") or "")
+    key = _block_cache_key(user_id, guest_session_id, slot_key)
+    if not key:
+        return
+    ttl_cache.set(key, payload)
 
 
 def get_flash_sale_assignment(

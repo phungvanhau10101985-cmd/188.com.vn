@@ -304,6 +304,112 @@ def test_high_unit_price_keeps_higher_configured_percent():
     assert deposit["deposit_amount"] == Decimal("1200000.00")
 
 
+def test_three_products_of_one_million_force_30_percent_deposit():
+    deposit = build_group_financial_plan(
+        [
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": False,
+            },
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": False,
+            },
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": False,
+            },
+        ],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+    )
+    assert deposit["requires_deposit"] is True
+    assert deposit["deposit_percentage"] == 30
+    assert deposit["deposit_amount"] == Decimal("900000.00")
+
+
+def test_line_total_above_3m_forces_30_percent_even_when_unit_price_is_lower():
+    deposit = build_group_financial_plan(
+        [{
+            "fulfillment_source": "china",
+            "unit_price": Decimal("2346500"),
+            "total_price": Decimal("4693000"),
+            "requires_deposit": True,
+        }],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+    )
+    assert deposit["deposit_percentage"] == 30
+    assert deposit["deposit_amount"] == Decimal("1407900.00")
+
+
+def test_order_under_3m_keeps_configured_percent():
+    deposit = build_group_financial_plan(
+        [
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": True,
+            },
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": True,
+            },
+        ],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+    )
+    assert deposit["requires_deposit"] is True
+    assert deposit["deposit_percentage"] == 10
+    assert deposit["deposit_amount"] == Decimal("200000.00")
+
+
+def test_discount_below_3m_does_not_force_high_percent():
+    deposit = build_group_financial_plan(
+        [
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": True,
+            },
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": True,
+            },
+            {
+                "fulfillment_source": "china",
+                "unit_price": Decimal("1000000"),
+                "total_price": Decimal("1000000"),
+                "requires_deposit": True,
+            },
+        ],
+        discount=Decimal("1"),
+        shipping_fee=Decimal("0"),
+        requested_deposit_type=None,
+        partial_percent=10,
+    )
+    assert deposit["deposit_percentage"] == 10
+    assert deposit["deposit_amount"] == Decimal("299999.90")
+
+
 def test_unit_price_below_threshold_does_not_force_deposit():
     deposit = build_group_financial_plan(
         [{

@@ -22,7 +22,7 @@ from app.crud.deposit_settings import (
     apply_partial_deposit,
     get_rule,
     line_requires_deposit,
-    partial_percent_for_lines,
+    partial_percent_for_goods,
 )
 from app.services import affiliate_wallet as affiliate_svc
 from app.services import order_shipment_timeline as shipment_svc
@@ -50,7 +50,7 @@ def calculate_deposit(
         return Decimal('0')
     
     if deposit_type == DepositType.PERCENT_30.value:
-        pct = partial_percent_for_lines(partial_percent, [{"unit_price": unit_price}])
+        pct = partial_percent_for_goods(partial_percent, unit_price)
         return apply_partial_deposit(Decimal(product.price or 0), pct, min_amount)
     elif deposit_type == DepositType.PERCENT_100.value:
         return product.price
@@ -208,8 +208,7 @@ def update_order_deposit_type(
         order.remaining_amount = total - deposit_base
     else:
         partial, minimum = get_rule(db)
-        lines = list(getattr(order, "items", None) or [])
-        partial = partial_percent_for_lines(partial, lines)
+        partial = partial_percent_for_goods(partial, deposit_base)
         order.deposit_percentage = partial
         order.deposit_amount = apply_partial_deposit(deposit_base, partial, minimum)
         order.remaining_amount = (total - order.deposit_amount).quantize(Decimal('0.01'))

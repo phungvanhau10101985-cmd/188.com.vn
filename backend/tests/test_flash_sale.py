@@ -164,3 +164,50 @@ def test_disabled_flash_returns_empty_assignment(monkeypatch):
     assignment = get_flash_sale_assignment(SimpleNamespace(), user_id=1)
     assert assignment.product_ids == []
     assert assignment.percent_by_id == {}
+
+
+def test_flash_sale_block_cache_keeps_same_payload_and_skips_empty():
+    from app.services.flash_sale import (
+        peek_flash_sale_block,
+        remember_flash_sale_block,
+        resolve_flash_slot,
+    )
+
+    slot = resolve_flash_slot()
+    empty = {
+        "products": [],
+        "countdown_to": slot.end_at.isoformat(),
+        "slot_start_at": slot.start_at.isoformat(),
+        "slot_end_at": slot.end_at.isoformat(),
+        "slot_key": slot.key,
+    }
+    remember_flash_sale_block(7, None, empty)
+    assert peek_flash_sale_block(7, None) is None
+
+    payload = {
+        "products": [{"id": i} for i in range(1, 5)],
+        "countdown_to": slot.end_at.isoformat(),
+        "slot_start_at": slot.start_at.isoformat(),
+        "slot_end_at": slot.end_at.isoformat(),
+        "slot_key": slot.key,
+    }
+    remember_flash_sale_block(7, None, payload)
+    assert peek_flash_sale_block(7, None)["products"][0]["id"] == 1
+    assert peek_flash_sale_block(8, None) is None
+    assert peek_flash_sale_block(None, "guest-a") is None
+
+
+def test_close_export_session_survives_dead_connection():
+    from app.db.export_session import close_export_session
+
+    class _Dead:
+        def close(self):
+            raise Exception("connection already closed")
+
+        def invalidate(self):
+            self.invalidated = True
+
+    db = _Dead()
+    close_export_session(db)
+    assert db.invalidated is True
+    close_export_session(None)

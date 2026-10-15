@@ -93,6 +93,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: '/admin/notifications', label: 'Thông báo', moduleKey: 'notifications' },
       { href: '/admin/newsletter', label: 'Quản lý gửi email', moduleKey: 'newsletter' },
+      {
+        href: '/admin/errors',
+        label: 'Quản lý lỗi',
+        moduleKey: 'error_logs',
+        privilegedOnly: true,
+      },
     ],
   },
 ];

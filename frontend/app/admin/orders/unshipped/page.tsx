@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
+import AdminOrderDetailModal from '@/components/admin/AdminOrderDetailModal';
 import { adminOrderAPI, type AdminOrder, type DepositedNoEmsReceivable } from '@/lib/admin-api';
 
 const PAGE_SIZE = 25;
@@ -55,6 +55,13 @@ export default function UnshippedReceivablePage() {
   const [search, setSearch] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
   const [period, setPeriod] = useState<DepositPeriod>('all');
+  const [detailOrder, setDetailOrder] = useState<AdminOrder | null>(null);
+  const [toast, setToast] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+
+  const notify = (type: 'ok' | 'err', msg: string) => {
+    setToast({ type, msg });
+    window.setTimeout(() => setToast(null), 3000);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +110,17 @@ export default function UnshippedReceivablePage() {
 
   return (
     <div className="mx-auto max-w-3xl p-4 sm:p-6">
+      {toast ? (
+        <div
+          className={`fixed top-24 right-4 z-[100] max-w-[min(20rem,calc(100vw-2rem))] rounded-lg px-4 py-2 shadow-lg sm:right-6 ${
+            toast.type === 'ok' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+          }`}
+          role="status"
+          aria-live="polite"
+        >
+          {toast.msg}
+        </div>
+      ) : null}
       <div className="mb-4">
         <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">Cần thu chưa gửi</h1>
         <p className="mt-1 text-sm text-gray-600">
@@ -251,12 +269,13 @@ export default function UnshippedReceivablePage() {
                     </div>
                   </div>
                   <div className="mt-2 flex justify-end">
-                    <Link
-                      href={`/admin/orders?q=${encodeURIComponent(order.order_code)}&open=1`}
+                    <button
+                      type="button"
+                      onClick={() => setDetailOrder(order)}
                       className="inline-flex min-h-[36px] items-center rounded-lg border border-[#ea580c] px-3 py-1.5 text-xs font-semibold text-[#ea580c] hover:bg-orange-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#ea580c]"
                     >
                       Xem chi tiết
-                    </Link>
+                    </button>
                   </div>
                 </li>
               );
@@ -294,6 +313,19 @@ export default function UnshippedReceivablePage() {
           </div>
         ) : null}
       </section>
+
+      {detailOrder ? (
+        <AdminOrderDetailModal
+          order={detailOrder}
+          onClose={() => setDetailOrder(null)}
+          onOrderChange={(next) => {
+            setDetailOrder(next);
+            setOrders((prev) => prev.map((row) => (row.id === next.id ? { ...row, ...next } : row)));
+          }}
+          onRefresh={() => void load()}
+          notify={notify}
+        />
+      ) : null}
     </div>
   );
 }

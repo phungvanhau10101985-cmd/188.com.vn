@@ -39,6 +39,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "vps_backup",
     "notifications",
     "newsletter",
+    "error_logs",
     "ladipage",
 }
 

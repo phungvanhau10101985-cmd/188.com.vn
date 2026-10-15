@@ -35,6 +35,14 @@ class TTLCache:
             return None
         return value
 
+    def get(self, key: str, ttl_seconds: float) -> Optional[Any]:
+        with self._store_lock:
+            return self._get_fresh(key, ttl_seconds)
+
+    def set(self, key: str, value: Any) -> None:
+        with self._store_lock:
+            self._store[key] = (time.time(), value)
+
     def get_or_fetch(
         self,
         key: str,

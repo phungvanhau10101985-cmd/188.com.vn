@@ -163,11 +163,27 @@ def get_current_user(
     return user
 
 
-def get_current_user_optional(
-    token: Optional[str] = Depends(get_raw_token_optional),
-    db: Session = Depends(get_db),
-) -> Optional[User]:
-    """Lấy user hiện tại nếu có token hợp lệ; không có token hoặc token lỗi thì trả về None."""
+def optional_user_id_from_token(token: Optional[str]) -> Optional[int]:
+    """user_id trong JWT, không mở DB. Token thiếu user_id thì trả None (caller tra DB)."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, _get_secret_key(), algorithms=[settings.ALGORITHM])
+    except JWTError:
+        return None
+    if payload.get("type") != "user" or not payload.get("sub"):
+        return None
+    raw_id = payload.get("user_id")
+    if raw_id is None:
+        return None
+    try:
+        return int(raw_id)
+    except (TypeError, ValueError):
+        return None
+
+
+def resolve_optional_user(db: Session, token: Optional[str]) -> Optional[User]:
+    """User từ token nếu hợp lệ. Không có token, token lỗi, hoặc DB lỗi thì None."""
     if not token:
         return None
     try:
@@ -195,6 +211,14 @@ def get_current_user_optional(
     except Exception:
         # Endpoint dùng optional auth (badge, behavior, trang công khai) không được fail cứng vì DB đang căng.
         return None
+
+
+def get_current_user_optional(
+    token: Optional[str] = Depends(get_raw_token_optional),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """Lấy user hiện tại nếu có token hợp lệ; không có token hoặc token lỗi thì trả về None."""
+    return resolve_optional_user(db, token)
 
 
 # ========== ADMIN FUNCTIONS ==========

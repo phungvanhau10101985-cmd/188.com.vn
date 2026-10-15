@@ -48,3 +48,20 @@ ExportSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_expor
 def get_export_db_session():
     """Mở session riêng cho job export/sync nặng — nhớ close() trong finally."""
     return ExportSessionLocal()
+
+
+def close_export_session(db) -> None:
+    """Đóng session export. Client ngắt giữa chừng (Facebook/Google) thì connection
+    có thể đã chết — rollback trong close() ném InterfaceError và giữ slot pool nhỏ.
+    """
+    if db is None:
+        return
+    try:
+        db.close()
+        return
+    except Exception:
+        pass
+    try:
+        db.invalidate()
+    except Exception:
+        pass

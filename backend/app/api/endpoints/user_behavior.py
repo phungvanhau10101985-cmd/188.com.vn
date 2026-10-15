@@ -5,9 +5,15 @@ from datetime import date, datetime
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db, is_sqlite
 from app.models.user import User
-from app.core.security import get_current_user, get_current_user_optional
+from app.core.security import (
+    get_current_user,
+    get_current_user_optional,
+    get_raw_token_optional,
+    optional_user_id_from_token,
+    resolve_optional_user,
+)
 from app.schemas.user import (
     ProductViewCreate, ProductViewResponse, FavoriteCreate, 
     FavoriteResponse, CategoryViewCreate, CategoryViewResponse,
@@ -375,35 +381,85 @@ def get_home_recommendation_block_endpoint(
         }
 
 
+def _close_request_session(db: Session) -> None:
+    try:
+        db.rollback()
+        db.close()
+    except Exception:
+        try:
+            db.invalidate()
+        except Exception:
+            pass
+
+
 @router.get("/products/flash-sale-block", response_model=dict)
 def get_flash_sale_block_endpoint(
     response: Response,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db),
+    token: Optional[str] = Depends(get_raw_token_optional),
     x_guest_session_id: Optional[str] = Header(None, alias="X-Guest-Session-Id"),
 ):
     """
     Khối Flash sale trang chủ: shop Trung Quốc của 8 SP vừa xem,
     8–12 SP trộn đều mỗi lượt (không tua hết shop này sang shop kia), giảm 5–6%.
     Hàng kho thanh lý không vào nhóm và không đổi % kho.
+
+    Bản vừa dựng (30 giây, theo user/khách + lượt) trả thẳng, không mở pool.
     """
     response.headers["Cache-Control"] = "private, no-store"
     sid = (x_guest_session_id or "").strip() or None
-    uid = current_user.id if current_user else None
-    from app.services.flash_sale import list_flash_sale_products, set_flash_sale_identity
+    uid_hint = optional_user_id_from_token(token)
+    from app.services.flash_sale import (
+        list_flash_sale_products,
+        peek_flash_sale_block,
+        remember_flash_sale_block,
+        set_flash_sale_identity,
+    )
 
-    set_flash_sale_identity(uid, sid)
+    # Token không có user_id phải tra DB — không lấy nhầm cache khách.
+    if not token or uid_hint is not None:
+        cached = peek_flash_sale_block(uid_hint, sid)
+        if cached is not None:
+            return cached
+
+    if not is_sqlite:
+        try:
+            from app.db.pool_self_heal import get_pool_usage_snapshot
+
+            snap = get_pool_usage_snapshot()
+            checked_out = int(snap.get("checked_out") or 0)
+            pool_max = int(snap.get("pool_max") or 0)
+            if pool_max > 0 and checked_out >= pool_max:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây",
+                    headers={"Retry-After": "3"},
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    db = SessionLocal()
     try:
-        return list_flash_sale_products(
+        current_user = resolve_optional_user(db, token)
+        uid = current_user.id if current_user else None
+        set_flash_sale_identity(uid, sid)
+        payload = list_flash_sale_products(
             db,
             user_id=uid,
             guest_session_id=sid,
             serialize_products=_serialize_product_rows_for_api,
             user=current_user,
         )
+        if current_user is not None or not token:
+            remember_flash_sale_block(uid, sid, payload)
+        return payload
     except Exception:
         logger.exception("Failed to build flash sale block")
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass
         return {
             "products": [],
             "countdown_to": None,
@@ -411,6 +467,8 @@ def get_flash_sale_block_endpoint(
             "slot_end_at": None,
             "slot_key": None,
         }
+    finally:
+        _close_request_session(db)
 
 
 @router.get("/products/same-shop-as-recent-views", response_model=dict)

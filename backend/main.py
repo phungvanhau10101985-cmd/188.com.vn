@@ -69,6 +69,13 @@ def _setup_file_logging() -> None:
 
 _setup_file_logging()
 
+try:
+    from app.services.site_error_log import install_site_error_logging
+
+    install_site_error_logging()
+except Exception as _site_err_exc:
+    print(f"⚠️  Không bật ghi log lỗi site: {_site_err_exc}")
+
 # Production: tắt Swagger/ReDoc nếu cần (đặt DISABLE_DOCS=true trong .env)
 _docs_url = None if os.getenv("DISABLE_DOCS", "").lower() == "true" else "/docs"
 _redoc_url = None if os.getenv("DISABLE_DOCS", "").lower() == "true" else "/redoc"
@@ -122,6 +129,9 @@ app.add_middleware(LastResortJsonMiddleware)
 app.add_middleware(AuthLoginBodyMiddleware)
 app.add_middleware(ClientDisconnectSafeMiddleware)
 app.add_middleware(RateLimitMiddleware)
+from app.services.site_error_log import SiteErrorRequestContextMiddleware
+
+app.add_middleware(SiteErrorRequestContextMiddleware)
 
 # ========== DATABASE INITIALIZATION ==========
 def init_database_tables():
@@ -248,6 +258,7 @@ def load_api_routes():
         ("loyalty", "/loyalty", "loyalty"),
         ("affiliate", "/affiliate", "affiliate"),
         ("notifications", "/notifications", "notifications"),
+        ("site_errors", "/site-errors", "site-errors"),
         ("newsletter", "/newsletter", "newsletter"),  # CMSN + warm-up + marketing
         ("push", "/push", "push"),
         ("ladipage_admin", "/admin/ladipages", "ladipage-admin"),
@@ -574,6 +585,14 @@ _ensure_newsletter_router()
 
 @app.on_event("startup")
 async def startup_event():
+    try:
+        from app.services.site_error_log import ensure_site_error_table, install_site_error_logging
+
+        install_site_error_logging()
+        ensure_site_error_table()
+    except Exception as _site_err_exc:
+        print(f"⚠️  Không bật ghi log lỗi site: {_site_err_exc}")
+
     print("\n" + "="*60)
     print("🚀 188.com.vn API Server Starting...")
     print("="*60)

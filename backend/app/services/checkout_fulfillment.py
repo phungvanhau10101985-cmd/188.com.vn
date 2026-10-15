@@ -15,9 +15,9 @@ from app.crud import promotion as crud_promotion
 from app.crud.deposit_settings import (
     apply_partial_deposit,
     get_rule,
-    group_has_high_unit_price,
     line_requires_deposit,
-    partial_percent_for_lines,
+    order_hits_high_value,
+    partial_percent_for_goods,
 )
 from app.crud.cart import _resolve_cart_line_image, cart as cart_crud
 from app.crud.promotion import PromoValidationError
@@ -121,10 +121,10 @@ def build_group_financial_plan(
     subtotal = sum((_dec(row["total_price"]) for row in rows), Decimal("0"))
     discounted_subtotal = max(Decimal("0"), subtotal - discount)
     total = discounted_subtotal + shipping_fee
-    high_unit = group_has_high_unit_price(rows)
-    requires_deposit = any(bool(row.get("requires_deposit")) for row in rows) or high_unit
+    high_order = order_hits_high_value(discounted_subtotal)
+    requires_deposit = any(bool(row.get("requires_deposit")) for row in rows) or high_order
     deposit_type = requested_deposit_type
-    if high_unit and (not deposit_type or deposit_type == schemas.DepositType.NONE.value):
+    if high_order and (not deposit_type or deposit_type == schemas.DepositType.NONE.value):
         deposit_type = schemas.DepositType.PERCENT_30.value
     elif requires_deposit and not deposit_type:
         deposit_type = schemas.DepositType.PERCENT_30.value
@@ -139,7 +139,7 @@ def build_group_financial_plan(
             deposit = discounted_subtotal
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
-            percentage = partial_percent_for_lines(partial_percent, rows)
+            percentage = partial_percent_for_goods(partial_percent, discounted_subtotal)
             deposit = apply_partial_deposit(discounted_subtotal, percentage, min_amount)
     return {
         "subtotal": subtotal,

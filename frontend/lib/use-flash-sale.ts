@@ -31,7 +31,11 @@ const SERVER_SNAPSHOT: FlashSaleSnapshot = {
 
 let store: FlashSaleSnapshot = { ...SERVER_SNAPSHOT, loading: true };
 let inflight: Promise<void> | null = null;
+let inflightIdentity: string | null = null;
+let flightSeq = 0;
 let requested = false;
+let refreshTimer: number | null = null;
+let pastSlotRetried = false;
 const listeners = new Set<() => void>();
 
 function emit() {
@@ -57,24 +61,51 @@ function buildById(products: Product[]): Record<number, SiteSaleProductPricing> 
   return Object.keys(byId).length ? byId : EMPTY_FLASH_BY_ID;
 }
 
-async function loadFlashSaleOnce(force = false, silent = false): Promise<void> {
-  if (!force) {
-    if (inflight) return inflight;
-    if (requested) return;
+function scheduleSlotRefresh(countdownTo: string | null) {
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  if (!countdownTo) return;
+  const end = new Date(countdownTo).getTime();
+  if (!Number.isFinite(end)) return;
+  const remaining = end - Date.now();
+  if (remaining <= 0) {
+    if (pastSlotRetried) return;
+    pastSlotRetried = true;
   } else {
-    inflight = null;
+    pastSlotRetried = false;
+  }
+  const wait =
+    remaining > 0
+      ? Math.min(11 * 60 * 1000, Math.max(400, remaining + 400))
+      : 1500;
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null;
+    void loadFlashSaleOnce(true, true);
+  }, wait);
+}
+
+async function loadFlashSaleOnce(force = false, silent = false): Promise<void> {
+  const identity = currentIdentityKey();
+  if (inflight && (!force || inflightIdentity === identity)) {
+    return inflight;
+  }
+  if (!force && requested && store.identity === identity) return;
+
+  requested = true;
+  if (force) {
     store = silent
       ? { ...store, error: null }
       : { ...store, loading: true, error: null };
     emit();
   }
 
-  requested = true;
-  const identity = currentIdentityKey();
-
-  inflight = (async () => {
+  const seq = ++flightSeq;
+  const flight = (async () => {
     try {
       const data: FlashSaleBlockResponse = await apiClient.getFlashSaleBlock();
+      if (seq !== flightSeq) return;
       const products = data.products ?? [];
       store = {
         products,
@@ -86,6 +117,7 @@ async function loadFlashSaleOnce(force = false, silent = false): Promise<void> {
         identity,
       };
     } catch (e) {
+      if (seq !== flightSeq) return;
       if (process.env.NODE_ENV === 'development') {
         console.warn('[useFlashSale] Không tải được flash sale:', e);
       }
@@ -99,12 +131,17 @@ async function loadFlashSaleOnce(force = false, silent = false): Promise<void> {
         identity,
       };
     } finally {
+      if (seq !== flightSeq) return;
       inflight = null;
+      inflightIdentity = null;
       emit();
+      scheduleSlotRefresh(store.countdownTo);
     }
   })();
 
-  return inflight;
+  inflight = flight;
+  inflightIdentity = identity;
+  return flight;
 }
 
 function subscribe(listener: () => void) {
@@ -148,18 +185,6 @@ export function useFlashSale() {
       void loadFlashSaleOnce(true);
     }
   }, [authLoading, isAuthenticated, user?.id, snapshot.identity]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !snapshot.countdownTo) return;
-    const end = new Date(snapshot.countdownTo).getTime();
-    if (!Number.isFinite(end)) return;
-    const wait = Math.min(11 * 60 * 1000, Math.max(400, end - Date.now() + 400));
-    const timer = window.setTimeout(() => {
-      requested = false;
-      void loadFlashSaleOnce(true, true);
-    }, wait);
-    return () => window.clearTimeout(timer);
-  }, [snapshot.countdownTo, snapshot.slotKey]);
 
   return {
     products: snapshot.products,

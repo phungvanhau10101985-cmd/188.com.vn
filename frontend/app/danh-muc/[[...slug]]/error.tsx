@@ -3,7 +3,15 @@
 import { useEffect, useRef } from 'react';
 import LoadingLink from '@/components/ui/LoadingLink';
 
-export default function CategoryError({ reset }: { reset: () => void }) {
+import ReportRouteError from '@/components/ReportRouteError';
+
+export default function CategoryError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
   const autoRetried = useRef(false);
 
   useEffect(() => {
@@ -15,6 +23,7 @@ export default function CategoryError({ reset }: { reset: () => void }) {
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
+      <ReportRouteError error={error} />
       <div className="bg-white border border-gray-200 rounded-2xl p-8 max-w-lg w-full text-center">
         <div
           className="mx-auto mb-4 h-10 w-10 rounded-full border-[3px] border-orange-200 border-t-[#ea580c] animate-spin"

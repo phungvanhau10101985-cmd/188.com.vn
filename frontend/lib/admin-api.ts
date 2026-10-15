@@ -3092,6 +3092,59 @@ export const adminApiStatsAPI = {
   },
 };
 
+export type SiteErrorItem = {
+  id: number;
+  source: 'server' | 'web' | 'web_server' | string;
+  level: string;
+  logger_name: string;
+  exc_type: string;
+  message: string;
+  path: string;
+  method: string;
+  status_code: number | null;
+  occurrence_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  email_sent_at: string | null;
+  resolved: boolean;
+  log_day: string | null;
+  detail?: string | null;
+  user_agent?: string | null;
+  client_ip?: string | null;
+};
+
+export type SiteErrorList = {
+  items: SiteErrorItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  summary: {
+    today_errors: number;
+    today_occurrences: number;
+    today_emails: number;
+    open_count: number;
+  };
+};
+
+export const adminSiteErrorsAPI = {
+  list: (params?: { days?: number; source?: string; status?: string; q?: string; page?: number; pageSize?: number }) => {
+    const sp = new URLSearchParams();
+    sp.set('days', String(params?.days ?? 7));
+    if (params?.source) sp.set('source', params.source);
+    sp.set('status', params?.status || 'open');
+    if (params?.q?.trim()) sp.set('q', params.q.trim());
+    sp.set('page', String(params?.page ?? 1));
+    sp.set('page_size', String(params?.pageSize ?? 40));
+    return fetchAdmin<SiteErrorList>(`/site-errors?${sp.toString()}`);
+  },
+  get: (id: number) => fetchAdmin<SiteErrorItem>(`/site-errors/${id}`),
+  setResolved: (id: number, resolved: boolean) =>
+    fetchAdmin<SiteErrorItem>(`/site-errors/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolved }),
+    }),
+};
+
 export const adminOrderAPI = {
   getAllOrders: (params?: {
     status?: string;

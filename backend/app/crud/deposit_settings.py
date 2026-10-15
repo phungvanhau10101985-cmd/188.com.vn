@@ -10,8 +10,9 @@ DEFAULT_PARTIAL_PERCENT = 30
 DEFAULT_MIN_AMOUNT = 100_000
 MIN_AMOUNT_FLOOR = 100_000
 MIN_AMOUNT_CEILING = 50_000_000
-# Đơn giá từ mốc này: cọc một phần không thấp hơn HIGH_UNIT_MIN_PERCENT.
-HIGH_UNIT_PRICE_VND = 3_000_000
+# Giá trị hàng của đơn (sau giảm giá, không gồm ship) từ mốc này: cọc một phần không thấp hơn HIGH_UNIT_MIN_PERCENT.
+HIGH_ORDER_VALUE_VND = 3_000_000
+HIGH_UNIT_PRICE_VND = HIGH_ORDER_VALUE_VND
 HIGH_UNIT_MIN_PERCENT = 30
 _SINGLETON_ID = 1
 _CACHE_KEY = "deposit_settings:rule"
@@ -41,31 +42,64 @@ def clamp_min_amount(raw: object, default: int = DEFAULT_MIN_AMOUNT) -> int:
     return n
 
 
-def line_hits_high_unit_price(unit_price: object) -> bool:
-    """Đơn giá >= 3.000.000đ thì dòng hàng thuộc nhóm cọc tối thiểu 30%."""
+def _as_decimal(raw: object) -> Decimal:
     try:
-        price = Decimal(str(0 if unit_price is None else unit_price))
+        return Decimal(str(0 if raw is None else raw))
     except Exception:
-        return False
-    return price >= Decimal(HIGH_UNIT_PRICE_VND)
+        return Decimal("0")
 
 
-def _row_unit_price(row: object) -> object:
+def line_hits_high_unit_price(unit_price: object) -> bool:
+    """Đơn giá >= 3.000.000đ: một mình dòng đó đã đủ mốc cọc tối thiểu 30%."""
+    return _as_decimal(unit_price) >= Decimal(HIGH_ORDER_VALUE_VND)
+
+
+def order_hits_high_value(goods: object) -> bool:
+    """Giá trị hàng của đơn >= 3.000.000đ thì cọc một phần không thấp hơn 30%."""
+    return _as_decimal(goods) >= Decimal(HIGH_ORDER_VALUE_VND)
+
+
+def line_goods_value(row: object) -> Decimal:
+    """Tiền hàng của một dòng: thành tiền, hoặc đơn giá × số lượng."""
     if isinstance(row, dict):
-        return row.get("unit_price")
-    return getattr(row, "unit_price", None)
+        if row.get("total_price") is not None:
+            return max(Decimal("0"), _as_decimal(row.get("total_price")))
+        qty = _as_decimal(row.get("quantity") or 1)
+        return max(Decimal("0"), _as_decimal(row.get("unit_price")) * qty)
+    total = getattr(row, "total_price", None)
+    if total is not None:
+        return max(Decimal("0"), _as_decimal(total))
+    unit = getattr(row, "unit_price", None)
+    if unit is None:
+        unit = getattr(row, "price", None)
+    qty = _as_decimal(getattr(row, "quantity", None) or 1)
+    return max(Decimal("0"), _as_decimal(unit) * qty)
+
+
+def group_goods_value(rows: list) -> Decimal:
+    return sum((line_goods_value(row) for row in rows), Decimal("0"))
+
+
+def group_hits_high_order_value(rows: list) -> bool:
+    return order_hits_high_value(group_goods_value(rows))
 
 
 def group_has_high_unit_price(rows: list) -> bool:
-    return any(line_hits_high_unit_price(_row_unit_price(row)) for row in rows)
+    """Tên cũ. Mốc 3 triệu tính trên tổng tiền hàng của đơn, không trên đơn giá."""
+    return group_hits_high_order_value(rows)
+
+
+def partial_percent_for_goods(configured: int, goods: object) -> int:
+    """% cọc một phần. Giá trị hàng >= 3.000.000đ thì không thấp hơn 30%."""
+    pct = clamp_partial_percent(configured)
+    if order_hits_high_value(goods):
+        return max(pct, HIGH_UNIT_MIN_PERCENT)
+    return pct
 
 
 def partial_percent_for_lines(configured: int, rows: list) -> int:
-    """% cọc một phần. Có đơn giá >= 3.000.000đ thì không thấp hơn 30%."""
-    pct = clamp_partial_percent(configured)
-    if group_has_high_unit_price(rows):
-        return max(pct, HIGH_UNIT_MIN_PERCENT)
-    return pct
+    """% cọc một phần theo tổng thành tiền các dòng (chưa trừ giảm giá đơn)."""
+    return partial_percent_for_goods(configured, group_goods_value(rows))
 
 
 def line_requires_deposit(product_flag: object, unit_price: object) -> bool:

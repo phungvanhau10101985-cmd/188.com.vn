@@ -945,6 +945,13 @@ class Settings:
             for x in os.getenv("OPS_HEALTH_ALERT_EMAILS", "").split(",")
             if x.strip()
         ]
+        # Email khi log server có lỗi — mỗi fingerprint tối đa 1 lần / ngày (giờ VN)
+        self.SITE_ERROR_ALERT_ENABLED: bool = os.getenv(
+            "SITE_ERROR_ALERT_ENABLED", "true"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.SITE_ERROR_INGEST_SECRET: str = (
+            os.getenv("SITE_ERROR_INGEST_SECRET", "").strip() or self.CRON_SECRET
+        )
 
         # Email sau mỗi lần backup VPS (admin_users + VPS_BACKUP_NOTIFY_EMAILS)
         self.VPS_BACKUP_NOTIFY_ENABLED: bool = os.getenv(

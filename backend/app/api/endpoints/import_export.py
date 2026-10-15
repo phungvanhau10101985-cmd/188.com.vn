@@ -1098,7 +1098,7 @@ def export_merchant_center_feed_tsv():
     ~100k SP), không được giữ connection pool chính trong lúc đó (tránh 503 cho khách đang duyệt web).
     """
     from app.services.merchant_feed_tsv import iter_merchant_feed_lines
-    from app.db.export_session import get_export_db_session
+    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1110,7 +1110,7 @@ def export_merchant_center_feed_tsv():
             for line in iter_merchant_feed_lines(db, shop, currency=cur, image_site_base=img or shop):
                 yield (line + "\n").encode("utf-8")
         finally:
-            db.close()
+            close_export_session(db)
 
     return StreamingResponse(
         body(),
@@ -1135,7 +1135,7 @@ def export_meta_catalog_feed_tsv():
     Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
     """
     from app.services.social_catalog_feed_tsv import iter_meta_catalog_lines
-    from app.db.export_session import get_export_db_session
+    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1156,7 +1156,7 @@ def export_meta_catalog_feed_tsv():
             ):
                 yield (line + "\n").encode("utf-8")
         finally:
-            db.close()
+            close_export_session(db)
 
     return StreamingResponse(
         body(),
@@ -1179,7 +1179,7 @@ def export_tiktok_catalog_feed_tsv():
     Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
     """
     from app.services.social_catalog_feed_tsv import iter_tiktok_catalog_lines
-    from app.db.export_session import get_export_db_session
+    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1198,7 +1198,7 @@ def export_tiktok_catalog_feed_tsv():
             ):
                 yield (line + "\n").encode("utf-8")
         finally:
-            db.close()
+            close_export_session(db)
 
     return StreamingResponse(
         body(),

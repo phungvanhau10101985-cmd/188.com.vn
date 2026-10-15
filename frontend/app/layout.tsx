@@ -15,6 +15,7 @@ import {
 } from "@/components/DeferredLayoutBoot.client";
 import GoogleAutomatedDiscountCapture from "@/components/GoogleAutomatedDiscountCapture";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
+import SiteErrorReporter from "@/components/SiteErrorReporter";
 import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { GoogleCustomerReviewsMerchantProvider } from "@/components/GoogleCustomerReviewsMerchantProvider";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
@@ -222,6 +223,7 @@ export default async function RootLayout({
                   <AppShell initialCategoryTree={initialCategoryTree}>
                     <Suspense fallback={null}>
                       <AnalyticsTracker />
+                      <SiteErrorReporter />
                     </Suspense>
                     <Suspense
                       fallback={
