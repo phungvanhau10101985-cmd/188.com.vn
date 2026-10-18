@@ -154,10 +154,7 @@ class ImageProcessor:
 
         out = img.copy()
         out[y1:y2, x1:x2] = fill_color
-
-        edge_mask = np.zeros((h_img, w_img), dtype=np.uint8)
-        cv2.rectangle(edge_mask, (x1, y1), (x2, y2), 255, max(2, min(5, ref_pad // 2)))
-        return cv2.inpaint(out, edge_mask, 2, cv2.INPAINT_TELEA)
+        return out
 
     def _inpaint_text_strokes(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Xóa nét chữ trên ảnh sản phẩm, giữ nguyên da/kim loại bên trong bbox OCR."""
@@ -190,11 +187,14 @@ class ImageProcessor:
         return cv2.inpaint(img, full_mask, radius, cv2.INPAINT_TELEA)
 
     def _advanced_inpainting(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
-        """Xóa chữ trên nền phẳng. Bbox đè lên ảnh sản phẩm thì chỉ xóa nét chữ."""
+        """Xóa chữ bằng nền đặc đúng màu quanh hộp. Ảnh sản phẩm chỉ xóa nét chữ."""
         h_img, w_img = img.shape[:2]
         x1, y1, x2, y2 = self._expand_bbox_for_inpaint(bbox, h_img, w_img)
         if x2 <= x1 or y2 <= y1:
             return img
+        covered = self._solid_cover_text(img, (x1, y1, x2, y2))
+        if covered is not img:
+            return covered
         if self._region_is_product_photo(img, (x1, y1, x2, y2)):
             return self._inpaint_text_strokes(img, (x1, y1, x2, y2))
         return self._fill_bbox_with_surrounding_background(img, (x1, y1, x2, y2))
@@ -475,11 +475,14 @@ class ImageProcessor:
         return out
 
     def _erase_strokes_with_local_color(self, img: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
-        """Xóa nét chữ bằng màu nền quanh nét, tránh vệt loang của inpaint trên da."""
+        """Xóa chữ bằng nền đặc đúng màu quanh hộp. Trên da chỉ xóa nét."""
         h_img, w_img = img.shape[:2]
         x1, y1, x2, y2 = self._clip_bbox(bbox, h_img, w_img)
         if x2 <= x1 or y2 <= y1:
             return img
+        covered = self._solid_cover_text(img, (x1, y1, x2, y2))
+        if covered is not img:
+            return covered
         roi = img[y1:y2, x1:x2]
         mask = self._build_text_mask(roi)
         if mask.size == 0 or int(np.count_nonzero(mask)) < 8:
@@ -1444,13 +1447,113 @@ class ImageProcessor:
         med = np.median(keep, axis=0)
         return (int(med[0]), int(med[1]), int(med[2]))
 
+    def _interior_matches_plate(self, img: np.ndarray, bbox, color: Tuple[int, int, int]) -> bool:
+        """Hộp là nền một màu cộng nét chữ, không phải ảnh sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        roi = img[y1:y2, x1:x2]
+        if roi.size == 0:
+            return False
+        target = np.array(color, dtype=np.int16)
+        diff = np.max(np.abs(roi.astype(np.int16) - target), axis=2)
+        near = diff <= 40
+        frac = float(np.mean(near))
+        if frac < 0.12 or int(np.count_nonzero(near)) < 8:
+            return False
+        return float(np.std(roi[near].astype(np.float32))) <= 16
+
+    def _plate_color_for_cover(self, img: np.ndarray, bbox) -> Tuple[int, int, int] | None:
+        """Màu nền đặc của hộp chữ. None khi hộp là ảnh có vân."""
+        local = self._uniform_surround_bgr(img, bbox, pad=8)
+        if local is not None and self._interior_matches_plate(img, bbox, local):
+            return local
+        return self._flat_panel_bgr(img, bbox)
+
+    def _edge_matches_plate(self, row: np.ndarray, color: Tuple[int, int, int]) -> bool:
+        """Viền còn cùng màu nền, kể cả khi có nét chữ xen vào. Dừng trước tem màu khác hoặc ảnh."""
+        if row.size == 0:
+            return False
+        pixels = row.reshape(-1, 3).astype(np.int16)
+        target = np.array(color, dtype=np.int16)
+        near = np.max(np.abs(pixels - target), axis=1) <= 38
+        frac = float(np.mean(near))
+        if frac >= 0.72:
+            return True
+        if frac < 0.28:
+            return False
+        rest = pixels[~near]
+        if rest.shape[0] < 4:
+            return False
+        med = np.median(rest, axis=0)
+        close = np.max(np.abs(rest - med), axis=1) <= 26
+        rest_uniform = float(np.mean(close)) >= 0.8 and float(np.std(rest.astype(np.float32))) <= 18
+        if not rest_uniform:
+            return False
+        idx = np.where(near)[0]
+        span = int(idx.max() - idx.min()) if idx.size else 0
+        return span >= int(pixels.shape[0] * 0.55)
+
+    def _grow_plate_rect(self, img: np.ndarray, bbox, color: Tuple[int, int, int], limit: int = 40):
+        """Nới hộp trên cùng nền để nuốt nét chữ tràn ra ngoài, không tràn sang màu khác."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        room = {"l": limit, "r": limit, "u": limit, "d": limit}
+
+        def can(rect) -> bool:
+            sx1, sy1, sx2, sy2 = rect
+            if sx2 - sx1 < 2 or sy2 - sy1 < 2 or sx1 < 0 or sy1 < 0 or sx2 > w_img or sy2 > h_img:
+                return False
+            if sy1 < y1:
+                edge = img[sy1, sx1:sx2]
+            elif sy2 > y2:
+                edge = img[sy2 - 1, sx1:sx2]
+            elif sx1 < x1:
+                edge = img[sy1:sy2, sx1]
+            else:
+                edge = img[sy1:sy2, sx2 - 1]
+            return self._edge_matches_plate(edge, color)
+
+        while any(room.values()):
+            moved = False
+            if room["u"] > 0 and can((x1, y1 - 2, x2, y1)):
+                y1 -= 2
+                room["u"] -= 2
+                moved = True
+            if room["d"] > 0 and can((x1, y2, x2, y2 + 2)):
+                y2 += 2
+                room["d"] -= 2
+                moved = True
+            if room["l"] > 0 and can((x1 - 2, y1, x1, y2)):
+                x1 -= 2
+                room["l"] -= 2
+                moved = True
+            if room["r"] > 0 and can((x2, y1, x2 + 2, y2)):
+                x2 += 2
+                room["r"] -= 2
+                moved = True
+            if not moved:
+                break
+        return self._clip_bbox((x1, y1, x2, y2), h_img, w_img)
+
     def _solid_cover_text(self, img: np.ndarray, bbox) -> np.ndarray:
-        """Tô kín hộp chữ bằng nền đặc để che hết nét cũ. Không đè ảnh sản phẩm."""
+        """Tô kín chữ cũ bằng một màu đặc giống nền quanh đó. Không đè ảnh sản phẩm."""
         h_img, w_img = img.shape[:2]
         x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
         if x2 - x1 < 2 or y2 - y1 < 2:
             return img
-        if self._region_is_color_photo(img, (x1, y1, x2, y2)) and not self._is_light_chart_surface(img, (x1, y1, x2, y2)):
+        color = self._plate_color_for_cover(img, (x1, y1, x2, y2))
+        if color is None:
+            return img
+        gx1, gy1, gx2, gy2 = self._grow_plate_rect(img, (x1, y1, x2, y2), color)
+        out = img.copy()
+        out[gy1:gy2, gx1:gx2] = np.array(color, dtype=np.uint8)
+        return out
+
+    def _fill_known_plate(self, img: np.ndarray, bbox) -> np.ndarray:
+        """Tô kín hộp bằng màu nền khi vùng không phải ảnh sản phẩm."""
+        h_img, w_img = img.shape[:2]
+        x1, y1, x2, y2 = self._clip_bbox(tuple(map(int, bbox)), h_img, w_img)
+        if x2 - x1 < 2 or y2 - y1 < 2:
             return img
         px1, py1, px2, py2 = self._expand_light_ink(img, x1, y1, x2, y2)
         if self._region_is_color_photo(img, (px1, py1, px2, py2)):
@@ -2037,26 +2140,34 @@ class ImageProcessor:
                 item["_paper_bgr"] = None
                 item["ink_rgb"] = (255, 255, 255)
             elif protect_color_only:
-                flat = self._flat_panel_bgr(image_data, tuple(map(int, src)))
+                src_box = tuple(map(int, src))
+                flat = self._flat_panel_bgr(image_data, src_box)
                 item["_flat"] = flat is not None
+                changed = False
+                for box in erase_boxes:
+                    nxt = self._solid_cover_text(img, box)
+                    if nxt is not img:
+                        img = nxt
+                        changed = True
                 if flat is not None:
-                    for box in erase_boxes:
-                        img = self._solid_cover_text(img, box)
                     item["_panel_bgr"] = flat
                     item["_paper"] = self._luminance((flat[2], flat[1], flat[0])) >= 185
                     item["_paper_bgr"] = flat if item["_paper"] else None
                 else:
                     gray = cv2.cvtColor(image_data[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY)
                     item["_paper_text"] = self._is_text_on_flat_paper(gray)
-                    if self._region_is_color_photo(image_data, tuple(map(int, src))) and not self._is_light_chart_surface(image_data, tuple(map(int, src))):
+                    if changed:
+                        item["_solid_bgr"] = self._plate_color_for_cover(image_data, src_box)
+                    elif self._region_is_color_photo(image_data, src_box) and not self._is_light_chart_surface(image_data, src_box):
                         for box in erase_boxes:
                             img = self._inpaint_text_strokes(img, box)
                     else:
                         for box in erase_boxes:
-                            img = self._solid_cover_text(img, box)
-                        if item["_paper_text"]:
-                            item["_paper"] = True
-                            item["_paper_bgr"] = self._plate_bgr(image_data, tuple(map(int, src)))
+                            img = self._fill_known_plate(img, box)
+                    if item["_paper_text"]:
+                        cover = item.get("_solid_bgr") or self._plate_bgr(image_data, src_box)
+                        item["_paper"] = self._luminance((int(cover[2]), int(cover[1]), int(cover[0]))) >= 185
+                        item["_paper_bgr"] = cover if item["_paper"] else None
                     item["_panel_bgr"] = None
                     if not item.get("_paper"):
                         item["_paper_bgr"] = None
@@ -2256,7 +2367,10 @@ class ImageProcessor:
                 continue
             fill = item.get("ink_rgb") or (0, 0, 0)
             plate = None
-            if prepared and not item.get("_sky"):
+            solid = item.get("_solid_bgr")
+            if solid is not None and not item.get("_sky") and self._interior_matches_plate(image_data, (x1, y1, x2, y2), solid):
+                plate = solid
+            if plate is None and prepared and not item.get("_sky"):
                 on_photo = self._region_is_color_photo(image_data, (x1, y1, x2, y2)) and not self._is_light_chart_surface(image_data, (x1, y1, x2, y2))
                 if not on_photo and (item.get("_paper") or item.get("_paper_text") or item.get("_flat") or self._is_light_chart_surface(image_data, (x1, y1, x2, y2))):
                     plate = item.get("_paper_bgr") or item.get("_panel_bgr") or self._plate_bgr(img, (x1, y1, x2, y2))

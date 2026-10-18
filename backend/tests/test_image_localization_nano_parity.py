@@ -114,6 +114,8 @@ def test_size_chart_prompt_removes_the_model():
     assert "1 斤 = 0.5 kg" in plain
     assert "94 斤 becomes 47 kg" in plain
     assert "Still convert 斤 body weight to kilograms" in size
+    assert "flat color matched to the surrounding background" in plain
+    assert "flat color matched to the surrounding background" in size
 
 
 def test_gpt_failure_stops_the_job():

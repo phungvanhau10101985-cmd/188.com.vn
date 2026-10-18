@@ -660,7 +660,7 @@ def _language_prompt(language: str) -> str:
     target = LANGUAGE_LABELS.get(language, language or "Vietnamese")
     return f"""ROLE: E-commerce Image Localization Agent
 
-Translate every Chinese text element in the attached product image into {target}. Preserve product details, layout, dimensions, aspect ratio, text placement, original colors, and image quality. Remove website URLs and domains from the image. Chinese weight in 斤 equals 0.5kg: divide by 2 and write kg. A bare number in a 体重 or 重量 column with no unit is also 斤 and must be converted the same way. Leave values already marked kg, 公斤, or 千克 unchanged. Return only the processed image file, with no explanation."""
+Translate every Chinese text element in the attached product image into {target}. Erase each original text area with one flat color matched to the surrounding background, leaving no old letters, outlines, or glow. Preserve product details, layout, dimensions, aspect ratio, text placement, original colors, and image quality. Remove website URLs and domains from the image. Chinese weight in 斤 equals 0.5kg: divide by 2 and write kg. A bare number in a 体重 or 重量 column with no unit is also 斤 and must be converted the same way. Leave values already marked kg, 公斤, or 千克 unchanged. Return only the processed image file, with no explanation."""
 
 
 def _mime_for_image_filename(filename: str) -> str:

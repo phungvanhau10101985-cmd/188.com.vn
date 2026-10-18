@@ -118,6 +118,8 @@ def language_prompt(language: str, remove_model: bool = False, strip_photos: boo
     return (
         "ROLE: E-commerce Image Localization Agent\n\n"
         f"Translate every Chinese text element in the attached product image into {target}. "
+        "Erase each original text area with one flat color matched to the surrounding background, "
+        "leaving no old letters, outlines, or glow. "
         "Preserve product details, layout, dimensions, aspect ratio, text placement, original colors, and image quality. "
         "Remove website URLs and domains from the image. "
         "Convert every Chinese weight to kilograms: 1 斤 = 0.5 kg. "

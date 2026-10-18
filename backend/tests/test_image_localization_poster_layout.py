@@ -370,3 +370,30 @@ def test_old_ink_is_covered_by_a_solid_plate():
     assert float(light.mean()) > 220
     assert int(now.min()) < 40
     assert int(was_ink.sum()) > 20
+
+
+def test_banner_text_is_covered_with_the_banner_color():
+    import cv2
+
+    orange = (30, 120, 230)
+    yellow = (40, 210, 250)
+    img = np.full((220, 400, 3), orange, np.uint8)
+    cv2.putText(img, "HANZI", (36, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (250, 250, 250), 2, cv2.LINE_AA)
+    cv2.putText(img, "ZI", (132, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (250, 250, 250), 2, cv2.LINE_AA)
+    cv2.rectangle(img, (36, 108), (190, 156), yellow, -1)
+    cv2.putText(img, "DONG", (48, 142), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (20, 20, 20), 2, cv2.LINE_AA)
+    photo = _leather(50, 360, 4)
+    img[165:215, 20:380] = photo
+
+    out = _processor().process_image_with_text(
+        img,
+        [("Ao", (30, 36, 120, 84)), ("Mua", (44, 114, 110, 148))],
+        [],
+    )
+
+    leftover = out[46:76, 128:176]
+    assert np.max(np.abs(leftover.astype(np.int16) - np.array(orange, np.int16))) <= 12
+    assert int(out[128, 170, 1]) > 180
+    delta = np.abs(out[165:215, 20:380].astype(np.int16) - photo.astype(np.int16)).mean()
+    assert delta < 8
+    assert int(out[46:76, 36:110].min()) < 80
