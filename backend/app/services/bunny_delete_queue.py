@@ -159,6 +159,8 @@ def process_pending_bunny_deletes(
     skipped_config = 0
 
     if not zone or not key:
+        # Thả lock FOR UPDATE — thiếu cấu hình thì không giữ transaction.
+        db.rollback()
         if claimed:
             logger.warning(
                 "Bunny delete queue: thiếu BUNNY_STORAGE_* — giữ %s dòng pending",
@@ -179,25 +181,53 @@ def process_pending_bunny_deletes(
             "remaining_pending": remaining,
         }
 
+    # HTTP Bunny có thể lâu hơn idle_in_transaction (35s). Claim rồi commit
+    # trước khi gọi mạng; mỗi file ghi kết quả bằng transaction ngắn.
+    lease_until = now + timedelta(minutes=10)
+    claimed_items: List[Tuple[int, str, int]] = []
     for row in rows:
-        row.attempts = int(row.attempts or 0) + 1
+        claimed_items.append((int(row.id), str(row.storage_path), int(row.attempts or 0)))
+        row.next_attempt_at = lease_until
+    if claimed_items:
+        db.commit()
+
+    for row_id, storage_path, attempts_before in claimed_items:
         try:
             ok = delete_file_from_zone(
                 zone_name=zone,
                 access_key=key,
-                remote_path=row.storage_path,
+                remote_path=storage_path,
             )
+            err = None if ok else "Bunny DELETE không thành công (HTTP không 200/204/404)"
+        except Exception as exc:
+            ok = False
+            err = str(exc)[:1000]
+        try:
+            row = (
+                db.query(PendingBunnyDelete)
+                .filter(PendingBunnyDelete.id == row_id)
+                .one_or_none()
+            )
+            if row is None or row.status != "pending":
+                db.rollback()
+                continue
+            row.attempts = attempts_before + 1
             if ok:
                 db.delete(row)
                 deleted += 1
             else:
-                _mark_retry_or_failed(row, max_attempts, "Bunny DELETE không thành công (HTTP không 200/204/404)")
+                _mark_retry_or_failed(row, max_attempts, err or "Bunny DELETE lỗi")
                 failed += 1
-        except Exception as exc:
-            _mark_retry_or_failed(row, max_attempts, str(exc)[:1000])
+            db.commit()
+        except Exception:
+            db.rollback()
             failed += 1
+            logger.warning(
+                "Bunny delete queue: không ghi được kết quả id=%s",
+                row_id,
+                exc_info=True,
+            )
 
-    db.commit()
     remaining = (
         db.query(PendingBunnyDelete)
         .filter(PendingBunnyDelete.status == "pending")

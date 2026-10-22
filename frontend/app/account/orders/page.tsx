@@ -388,7 +388,16 @@ export default function AccountOrdersPage() {
                             ) : (
                               <div className="w-16 h-16 rounded bg-gray-100 flex-shrink-0" />
                             )}
-                            <span className="text-gray-800 line-clamp-2">{item.product_name}</span>
+                            {item.product_slug ? (
+                              <Link
+                                href={`/products/${item.product_slug}`}
+                                className="text-gray-800 line-clamp-2 hover:text-[#ea580c] hover:underline"
+                              >
+                                {item.product_name}
+                              </Link>
+                            ) : (
+                              <span className="text-gray-800 line-clamp-2">{item.product_name}</span>
+                            )}
                           </div>
                         </td>
                         <td className="p-3 text-right">{formatVnd(item.unit_price)}</td>

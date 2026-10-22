@@ -34,12 +34,31 @@ def _pg_connect_options() -> str:
     return " ".join(parts)
 
 
-def apply_postgres_connect_timeouts(connect_args: dict) -> dict:
-    """Bổ sung options vào connect_args (PostgreSQL / psycopg2)."""
+# Feed/export giữ cursor lâu — không áp idle-in-transaction 35s và không bị pool relief cắt.
+EXPORT_APPLICATION_NAME = "188_export"
+
+
+def apply_postgres_connect_timeouts(
+    connect_args: dict,
+    *,
+    idle_in_transaction_seconds: Optional[int] = None,
+) -> dict:
+    """Bổ sung options vào connect_args (PostgreSQL / psycopg2).
+
+    ``idle_in_transaction_seconds=0`` tắt timeout trên connection này
+    (ghi đè ALTER DATABASE), dùng cho session export/stream.
+    """
     if not getattr(settings, "IS_POSTGRESQL", False):
         return connect_args
     merged = dict(connect_args or {})
-    opts = _pg_connect_options()
+    if idle_in_transaction_seconds is None:
+        opts = _pg_connect_options()
+    else:
+        idle_sec = int(idle_in_transaction_seconds)
+        opts = f"-c idle_in_transaction_session_timeout={max(0, idle_sec)}s"
+        stmt_sec = int(getattr(settings, "DATABASE_STATEMENT_TIMEOUT_SECONDS", 0) or 0)
+        if stmt_sec > 0 and idle_sec > 0:
+            opts = f"{opts} -c statement_timeout={max(10, stmt_sec)}s"
     existing = (merged.get("options") or "").strip()
     merged["options"] = f"{existing} {opts}".strip() if existing else opts
     return merged
@@ -199,9 +218,10 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
                 WHERE datname = current_database()
                   AND state = 'idle in transaction (aborted)'
                   AND pid <> pg_backend_pid()
+                  AND COALESCE(application_name, '') <> :export_app
                   AND now() - state_change > make_interval(secs => :min_idle)
                 """,
-                {"min_idle": aborted_min},
+                {"min_idle": aborted_min, "export_app": EXPORT_APPLICATION_NAME},
             )
             opened = 0
             if kill_open:
@@ -213,9 +233,10 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
                     WHERE datname = current_database()
                       AND state = 'idle in transaction'
                       AND pid <> pg_backend_pid()
+                      AND COALESCE(application_name, '') <> :export_app
                       AND now() - state_change > make_interval(secs => :min_idle)
                     """,
-                    {"min_idle": min_idle},
+                    {"min_idle": min_idle, "export_app": EXPORT_APPLICATION_NAME},
                 )
             terminated = aborted + opened
             if terminated:
@@ -266,10 +287,11 @@ def release_long_active_queries_when_pool_stressed(
                       AND pid <> pg_backend_pid()
                       AND state = 'active'
                       AND backend_type = 'client backend'
+                      AND COALESCE(application_name, '') <> :export_app
                       AND now() - query_start > make_interval(secs => :min_age)
                     """
                 ),
-                {"min_age": min_age},
+                {"min_age": min_age, "export_app": EXPORT_APPLICATION_NAME},
             ).fetchall()
             terminated = 0
             for pid, qpreview in rows:

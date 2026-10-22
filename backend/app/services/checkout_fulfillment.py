@@ -136,7 +136,7 @@ def build_group_financial_plan(
     if requires_deposit:
         if deposit_type == schemas.DepositType.PERCENT_100.value:
             percentage = 100
-            deposit = discounted_subtotal
+            deposit = total
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
             percentage = partial_percent_for_goods(partial_percent, discounted_subtotal)

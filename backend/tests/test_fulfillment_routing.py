@@ -428,6 +428,21 @@ def test_unit_price_below_threshold_does_not_force_deposit():
     assert deposit["initial_status"] == "confirmed"
 
 
+def test_full_deposit_includes_shipping():
+    deposit = build_group_financial_plan(
+        [{"fulfillment_source": "china", "total_price": Decimal("430000"), "requires_deposit": True}],
+        discount=Decimal("0"),
+        shipping_fee=Decimal("30000"),
+        requested_deposit_type="percent_100",
+        partial_percent=30,
+        min_amount=100_000,
+    )
+    assert deposit["deposit_percentage"] == 100
+    assert deposit["deposit_amount"] == Decimal("460000")
+    assert deposit["remaining_amount"] == Decimal("0")
+    assert deposit["total"] == Decimal("460000")
+
+
 def test_full_deposit_ignores_min_amount():
     deposit = build_group_financial_plan(
         [{"fulfillment_source": "china", "total_price": Decimal("80000"), "requires_deposit": True}],

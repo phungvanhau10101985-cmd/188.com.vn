@@ -103,7 +103,7 @@ def resolve_order_deposit_due(
     pct = int(getattr(order, "deposit_percentage", None) or 0)
 
     if dt == DepositTypeEnum.PERCENT_100.value or pct >= 100:
-        return goods.quantize(Decimal("0.01"))
+        return total.quantize(Decimal("0.01"))
 
     applied = pct if 0 < pct < 100 else clamp_partial_percent(partial_percent)
     if dt == DepositTypeEnum.PERCENT_30.value or 0 < pct < 100:
@@ -218,6 +218,7 @@ def read_orders(
         db, user_id=current_user.id,
         skip=skip, limit=limit, status=status
     )
+    crud.order.sync_unpaid_full_deposits(db, orders)
     return _serialize_user_orders(db, orders)
 
 # ========== PAYMENT/DEPOSIT ENDPOINTS (specific paths before /{order_id}) ==========
@@ -264,6 +265,7 @@ def get_sepay_deposit_info(
     if status_val != OrderStatusEnum.WAITING_DEPOSIT.value or not order.requires_deposit:
         raise HTTPException(status_code=400, detail="Đơn không ở trạng thái chờ đặt cọc")
 
+    crud.order.sync_unpaid_full_deposits(db, [order])
     transfer_content = sepay_svc.build_transfer_content_for_order(order)
     amount = Decimal(str(order.deposit_amount))
     crud.payment.upsert_pending_sepay_deposit_payment(
@@ -312,6 +314,7 @@ def download_deposit_qr_image(
     if status_val != OrderStatusEnum.WAITING_DEPOSIT.value or not order.requires_deposit:
         raise HTTPException(status_code=400, detail="Đơn không ở trạng thái chờ đặt cọc")
 
+    crud.order.sync_unpaid_full_deposits(db, [order])
     transfer_content = sepay_svc.build_transfer_content_for_order(order)
     amount = Decimal(str(order.deposit_amount))
     crud.payment.upsert_pending_sepay_deposit_payment(
@@ -477,6 +480,7 @@ def read_order(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized")
+    crud.order.sync_unpaid_full_deposits(db, [order])
     return _serialize_user_order(db, order)
 
 # ========== ADMIN ORDER ENDPOINTS ==========

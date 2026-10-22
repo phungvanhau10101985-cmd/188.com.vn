@@ -41,7 +41,7 @@ def _smtp_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
-def _connect_smtp() -> smtplib.SMTP:
+def _connect_smtp_once() -> smtplib.SMTP:
     """
     Tương tự nodemailer: secure true hoặc port 465 => SMTP_SSL;
     ngược lại: SMTP rồi (tuỳ chọn) STARTTLS nếu EMAIL_USE_TLS.
@@ -65,6 +65,23 @@ def _connect_smtp() -> smtplib.SMTP:
         except smtplib.SMTPException:
             pass
     return server
+
+
+def _connect_smtp() -> smtplib.SMTP:
+    """Kết nối SMTP. Timeout/từ chối cổng thì thử lại một lần trước khi báo lỗi."""
+    last: Optional[BaseException] = None
+    for attempt in range(2):
+        try:
+            return _connect_smtp_once()
+        except (TimeoutError, ConnectionRefusedError, OSError) as exc:
+            last = exc
+            if attempt == 0:
+                time.sleep(1.5)
+                continue
+            raise
+    if last is not None:
+        raise last
+    raise OSError("SMTP connect failed")
 
 
 def send_email(

@@ -52,6 +52,14 @@ _CLIENT_NOISE = (
     "aborterror",
     "the operation was aborted",
     "the user aborted a request",
+    # Trình duyệt nhúng Facebook/Instagram/Zalo và tab cũ sau deploy — không phải lỗi app.
+    "java object is gone",
+    "webkit.messagehandlers",
+    "zalojsv2",
+    "loading chunk",
+    "chunkloaderror",
+    "failed to read the 'localstorage' property",
+    "access is denied for this document",
 )
 
 _table_ready = False
@@ -158,6 +166,9 @@ def should_capture_record(record: logging.LogRecord) -> bool:
     except Exception:
         return False
     if name.startswith("uvicorn") and "Exception in ASGI application" in msg:
+        return False
+    # Pool trả connection đã bị Postgres cắt — hệ quả của idle-in-transaction, không phải lỗi mới.
+    if name.startswith("sqlalchemy.pool") and "Exception during reset" in msg:
         return False
     return True
 

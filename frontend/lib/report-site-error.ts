@@ -18,7 +18,14 @@ function isNoise(message: string, stack: string): boolean {
     blob.includes('chrome-extension://') ||
     blob.includes('moz-extension://') ||
     blob.includes('aborterror') ||
-    blob.includes('site-errors/report')
+    blob.includes('site-errors/report') ||
+    blob.includes('java object is gone') ||
+    blob.includes('webkit.messagehandlers') ||
+    blob.includes('zalojsv2') ||
+    blob.includes('loading chunk') ||
+    blob.includes('chunkloaderror') ||
+    blob.includes("failed to read the 'localstorage' property") ||
+    blob.includes('access is denied for this document')
   );
 }
 

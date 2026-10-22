@@ -22,7 +22,7 @@ if is_sqlite:
         connect_args={"check_same_thread": False},
     )
 else:
-    from app.db.pool_relief import apply_postgres_connect_timeouts
+    from app.db.pool_relief import EXPORT_APPLICATION_NAME, apply_postgres_connect_timeouts
 
     _export_engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
@@ -34,11 +34,13 @@ else:
         pool_reset_on_return="rollback",
         connect_args=apply_postgres_connect_timeouts(
             {
+                "application_name": EXPORT_APPLICATION_NAME,
                 "keepalives": 1,
                 "keepalives_idle": 30,
                 "keepalives_interval": 10,
                 "keepalives_count": 5,
-            }
+            },
+            idle_in_transaction_seconds=0,
         ),
     )
 

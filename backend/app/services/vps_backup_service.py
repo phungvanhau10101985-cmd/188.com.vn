@@ -267,22 +267,28 @@ def reconcile_stale_backup_runs(db: Session) -> int:
 
 
 def _finish_run_notify(db: Session, run: VpsBackupRun) -> None:
+    payload = dict(
+        run_id=run.id,
+        status=run.status,
+        trigger=run.trigger,
+        archive_filename=run.archive_filename,
+        archive_size_pretty=pretty_bytes(run.archive_size_bytes),
+        error_message=run.error_message,
+        drive_upload_status=run.drive_upload_status,
+        drive_web_link=run.drive_web_link,
+        drive_upload_error=run.drive_upload_error,
+    )
+    # Đọc field có thể mở transaction mới. Đóng trước khi gửi mail (SMTP có thể treo).
+    try:
+        db.rollback()
+    except Exception:
+        pass
     try:
         from app.services.vps_backup_notify import notify_backup_finished
 
-        notify_backup_finished(
-            run_id=run.id,
-            status=run.status,
-            trigger=run.trigger,
-            archive_filename=run.archive_filename,
-            archive_size_pretty=pretty_bytes(run.archive_size_bytes),
-            error_message=run.error_message,
-            drive_upload_status=run.drive_upload_status,
-            drive_web_link=run.drive_web_link,
-            drive_upload_error=run.drive_upload_error,
-        )
+        notify_backup_finished(**payload)
     except Exception:
-        logger.exception("VPS backup notify failed for run_id=%s (backup result unchanged)", run.id)
+        logger.exception("VPS backup notify failed for run_id=%s (backup result unchanged)", payload["run_id"])
 
 
 def _execute_backup_run(run_id: int) -> None:
@@ -304,17 +310,20 @@ def _execute_backup_run(run_id: int) -> None:
 
         run.status = "running"
         run.started_at = datetime.now(timezone.utc)
+        include_cache = bool(run.include_cache)
+        keep = run.keep_count if run.keep_count is not None else DEFAULT_KEEP_COUNT
         db.commit()
 
         env = os.environ.copy()
         env["BACKUP_ROOT"] = str(backup_root_dir())
-        keep = run.keep_count if run.keep_count is not None else DEFAULT_KEEP_COUNT
         env["BACKUP_KEEP_COUNT"] = str(keep)
         env["BACKUP_RETENTION_DAYS"] = "0"
-        if run.include_cache:
+        if include_cache:
             env["BACKUP_INCLUDE_CACHE"] = "1"
         env["BACKUP_SKIP_DRIVE_UPLOAD"] = "1"
 
+        # Không đụng ORM trong lúc script chạy — nếu không, session autobegin
+        # và Postgres cắt connection (idle in transaction) trước khi ghi kết quả.
         proc = subprocess.run(
             ["bash", str(BACKUP_SCRIPT)],
             cwd=str(PROJECT_ROOT),
@@ -327,6 +336,9 @@ def _execute_backup_run(run_id: int) -> None:
         log_tail = (proc.stdout or "")[-4000:]
         if proc.stderr:
             log_tail = ((proc.stderr or "")[-2000:] + "\n" + log_tail)[-4000:]
+        run = db.query(VpsBackupRun).filter(VpsBackupRun.id == run_id).first()
+        if not run:
+            return
         run.log_tail = log_tail or None
 
         if proc.returncode != 0:
@@ -346,18 +358,22 @@ def _execute_backup_run(run_id: int) -> None:
             run.drive_upload_status = "skipped"
 
         # Ghi nhận thành công ngay khi có file local — tránh kẹt nếu upload Drive treo.
+        upload_drive = bool(archive and archive.is_file() and run.drive_upload_status != "skipped")
         run.status = "success"
         run.finished_at = datetime.now(timezone.utc)
         db.commit()
 
-        if archive and archive.is_file() and run.drive_upload_status != "skipped":
+        if upload_drive and archive is not None:
             drv_status, drv_link, drv_err = _upload_backup_archive_with_timeout(archive)
-            run.drive_upload_status = drv_status
-            run.drive_web_link = drv_link
-            run.drive_upload_error = drv_err
-            db.commit()
+            run = db.query(VpsBackupRun).filter(VpsBackupRun.id == run_id).first()
+            if run:
+                run.drive_upload_status = drv_status
+                run.drive_web_link = drv_link
+                run.drive_upload_error = drv_err
+                db.commit()
 
-        _finish_run_notify(db, run)
+        if run is not None:
+            _finish_run_notify(db, run)
     except subprocess.TimeoutExpired:
         run = db.query(VpsBackupRun).filter(VpsBackupRun.id == run_id).first()
         if run:

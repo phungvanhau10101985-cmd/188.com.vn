@@ -28,8 +28,8 @@ export default function HuongDanMuaHangPage() {
         </p>
         <p>
           Yêu cầu đặt cọc được quy định <strong className="text-zinc-800">theo từng sản phẩm</strong>, không phụ thuộc sản phẩm ở Trung Quốc hay đã có sẵn tại Việt Nam. Với sản phẩm có nhãn cần đặt cọc, khách hàng thanh toán trước mặc định{' '}
-          <DepositPercentInline /> (hoặc chọn thanh toán trước 100%); phần còn lại và phí giao hàng, nếu có, được{' '}
-          <strong className="text-zinc-800">thanh toán khi nhận hàng</strong>. Đơn hàng có giá trị từ{' '}
+          <DepositPercentInline /> giá trị hàng; phần còn lại và phí giao hàng, nếu có, được{' '}
+          <strong className="text-zinc-800">thanh toán khi nhận hàng</strong>. Chọn thanh toán trước 100% thì cọc gồm cả phí giao hàng, không còn khoản phải trả khi nhận. Đơn hàng có giá trị từ{' '}
           <strong className="text-zinc-800">3.000.000đ</strong> trở lên luôn yêu cầu đặt cọc tối thiểu{' '}
           <strong className="text-zinc-800">30%</strong> giá trị hàng, kể cả khi từng sản phẩm dưới mức đó. Sản phẩm không yêu cầu đặt cọc và đơn dưới mức đó được xử lý ngay sau khi đặt đơn.
         </p>

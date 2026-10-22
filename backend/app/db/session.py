@@ -48,6 +48,25 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base class for models
 Base = declarative_base()
 
+def _dispose_session(db) -> None:
+    """Đóng session. Connection đã bị Postgres cắt thì invalidate, không biến cleanup thành 500."""
+    try:
+        db.rollback()
+    except Exception:
+        try:
+            db.invalidate()
+        except Exception:
+            pass
+        return
+    try:
+        db.close()
+    except Exception:
+        try:
+            db.invalidate()
+        except Exception:
+            pass
+
+
 # Dependency for FastAPI
 def get_db():
     """
@@ -75,11 +94,13 @@ def get_db():
             if isinstance(exc, HTTPException):
                 raise
     db = SessionLocal()
+    closed = False
     try:
         yield db
     except Exception:
-        db.rollback()
+        _dispose_session(db)
+        closed = True
         raise
     finally:
-        db.rollback()
-        db.close()
+        if not closed:
+            _dispose_session(db)

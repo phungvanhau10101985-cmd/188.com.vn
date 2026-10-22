@@ -200,12 +200,13 @@ def update_order_deposit_type(
         return None
     if deposit_type not in (DepositType.PERCENT_30.value, DepositType.PERCENT_100.value):
         return None
-    total = Decimal(str(order.total_amount))
+    total = Decimal(str(order.total_amount or 0)).quantize(Decimal("0.01"))
     deposit_base = max(Decimal("0"), total - Decimal(str(order.shipping_fee or 0)))
     if deposit_type == DepositType.PERCENT_100.value:
+        # 100% là thanh toán hết đơn, gồm phí ship.
         order.deposit_percentage = 100
-        order.deposit_amount = deposit_base
-        order.remaining_amount = total - deposit_base
+        order.deposit_amount = total
+        order.remaining_amount = Decimal("0.00")
     else:
         partial, minimum = get_rule(db)
         partial = partial_percent_for_goods(partial, deposit_base)
@@ -217,6 +218,39 @@ def update_order_deposit_type(
     db.commit()
     db.refresh(order)
     return order
+
+
+def sync_unpaid_full_deposit(order: Order) -> bool:
+    """Đơn chờ cọc 100% chưa thu: số cọc bằng tổng đơn, gồm phí ship."""
+    status_val = getattr(order.status, "value", order.status)
+    if status_val != OrderStatus.WAITING_DEPOSIT.value:
+        return False
+    if Decimal(str(order.deposit_paid or 0)) > 0:
+        return False
+    deposit_type = getattr(order.deposit_type, "value", order.deposit_type)
+    if deposit_type != DepositType.PERCENT_100.value:
+        return False
+    total = Decimal(str(order.total_amount or 0)).quantize(Decimal("0.01"))
+    deposit = Decimal(str(order.deposit_amount or 0)).quantize(Decimal("0.01"))
+    remaining = Decimal(str(order.remaining_amount or 0)).quantize(Decimal("0.01"))
+    if deposit == total and remaining == Decimal("0.00"):
+        return False
+    order.deposit_percentage = 100
+    order.deposit_amount = total
+    order.remaining_amount = Decimal("0.00")
+    order.updated_at = datetime.now()
+    return True
+
+
+def sync_unpaid_full_deposits(db: Session, orders: List[Order]) -> bool:
+    changed = False
+    for order in orders:
+        if sync_unpaid_full_deposit(order):
+            db.add(order)
+            changed = True
+    if changed:
+        db.commit()
+    return changed
 
 def get_order_by_code(db: Session, order_code: str) -> Optional[Order]:
     """Get order by order code (DHxxx — không phân biệt hoa thường)."""

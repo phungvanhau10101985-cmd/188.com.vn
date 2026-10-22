@@ -806,7 +806,7 @@ export default function OrderDepositPage() {
                       disabled={updatingDeposit}
                       className="text-orange-600"
                     />
-                    <span className="text-gray-800">Cọc 100%</span>
+                    <span className="text-gray-800">Cọc 100%, gồm phí ship</span>
                   </label>
                 </div>
                 {updatingDeposit && <p className="text-xs text-orange-600 mt-1.5">Đang cập nhật...</p>}

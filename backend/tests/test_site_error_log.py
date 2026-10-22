@@ -137,6 +137,19 @@ def test_handler_ignores_info_and_own_logger():
     assert svc.should_capture_record(error) is True
     assert svc.should_capture_record(own) is False
     assert svc.should_capture_record(uvicorn) is False
+    pool_reset = logging_record(
+        logging.ERROR,
+        "sqlalchemy.pool.impl.QueuePool",
+        "Exception during reset or similar",
+    )
+    assert svc.should_capture_record(pool_reset) is False
+
+
+def test_client_noise_ignores_in_app_browser_and_stale_chunks():
+    assert svc.is_client_noise("Error invoking postMessage: Java object is gone") is True
+    assert svc.is_client_noise("ReferenceError: zaloJSV2 is not defined") is True
+    assert svc.is_client_noise("Loading chunk 9225 failed.") is True
+    assert svc.is_client_noise("Cannot read cart") is False
 
 
 def logging_record(level: int, name: str, message: str) -> logging.LogRecord:

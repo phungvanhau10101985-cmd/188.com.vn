@@ -72,7 +72,7 @@ export default function DepositPercentPanel() {
         Phần trăm khách chuyển trước trên giá trị hàng (không gồm phí giao hàng). Nếu số tiền theo % thấp hơn mức tối thiểu,
         đơn mới lấy mức tối thiểu, nhưng không vượt giá trị hàng. Đơn từ 3.000.000đ trở lên luôn cọc tối thiểu 30% giá
         trị hàng, kể cả khi từng sản phẩm dưới mức đó và phần trăm ở đây thấp hơn. Khách vẫn có thể chọn cọc 100% khi
-        thanh toán. Đơn đang chờ cọc giữ số đã chốt cho đến khi khách đổi lại.
+        thanh toán; mức này gồm cả phí giao hàng. Đơn đang chờ cọc giữ số đã chốt cho đến khi khách đổi lại.
       </p>
 
       {error ? (

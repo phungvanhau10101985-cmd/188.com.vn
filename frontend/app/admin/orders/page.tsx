@@ -77,7 +77,7 @@ function depositRequiredDisplay(order: AdminOrder): number {
   const shipping = parseMoney(order.shipping_fee);
   const goods = Math.max(0, total - shipping);
   const pct = Number(order.deposit_percentage) || 0;
-  if (pct >= 100 || order.deposit_type === 'percent_100') return goods;
+  if (pct >= 100 || order.deposit_type === 'percent_100') return total;
   if (pct > 0 && pct < 100) return partialDepositAmount(goods, pct);
   if (order.deposit_type === 'percent_30') return partialDepositAmount(goods, 30);
   if (order.status === 'waiting_deposit' && total > 0) return partialDepositAmount(goods, 30);

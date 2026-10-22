@@ -500,7 +500,16 @@ export default function AccountOrderDetailPage() {
                           </div>
                         ) : null}
                         <div className="min-w-0">
-                          <span className="block min-w-0 break-words leading-snug">{item.product_name}</span>
+                          {item.product_slug ? (
+                            <Link
+                              href={`/products/${item.product_slug}`}
+                              className="block min-w-0 break-words leading-snug text-gray-900 hover:text-[#ea580c] hover:underline"
+                            >
+                              {item.product_name}
+                            </Link>
+                          ) : (
+                            <span className="block min-w-0 break-words leading-snug">{item.product_name}</span>
+                          )}
                           <OrderItemVariantMeta
                             item={item}
                             className="mt-1.5 space-y-0.5 text-xs text-gray-600"
