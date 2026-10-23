@@ -373,6 +373,10 @@ function rowKey(row: EmsShippingImportRow): string {
   return `${row.row_number}:${row.reference_code}:${row.order_code || ''}`;
 }
 
+function adminOrderDetailHref(orderCode: string): string {
+  return `/admin/orders?q=${encodeURIComponent(orderCode)}&open=1`;
+}
+
 function formatVnd(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
   return `${Math.round(amount).toLocaleString('vi-VN')} đ`;
@@ -557,7 +561,7 @@ function EmsImportReportPanel({
                       {row.order_code ? (
                         row.order_id ? (
                           <Link
-                            href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                            href={adminOrderDetailHref(row.order_code)}
                             className="text-emerald-700 hover:underline font-medium"
                           >
                             {row.order_code}
@@ -865,7 +869,7 @@ function EmsSearchResultCard({
             {row.order_code ? (
               row.order_id ? (
                 <Link
-                  href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                  href={adminOrderDetailHref(row.order_code)}
                   className="text-emerald-700 hover:underline font-medium"
                 >
                   {row.order_code}
@@ -3571,7 +3575,7 @@ export default function AdminShippingPage() {
                               {row.order_code ? (
                                 row.order_id ? (
                                   <Link
-                                    href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                                    href={adminOrderDetailHref(row.order_code)}
                                     className="text-orange-700 hover:underline"
                                   >
                                     {row.order_code}
@@ -4556,7 +4560,7 @@ export default function AdminShippingPage() {
                             {row.order_code ? (
                               row.order_id ? (
                                 <Link
-                                  href={`/admin/orders?q=${encodeURIComponent(row.order_code)}`}
+                                  href={adminOrderDetailHref(row.order_code)}
                                   className="text-emerald-700 hover:underline font-medium"
                                 >
                                   {row.order_code}
@@ -4792,7 +4796,16 @@ export default function AdminShippingPage() {
                   <ul className="space-y-1 font-mono text-xs leading-relaxed max-h-40 overflow-y-auto">
                     {opsBucketRows.map((row) => (
                       <li key={rowKey(row)}>
-                        {row.order_code || '—'}
+                        {row.order_code && row.order_id ? (
+                          <Link
+                            href={adminOrderDetailHref(row.order_code)}
+                            className="font-semibold text-emerald-800 hover:underline"
+                          >
+                            {row.order_code}
+                          </Link>
+                        ) : (
+                          row.order_code || '—'
+                        )}
                         {row.ems_tracking_code ? ` · ${row.ems_tracking_code}` : ''}
                         {row.reference_code ? ` · ${row.reference_code}` : ''}
                       </li>
@@ -5002,7 +5015,7 @@ export default function AdminShippingPage() {
                 {orderStatusModal.order ? (
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Link
-                      href={`/admin/orders?q=${encodeURIComponent(orderStatusModal.order.order_code)}`}
+                      href={adminOrderDetailHref(orderStatusModal.order.order_code)}
                       className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-100"
                     >
                       Mở trong quản lý đơn

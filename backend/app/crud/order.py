@@ -257,7 +257,12 @@ def get_order_by_code(db: Session, order_code: str) -> Optional[Order]:
     code = (order_code or "").strip()
     if not code:
         return None
-    return db.query(Order).filter(Order.order_code.ilike(code)).first()
+    return (
+        db.query(Order)
+        .options(selectinload(Order.items))
+        .filter(Order.order_code.ilike(code))
+        .first()
+    )
 
 def get_user_orders(
     db: Session, 

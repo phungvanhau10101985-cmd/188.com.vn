@@ -216,8 +216,13 @@ function monthInputToDateRange(value: string): { from: string; to: string } | nu
   };
 }
 
+function ordersQueryFromParams(params: { get: (key: string) => string | null }): string {
+  return (params.get('q') || params.get('highlight') || '').trim();
+}
+
 export default function AdminOrdersPage() {
   const searchParams = useSearchParams();
+  const urlQuery = ordersQueryFromParams(searchParams);
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [filteredTotal, setFilteredTotal] = useState(0);
@@ -225,8 +230,8 @@ export default function AdminOrdersPage() {
   const [listPageSize, setListPageSize] = useState(ADMIN_ORDERS_DEFAULT_PAGE_SIZE);
   const [statusCounts, setStatusCounts] = useState<any>(null); // Số đơn theo trạng thái (period=all) cho tab
   const [activeTab, setActiveTab] = useState('all');
-  const [search, setSearch] = useState('');
-  const [appliedSearch, setAppliedSearch] = useState('');
+  const [search, setSearch] = useState(urlQuery);
+  const [appliedSearch, setAppliedSearch] = useState(urlQuery);
   const [statusFilter, setStatusFilter] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
@@ -250,6 +255,8 @@ export default function AdminOrdersPage() {
   const [revenueReport, setRevenueReport] = useState<AdminOrderStats | null>(null);
   const [revenueLoading, setRevenueLoading] = useState(false);
   const [revenueError, setRevenueError] = useState<string | null>(null);
+  const [openingDetail, setOpeningDetail] = useState(false);
+  const fetchGen = useRef(0);
 
   const showToast = (type: 'ok' | 'err', msg: string) => {
     setToast({ type, msg });
@@ -257,6 +264,7 @@ export default function AdminOrdersPage() {
   };
 
   const fetchOrders = useCallback(async () => {
+    const gen = ++fetchGen.current;
     setLoading(true);
     try {
       const skip = (listPage - 1) * listPageSize;
@@ -278,6 +286,7 @@ export default function AdminOrdersPage() {
         skip,
         limit: listPageSize,
       });
+      if (gen !== fetchGen.current) return;
       const total = data.pagination?.filtered_total ?? data.items.length;
       const maxPage = Math.max(1, Math.ceil(total / listPageSize));
       if (total > 0 && listPage > maxPage) {
@@ -287,9 +296,10 @@ export default function AdminOrdersPage() {
       setOrders(data.items);
       setFilteredTotal(total);
     } catch {
+      if (gen !== fetchGen.current) return;
       showToast('err', 'Lỗi tải đơn hàng');
     } finally {
-      setLoading(false);
+      if (gen === fetchGen.current) setLoading(false);
     }
   }, [activeTab, statusFilter, paymentFilter, sourceFilter, specialFilter, appliedSearch, listPage, listPageSize]);
 
@@ -397,22 +407,40 @@ export default function AdminOrdersPage() {
   const openedDetailRef = useRef('');
 
   useEffect(() => {
-    const q = (searchParams.get('q') || searchParams.get('highlight') || '').trim();
-    if (q) {
-      setSearch(q);
-      setAppliedSearch(q);
-    }
+    const q = ordersQueryFromParams(searchParams);
+    if (!q) return;
+    setSearch(q);
+    setAppliedSearch(q);
   }, [searchParams]);
 
   useEffect(() => {
-    if (!openDetailCode || loading) return;
+    if (!openDetailCode) {
+      setOpeningDetail(false);
+      return;
+    }
     if (openedDetailRef.current === openDetailCode) return;
-    const match = orders.find((order) => order.order_code.toLowerCase() === openDetailCode.toLowerCase());
-    if (!match) return;
-    openedDetailRef.current = openDetailCode;
-    setSelectedOrder(match);
-    setDetailOpen(true);
-  }, [openDetailCode, loading, orders]);
+    let cancelled = false;
+    setOpeningDetail(true);
+    void (async () => {
+      try {
+        const order = await adminOrderAPI.lookupOrderByCode(openDetailCode);
+        if (cancelled) return;
+        openedDetailRef.current = openDetailCode;
+        setSelectedOrder(order);
+        setDetailOpen(true);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        showToast('err', err instanceof Error ? err.message : `Không mở được đơn ${openDetailCode}`);
+      } finally {
+        if (!cancelled) setOpeningDetail(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Tra đúng đơn theo mã, không phụ thuộc danh sách đang tải.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openDetailCode]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTotal / listPageSize));
   const displayFrom = filteredTotal === 0 ? 0 : (listPage - 1) * listPageSize + 1;
@@ -1237,6 +1265,14 @@ export default function AdminOrdersPage() {
             )}
           </div>
         </div>
+
+        {openingDetail && !detailOpen && openDetailCode ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <p className="rounded-lg bg-white px-4 py-3 text-sm text-gray-700 shadow">
+              Đang mở đơn {openDetailCode}…
+            </p>
+          </div>
+        ) : null}
 
         {detailOpen && selectedOrder && (
           <AdminOrderDetailModal
