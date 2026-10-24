@@ -139,9 +139,12 @@ def test_split_vn_name_and_fold():
 def test_is_valid_meta_fbc():
     now_ms = int(time.time() * 1000)
     assert is_valid_meta_fbc(f"fb.1.{now_ms}.IwAR0abc-def")
+    assert is_valid_meta_fbc(f"fb.1.{now_ms}.IwAR0abc-def.AQYAAQIA")
+    assert is_valid_meta_fbc(f"fb.2.{now_ms}.IwAR0abc-def")
     assert not is_valid_meta_fbc("fb.1.1710000000.IwAR0abc-def")
     assert not is_valid_meta_fbc(f"fb.1.{now_ms + 600_000}.IwAR0abc-def")
     assert not is_valid_meta_fbc("IwAR0abc")
+    assert not is_valid_meta_fbc("")
 
 
 def test_order_eligible_for_meta_purchase():

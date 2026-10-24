@@ -32,7 +32,9 @@ META_CLICK_ID_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
 META_CLOCK_SKEW_MS = 5 * 60 * 1000
 _SHA256_HEX_RE = re.compile(r"^[a-f0-9]{64}$")
 _FBP_RE = re.compile(r"^fb\.\d+\.(\d{13})\.\d+$")
-_FBC_RE = re.compile(r"^fb\.\d+\.(\d{13})\.[A-Za-z0-9_-]+$")
+# Group 1 = creation time ms. Đuôi là fbclid, có thể kèm phụ lục (dấu chấm) do Pixel/Parameter Builder.
+_FBC_RE = re.compile(r"^fb\.\d{1,3}\.(\d{13})\.\S+$")
+_FBC_MAX_LEN = 2048
 
 # Không hash — Meta yêu cầu plaintext.
 _PLAIN_USER_DATA_KEYS = frozenset(
@@ -220,7 +222,9 @@ def is_valid_meta_fbp(value: str) -> bool:
 
 def is_valid_meta_fbc(value: str) -> bool:
     v = (value or "").strip()
-    return len(v) <= 512 and _has_valid_meta_creation_time(v, _FBC_RE)
+    if not v or len(v) > _FBC_MAX_LEN or re.search(r"[\s;,]", v):
+        return False
+    return _has_valid_meta_creation_time(v, _FBC_RE)
 
 
 def _valid_ip(value: str) -> Optional[str]:

@@ -91,7 +91,7 @@ class OrderCreate(BaseModel):
     referral_code: Optional[str] = Field(default=None, max_length=32, description="Mã ref từ cookie/link affiliate")
     promo_code: Optional[str] = Field(default=None, max_length=50, description="Mã khuyến mãi (vd: WELCOME188)")
     meta_fbp: Optional[str] = Field(default=None, max_length=128, description="Cookie _fbp Meta")
-    meta_fbc: Optional[str] = Field(default=None, max_length=512, description="Cookie _fbc / click ID Meta")
+    meta_fbc: Optional[str] = Field(default=None, max_length=2048, description="Cookie _fbc / click ID Meta")
     shipping_province: Optional[str] = Field(default=None, max_length=255)
     shipping_district: Optional[str] = Field(default=None, max_length=255)
 

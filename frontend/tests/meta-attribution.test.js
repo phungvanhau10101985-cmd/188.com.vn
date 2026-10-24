@@ -18,7 +18,9 @@ describe('Meta attribution contract', () => {
   test('persists fbclid into first-party _fbc/_fbp', () => {
     expect(attr).toContain('persistMetaClickIds');
     expect(attr).toContain("params.get('fbclid')");
-    expect(attr).toContain('`fb.1.${Date.now()}.${clid}`');
+    expect(attr).toContain('metaSubdomainIndex');
+    expect(attr).toContain('fbcMatchesFbclid');
+    expect(attr).toContain('return `fb.${metaSubdomainIndex(host)}.${Date.now()}.${clid}`;');
     expect(attr).not.toContain('Math.floor(Date.now() / 1000)');
     expect(attr).toContain("writeCookie('_fbc'");
     expect(attr).toContain("writeCookie('_fbp'");

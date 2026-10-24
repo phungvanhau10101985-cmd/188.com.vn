@@ -167,7 +167,7 @@ function firePixelAndCapi(
     syncPixel?: boolean;
     onPixelFired?: () => void;
     capiRetries?: number;
-    /** Bỏ email khỏi CAPI cho event tần suất cao như ViewContent để tránh dữ liệu khách trùng lặp. */
+    /** false = bỏ email khỏi CAPI. ViewContent vẫn gửi email khi khách đã đăng nhập. */
     includeEmail?: boolean;
     /** Cố định event_id — dedupe Pixel ↔ CAPI (vd. Purchase theo order_id). */
     eventId?: string;
@@ -365,7 +365,6 @@ export function trackMetaViewContentProduct(
     /** Chờ fbq.loaded — Pixel Helper mới thấy ViewContent (không kẹt stub). */
     keepalive: true,
     capiRetries: 2,
-    includeEmail: false,
   });
 }
 
@@ -408,7 +407,6 @@ export function trackMetaViewContentProducts(
     /** Không syncPixel: lúc PDP mount fbq có thể còn stub — khi ready mới bắn (Pixel Helper thấy ViewContent). */
     keepalive: true,
     capiRetries: 2,
-    includeEmail: false,
   });
 }
 

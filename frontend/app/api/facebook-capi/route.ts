@@ -18,6 +18,32 @@ function backendOrigin(): string {
   return (process.env.API_INTERNAL_ORIGIN || 'http://127.0.0.1:8001').replace(/\/$/, '');
 }
 
+function firstHop(raw: string | null): string {
+  if (!raw) return '';
+  return raw.split(',')[0]?.trim() || '';
+}
+
+/** IPv6 thật (không tính ::ffff:x.x.x.x — đó là IPv4 ánh xạ). */
+function isIpv6(ip: string): boolean {
+  const t = ip.replace(/^\[|\]$/g, '');
+  return t.includes(':') && !t.toLowerCase().startsWith('::ffff:');
+}
+
+/**
+ * Meta chấm EMQ ViewContent thấp nếu chỉ có IPv4 trong khi khách vào bằng IPv6.
+ * CF-Connecting-IP là IP khách (kể cả IPv6). X-Real-IP phía nginx thường là IPv4 của proxy.
+ */
+function clientIpForMeta(req: NextRequest): string {
+  const strip = (ip: string) => ip.trim().replace(/^\[|\]$/g, '');
+  const cf = strip(req.headers.get('cf-connecting-ip') || '');
+  if (cf) return cf;
+  const xff = strip(firstHop(req.headers.get('x-forwarded-for')));
+  const real = strip(req.headers.get('x-real-ip') || '');
+  if (isIpv6(xff)) return xff;
+  if (isIpv6(real)) return real;
+  return xff || real || '';
+}
+
 export async function POST(req: NextRequest) {
   const secret = (process.env.FACEBOOK_CAPI_INGEST_SECRET || '').trim();
   if (!secret) {
@@ -45,9 +71,11 @@ export async function POST(req: NextRequest) {
   const userData: Record<string, unknown> = {
     ...(body.user_data && typeof body.user_data === 'object' ? body.user_data : {}),
   };
+  if (typeof userData.fbc === 'string' && !userData.fbc.trim()) {
+    delete userData.fbc;
+  }
 
-  const fwd = req.headers.get('x-forwarded-for');
-  const ip = fwd?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || '';
+  const ip = clientIpForMeta(req);
   if (ip && userData.client_ip_address == null) {
     userData.client_ip_address = ip;
   }

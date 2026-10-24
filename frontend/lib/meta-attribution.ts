@@ -11,7 +11,9 @@ const LS_FBC = '188_meta_fbc';
 const LS_FBP = '188_meta_fbp';
 
 const FBP_RE = /^fb\.\d+\.(\d{13})\.\d+$/;
-const FBC_RE = /^fb\.\d+\.(\d{13})\.[A-Za-z0-9_-]+$/;
+/** Timestamp là group 1. Đuôi giữ nguyên fbclid + phụ lục Parameter Builder (có dấu chấm). */
+const FBC_RE = /^fb\.\d{1,3}\.(\d{13})\.\S+$/;
+const FBC_MAX_LEN = 2048;
 
 export type MetaAdvancedMatchingPatch = {
   email?: string | null;
@@ -49,16 +51,28 @@ function lsSet(key: string, value: string): void {
   }
 }
 
-function readCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const hit = document.cookie.split('; ').find((row) => row.startsWith(`${name}=`));
-  if (!hit) return null;
-  const v = hit.slice(name.length + 1);
+function decodeCookieValue(raw: string): string {
   try {
-    return decodeURIComponent(v);
+    return decodeURIComponent(raw);
   } catch {
-    return v;
+    return raw;
   }
+}
+
+function readCookieValues(name: string): string[] {
+  if (typeof document === 'undefined') return [];
+  const prefix = `${name}=`;
+  const out: string[] = [];
+  for (const row of document.cookie.split('; ')) {
+    if (!row.startsWith(prefix)) continue;
+    const v = decodeCookieValue(row.slice(prefix.length)).trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+
+function readCookie(name: string): string | null {
+  return readCookieValues(name)[0] ?? null;
 }
 
 function writeCookie(name: string, value: string): void {
@@ -72,11 +86,10 @@ export function isValidMetaFbp(value: string | null | undefined): value is strin
 }
 
 export function isValidMetaFbc(value: string | null | undefined): value is string {
-  return Boolean(
-    value &&
-      value.trim().length <= 512 &&
-      hasValidMetaCreationTime(value, FBC_RE)
-  );
+  if (!value) return false;
+  const v = value.trim();
+  if (!v || v.length > FBC_MAX_LEN || /[\s;,]/.test(v)) return false;
+  return hasValidMetaCreationTime(v, FBC_RE);
 }
 
 function hasValidMetaCreationTime(
@@ -99,12 +112,42 @@ function newFbp(): string {
   return `fb.1.${Date.now()}.${Math.floor(Math.random() * 1e16)}`;
 }
 
+function fbcTail(value: string): string {
+  const match = /^fb\.\d{1,3}\.\d{13}\.(.+)$/.exec(value.trim());
+  return match ? match[1] : '';
+}
+
+/** Cookie Pixel có thể là `fbclid` hoặc `fbclid.<phụ lục>` — không được cắt phụ lục. */
+function fbcMatchesFbclid(fbc: string, fbclid: string): boolean {
+  const clid = fbclid.trim();
+  if (!clid) return false;
+  const tail = fbcTail(fbc);
+  return tail === clid || tail.startsWith(`${clid}.`);
+}
+
+/**
+ * Chỉ số subdomain Meta: example.com = 1, www.example.com = 2.
+ * `com.vn` là hậu tố kép nên 188.com.vn = 1, www.188.com.vn = 2.
+ */
+export function metaSubdomainIndex(hostname: string): number {
+  const host = hostname.split(':')[0].toLowerCase().replace(/\.$/, '');
+  if (!host || host === 'localhost' || /^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return 1;
+  const parts = host.split('.').filter(Boolean);
+  if (parts.length <= 1) return 0;
+  const last = parts[parts.length - 1] || '';
+  const second = parts[parts.length - 2] || '';
+  const multiPartSuffix = last.length === 2 && /^(com|co|org|net|gov|edu|ac|ne)$/.test(second);
+  if (multiPartSuffix && parts.length >= 3) return parts.length - 2;
+  return parts.length - 1;
+}
+
 function fbcFromFbclid(fbclid: string, existing?: string | null): string {
   const clid = fbclid.trim();
-  if (existing && isValidMetaFbc(existing) && existing.endsWith(`.${clid}`)) {
-    return existing;
+  if (existing && isValidMetaFbc(existing) && fbcMatchesFbclid(existing, clid)) {
+    return existing.trim();
   }
-  return `fb.1.${Date.now()}.${clid}`;
+  const host = typeof location !== 'undefined' ? location.hostname : '';
+  return `fb.${metaSubdomainIndex(host)}.${Date.now()}.${clid}`;
 }
 
 function bindPixelReady(): void {
@@ -209,17 +252,20 @@ export function persistMetaClickIds(): { fbp?: string; fbc?: string } {
   const urlClid = (params.get('fbclid') || '').trim();
   if (urlClid) lsSet(LS_FBCLID, urlClid);
 
-  const cookieFbc = readCookie('_fbc');
+  const cookieFbcs = readCookieValues('_fbc');
   const storedFbc = lsGet(LS_FBC);
-  let fbc = isValidMetaFbc(cookieFbc)
-    ? cookieFbc
-    : isValidMetaFbc(storedFbc)
-      ? storedFbc
-      : '';
+  const fbcCandidates = [...cookieFbcs, storedFbc];
+  let fbc =
+    (urlClid ? fbcCandidates.find((v) => isValidMetaFbc(v) && fbcMatchesFbclid(v, urlClid)) : '') ||
+    fbcCandidates.find((v) => isValidMetaFbc(v)) ||
+    '';
   if (urlClid) {
-    fbc = fbcFromFbclid(urlClid, fbc);
-    writeCookie('_fbc', fbc);
-    lsSet(LS_FBC, fbc);
+    const next = fbcFromFbclid(urlClid, fbc);
+    if (isValidMetaFbc(next)) {
+      fbc = next;
+      writeCookie('_fbc', fbc);
+      lsSet(LS_FBC, fbc);
+    }
   } else if (fbc) {
     // Chỉ khôi phục _fbc nguyên bản. Không ghép fbclid cũ với timestamp hiện tại.
     writeCookie('_fbc', fbc);
