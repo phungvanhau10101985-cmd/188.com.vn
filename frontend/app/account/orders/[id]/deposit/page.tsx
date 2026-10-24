@@ -36,7 +36,6 @@ import {
 import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
 import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 import { useGoogleCustomerReviewsMerchantId } from '@/lib/use-google-customer-reviews-merchant-id';
-import { formatDepositMinVnd } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
@@ -160,7 +159,7 @@ export default function OrderDepositPage() {
     account_number?: string | null;
   } | null>(null);
   const { pushToast } = useToast();
-  const { percent: configuredDepositPercent, minAmount: configuredDepositMin } = useDepositPolicy();
+  const { percent: configuredDepositPercent } = useDepositPolicy();
   const gcrMerchantId = useGoogleCustomerReviewsMerchantId();
   const prevStatusRef = useRef<string | null>(null);
   /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
@@ -794,7 +793,7 @@ export default function OrderDepositPage() {
                       {order.deposit_percentage && order.deposit_percentage > 0 && order.deposit_percentage < 100
                         ? order.deposit_percentage
                         : configuredDepositPercent}
-                      %, tối thiểu {formatDepositMinVnd(configuredDepositMin)}
+                      %
                     </span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">

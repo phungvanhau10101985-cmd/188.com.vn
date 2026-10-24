@@ -205,6 +205,40 @@ def _normalize_client_ip(s: str) -> str:
     return t
 
 
+# Cloudflare công bố https://www.cloudflare.com/ips-v4 — chỉ tin CF-Connecting-IP khi mép là các dải này.
+_CLOUDFLARE_NETS = tuple(
+    ipaddress.ip_network(cidr)
+    for cidr in (
+        "173.245.48.0/20",
+        "103.21.244.0/22",
+        "103.22.200.0/22",
+        "103.31.4.0/22",
+        "141.101.64.0/18",
+        "108.162.192.0/18",
+        "190.93.240.0/20",
+        "188.114.96.0/20",
+        "197.234.240.0/22",
+        "198.41.128.0/17",
+        "162.158.0.0/15",
+        "104.16.0.0/13",
+        "104.24.0.0/14",
+        "172.64.0.0/13",
+        "131.0.72.0/22",
+    )
+)
+
+
+def _is_cloudflare_ip(host: str) -> bool:
+    raw = _normalize_client_ip(host)
+    if not raw:
+        return False
+    try:
+        ip = ipaddress.ip_address(raw)
+    except ValueError:
+        return False
+    return any(ip in net for net in _CLOUDFLARE_NETS)
+
+
 def _peer_trust_x_forwarded_for(host: str) -> bool:
     """Chỉ đọc X-Forwarded-For khi kết nối trực tiếp từ proxy nội bộ (Next, ngrok → app)."""
     if not host:
@@ -216,12 +250,21 @@ def _peer_trust_x_forwarded_for(host: str) -> bool:
     return bool(ip.is_loopback or ip.is_private)
 
 
+def _append_unique_ip(out: list[str], seen: set[str], value: str) -> None:
+    ip = _normalize_client_ip(value)
+    if ip and ip not in seen:
+        seen.add(ip)
+        out.append(ip)
+
+
 def _webhook_ip_candidates(request: Request) -> list[str]:
     """
     IP để đối chiếu allowlist SePay.
 
     - Peer loopback/private: tin X-Forwarded-For (toàn chuỗi) và X-Real-IP (Nginx hay chỉ set một trong hai).
     - SEPAY_WEBHOOK_TRUST_PROXY_HEADERS=true: cùng logic dù peer không được coi là private (chỉ khi app sau proxy độc quyền).
+    - Peer là IP Cloudflare (uvicorn lấy hop cuối của X-Forwarded-For): lấy CF-Connecting-IP.
+      Không có header đó thì chỉ nhận đúng 2 hop ``client, edge`` — hop thừa phía trước là XFF giả mạo.
     """
     direct = ""
     if request.client and request.client.host:
@@ -231,6 +274,9 @@ def _webhook_ip_candidates(request: Request) -> list[str]:
     parts = [_normalize_client_ip(p) for p in xff_raw.split(",") if p.strip()]
     real_raw = (request.headers.get("x-real-ip") or request.headers.get("X-Real-IP") or "").strip()
     real_norm = _normalize_client_ip(real_raw) if real_raw else ""
+    cf_connect = _normalize_client_ip(
+        request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP") or ""
+    )
 
     trust_fwd = _peer_trust_x_forwarded_for(direct) or getattr(
         settings, "SEPAY_WEBHOOK_TRUST_PROXY_HEADERS", False
@@ -240,17 +286,28 @@ def _webhook_ip_candidates(request: Request) -> list[str]:
         out: list[str] = []
         seen: set[str] = set()
         for p in parts:
-            if p and p not in seen:
-                seen.add(p)
-                out.append(p)
-        if real_norm and real_norm not in seen:
-            out.append(real_norm)
+            _append_unique_ip(out, seen, p)
+        _append_unique_ip(out, seen, real_norm)
+        _append_unique_ip(out, seen, cf_connect)
         if out:
             return out
         return [direct] if direct else []
 
-    if direct:
-        return [direct]
+    out = []
+    seen = set()
+    _append_unique_ip(out, seen, direct)
+    edge_is_cf = _is_cloudflare_ip(direct) or _is_cloudflare_ip(real_norm)
+    if edge_is_cf and cf_connect:
+        _append_unique_ip(out, seen, cf_connect)
+    elif (
+        edge_is_cf
+        and _is_cloudflare_ip(direct)
+        and len(parts) == 2
+        and _is_cloudflare_ip(parts[-1])
+    ):
+        _append_unique_ip(out, seen, parts[0])
+    if out:
+        return out
     return parts[:1] if parts else ([real_norm] if real_norm else [])
 
 
@@ -296,13 +353,29 @@ def _configured_webhook_api_keys() -> list[str]:
     return keys
 
 
+def _canonical_ip(value: str) -> str:
+    """Chuẩn hoá IPv4/IPv6 để allowlist khớp cả dạng rút gọn và dạng đầy đủ."""
+    raw = _normalize_client_ip(value)
+    if not raw:
+        return ""
+    try:
+        return ipaddress.ip_address(raw).compressed
+    except ValueError:
+        return raw
+
+
 def _webhook_ip_allowed(request: Request) -> tuple[bool, Optional[str], list[str]]:
     """IP allowlist — lớp phụ. Trả (ok, ip_khớp, candidates)."""
-    allow = getattr(settings, "SEPAY_WEBHOOK_IP_ALLOWLIST", frozenset())
+    allow = {
+        canon
+        for canon in (_canonical_ip(ip) for ip in getattr(settings, "SEPAY_WEBHOOK_IP_ALLOWLIST", frozenset()))
+        if canon
+    }
     candidates = _webhook_ip_candidates(request)
     for ip in candidates:
-        if ip in allow:
-            return True, ip, candidates
+        canon = _canonical_ip(ip)
+        if canon and canon in allow:
+            return True, canon, candidates
     return False, None, candidates
 
 

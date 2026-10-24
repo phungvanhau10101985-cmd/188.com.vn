@@ -23,6 +23,21 @@ load_dotenv(_backend_root / ".env.local", override=True)  # ghi đè .env (dev/l
 load_dotenv(override=False)  # cwd .env — chỉ bổ sung biến chưa có (không đè .env.local)
 
 
+# IP SePay dùng để bắn webhook / IPN. Để trống SEPAY_WEBHOOK_IP_ALLOWLIST = dùng bộ này.
+# Nguồn: https://developer.sepay.vn/vi/dia-chi-ip — SePay có thể gọi từ bất kỳ IP nào trong danh sách.
+SEPAY_DEFAULT_WEBHOOK_IPS: Tuple[str, ...] = (
+    "172.236.138.20",
+    "172.233.83.68",
+    "171.244.35.2",
+    "151.158.108.68",
+    "151.158.109.79",
+    "103.255.238.139",
+    "45.57.137.67",
+    "2400:8905::2000:8cff:fe98:45cd",
+    "2600:3c15::2000:8aff:fedd:874b",
+)
+
+
 def _normalize_gemini_model(raw: Optional[str]) -> Tuple[str, bool]:
     """
     Chuẩn hoá model Gemini trong Settings.
@@ -1129,17 +1144,9 @@ class Settings:
             "SEPAY_WEBHOOK_TRUST_PROXY_HEADERS", "false"
         ).lower() in ("1", "true", "yes")
         _sepay_ip_env = os.getenv("SEPAY_WEBHOOK_IP_ALLOWLIST", "").strip()
-        _sepay_default_ips = (
-            "172.236.138.20",
-            "172.233.83.68",
-            "171.244.35.2",
-            "151.158.108.68",
-            "151.158.109.79",
-            "103.255.238.139",
-        )
         self.SEPAY_WEBHOOK_IP_ALLOWLIST: frozenset = frozenset(
             p.strip()
-            for p in (_sepay_ip_env.split(",") if _sepay_ip_env else _sepay_default_ips)
+            for p in (_sepay_ip_env.split(",") if _sepay_ip_env else SEPAY_DEFAULT_WEBHOOK_IPS)
             if p.strip()
         )
         self.SEPAY_ALLOW_INSECURE_DEV: bool = os.getenv("SEPAY_ALLOW_INSECURE_DEV", "false").lower() in ("1", "true", "yes")
