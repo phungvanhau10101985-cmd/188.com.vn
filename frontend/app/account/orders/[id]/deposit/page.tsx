@@ -209,15 +209,7 @@ export default function OrderDepositPage() {
     const sepayBank = sepayInfo?.enabled ? (sepayInfo.bank_code || '').trim() : '';
     const accountNumber = sepayAccount || (selectedAccount?.account_number || '').replace(/\s/g, '');
     const beneficiaryBank = sepayBank || (selectedAccount?.bank_code || selectedAccount?.bank_short_name || '').trim();
-    const sameAccount = Boolean(
-      selectedAccount && selectedAccount.account_number.replace(/\s/g, '') === accountNumber
-    );
-    return {
-      amount,
-      accountNumber,
-      beneficiaryBank,
-      accountName: sameAccount ? (selectedAccount?.account_holder || '').trim() : '',
-    };
+    return { amount, accountNumber, beneficiaryBank };
   }, [order, sepayInfo, selectedAccount]);
 
   useEffect(() => {
@@ -1001,7 +993,6 @@ export default function OrderDepositPage() {
         amount={depositPayTarget.amount}
         amountLabel={formatVnd(depositPayTarget.amount)}
         accountNumber={depositPayTarget.accountNumber}
-        accountName={depositPayTarget.accountName}
         beneficiaryBank={depositPayTarget.beneficiaryBank}
         transferContent={transferContent}
         onOpenApp={(appId) => trackEvent('deposit_bank_app_open', { order_id: order.id, app: appId })}

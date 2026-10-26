@@ -5,8 +5,10 @@ import {
   BANK_PAY_APPS,
   BANK_PAY_APPS_PREVIEW,
   bankPayAppIconUrl,
-  buildVietQrBankDeeplink,
-  vietQrBeneficiaryBankId,
+  buildBankQrOpenUrl,
+  detectBankPayPlatform,
+  vietQrBeneficiaryBin,
+  type BankPayPlatform,
 } from '@/lib/vietqr-bank-deeplink';
 
 type Props = {
@@ -16,7 +18,6 @@ type Props = {
   amount: number;
   amountLabel: string;
   accountNumber: string;
-  accountName?: string;
   beneficiaryBank: string;
   transferContent: string;
   onOpenApp?: (appId: string) => void;
@@ -29,7 +30,6 @@ export default function DepositBankPaySheet({
   amount,
   amountLabel,
   accountNumber,
-  accountName,
   beneficiaryBank,
   transferContent,
   onOpenApp,
@@ -39,8 +39,10 @@ export default function DepositBankPaySheet({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const [showAll, setShowAll] = useState(false);
-  const bankId = vietQrBeneficiaryBankId(beneficiaryBank);
-  const returnUrl = typeof window !== 'undefined' ? window.location.href : '';
+  const [platform] = useState<BankPayPlatform>(() =>
+    typeof navigator === 'undefined' ? 'other' : detectBankPayPlatform(navigator.userAgent)
+  );
+  const bankBin = vietQrBeneficiaryBin(beneficiaryBank);
 
   useEffect(() => {
     if (!open) {
@@ -119,22 +121,21 @@ export default function DepositBankPaySheet({
               />
             </div>
             <p className="mt-2 max-w-[280px] text-center text-xs leading-snug text-gray-500">
-              Quét mã này trong app ngân hàng, hoặc bấm Mở để app nhận sẵn số tiền và nội dung.
+              Bấm Mở để app nhận đúng mã QR này: số tiền và nội dung đã điền, chỉ cần đăng nhập rồi xác nhận.
             </p>
           </div>
 
           <p className="mb-2 text-sm font-semibold text-gray-900">Mở ứng dụng</p>
-          {bankId ? (
+          {bankBin ? (
             <ul className="divide-y divide-gray-100">
               {apps.map((app) => {
-                const href = buildVietQrBankDeeplink({
+                const href = buildBankQrOpenUrl({
                   appId: app.id,
                   accountNumber,
                   beneficiaryBank,
                   amount,
                   transferContent,
-                  accountName,
-                  returnUrl,
+                  platform,
                 });
                 return (
                   <li key={app.id} className="flex items-center gap-3 py-2.5">
@@ -167,7 +168,7 @@ export default function DepositBankPaySheet({
             </p>
           )}
 
-          {bankId && BANK_PAY_APPS.length > BANK_PAY_APPS_PREVIEW ? (
+          {bankBin && BANK_PAY_APPS.length > BANK_PAY_APPS_PREVIEW ? (
             <button
               type="button"
               onClick={() => setShowAll((value) => !value)}
@@ -178,8 +179,8 @@ export default function DepositBankPaySheet({
           ) : null}
 
           <p className="mt-3 text-[11px] leading-snug text-gray-500">
-            MB Bank, BIDV, ACB ONE, VietinBank và OCB tự điền số tài khoản, số tiền và nội dung. App khác mở để bạn quét
-            mã QR. Kiểm tra lại trước khi xác nhận chuyển tiền. Điều khoản của app ngân hàng áp dụng cho giao dịch.
+            Nút Mở gửi mã QR sang app, không chỉ mở trang chủ ngân hàng. Vietcombank, Agribank và MoMo không nhận link
+            này — hãy quét mã QR phía trên. Kiểm tra số tiền và nội dung trước khi xác nhận.
           </p>
         </div>
       </div>
