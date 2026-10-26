@@ -18,6 +18,8 @@ from app.models.product_review import ProductReview
 from app.services.rating_group_alloc import _table_names
 
 SEED_REVIEW_COUNT = 100
+SEED_USEFUL_MIN = 60
+SEED_USEFUL_MAX = 188
 _SHOP = "188.COM.VN"
 
 _HO = (
@@ -317,7 +319,7 @@ def seed_reviews_for_new_group(
                 content=_content(kind, noun, i, star),
                 group=gid,
                 product_id=None,
-                useful=0 if i % 5 == 0 else 1 + ((i * 3) % 18),
+                useful=rng.randint(SEED_USEFUL_MIN, SEED_USEFUL_MAX),
                 reply_name=_SHOP,
                 reply_content=reply_tpl.format(p=pronoun, shop=_SHOP),
                 reply_at=reply_at,
