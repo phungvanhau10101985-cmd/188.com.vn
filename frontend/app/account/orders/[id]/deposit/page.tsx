@@ -7,6 +7,7 @@ import { apiClient } from '@/lib/api-client';
 import type { BankAccountInfo } from '@/lib/api-client';
 import { useToast } from '@/components/ToastProvider';
 import { buildQrFromTemplate } from '@/lib/deposit-qr';
+import DepositBankPaySheet from '@/components/deposit/DepositBankPaySheet';
 import { buildSepayTransferContent } from '@/lib/sepay-transfer-content';
 import { detectInAppBrowser, getInAppBrowserSaveHint, getInAppBrowserShortName, isLikelyMobile, type InAppBrowserKind } from '@/lib/in-app-browser';
 import { saveImageBlob, trySaveFilePicker, trySyncBlobDownload } from '@/lib/save-image-blob';
@@ -173,6 +174,7 @@ export default function OrderDepositPage() {
   const qrBlobRef = useRef<Blob | null>(null);
   const [qrBlobReady, setQrBlobReady] = useState(false);
   const [inAppKind, setInAppKind] = useState<InAppBrowserKind | null>(null);
+  const [bankPayOpen, setBankPayOpen] = useState(false);
   const inAppBrowser = inAppKind != null;
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -200,6 +202,23 @@ export default function OrderDepositPage() {
     }
     return `https://img.vietqr.io/image/${selectedAccount.bank_short_name}-${selectedAccount.account_number}-compact2.png?amount=${order.deposit_amount}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(selectedAccount.account_holder || '')}`;
   }, [sepayInfo, order, selectedAccount, transferContent]);
+
+  const depositPayTarget = useMemo(() => {
+    const amount = order ? Math.round(orderMoney(order, 'deposit_amount')) : 0;
+    const sepayAccount = sepayInfo?.enabled ? (sepayInfo.account_number || '').replace(/\s/g, '') : '';
+    const sepayBank = sepayInfo?.enabled ? (sepayInfo.bank_code || '').trim() : '';
+    const accountNumber = sepayAccount || (selectedAccount?.account_number || '').replace(/\s/g, '');
+    const beneficiaryBank = sepayBank || (selectedAccount?.bank_code || selectedAccount?.bank_short_name || '').trim();
+    const sameAccount = Boolean(
+      selectedAccount && selectedAccount.account_number.replace(/\s/g, '') === accountNumber
+    );
+    return {
+      amount,
+      accountNumber,
+      beneficiaryBank,
+      accountName: sameAccount ? (selectedAccount?.account_holder || '').trim() : '',
+    };
+  }, [order, sepayInfo, selectedAccount]);
 
   useEffect(() => {
     setInAppKind(detectInAppBrowser());
@@ -916,20 +935,21 @@ export default function OrderDepositPage() {
                     />
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1.5 text-center max-w-[280px] leading-snug">
-                    Quét mã bằng app ngân hàng.
-                    {inAppBrowser ? (
-                      <>
-                        {' '}
-                        Trong {getInAppBrowserShortName(inAppKind)}: bấm «Lưu mã QR» →{' '}
-                        <strong className="font-semibold text-gray-700">nhấn giữ ảnh</strong> để lưu.
-                      </>
-                    ) : null}
+                    Bấm thanh toán để mở app ngân hàng, số tiền và nội dung đã điền sẵn, kèm mã QR để quét.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setBankPayOpen(true)}
+                    disabled={depositPayTarget.amount <= 0 || !depositPayTarget.accountNumber}
+                    className="mt-3 inline-flex w-full max-w-[280px] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:opacity-60"
+                  >
+                    Thanh toán cọc qua ngân hàng
+                  </button>
                   <button
                     type="button"
                     onClick={() => void handleDownloadQr()}
                     disabled={qrDownloading || !qrBlobReady}
-                    className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors w-full max-w-[240px]"
+                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors w-full max-w-[280px]"
                   >
                     {qrDownloading ? (
                       <>
@@ -973,6 +993,20 @@ export default function OrderDepositPage() {
       </div>
     </div>
 
+    {bankPayOpen && qrValue && depositPayTarget.accountNumber ? (
+      <DepositBankPaySheet
+        open
+        onClose={() => setBankPayOpen(false)}
+        qrImageUrl={qrValue}
+        amount={depositPayTarget.amount}
+        amountLabel={formatVnd(depositPayTarget.amount)}
+        accountNumber={depositPayTarget.accountNumber}
+        accountName={depositPayTarget.accountName}
+        beneficiaryBank={depositPayTarget.beneficiaryBank}
+        transferContent={transferContent}
+        onOpenApp={(appId) => trackEvent('deposit_bank_app_open', { order_id: order.id, app: appId })}
+      />
+    ) : null}
     {qrSavePreviewUrl ? (
       <div
         className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-black/60 p-4"
