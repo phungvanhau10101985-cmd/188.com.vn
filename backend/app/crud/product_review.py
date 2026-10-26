@@ -26,7 +26,8 @@ def get_reviews_for_product(
     Lấy đánh giá hiển thị trên trang sản phẩm (giống logic câu hỏi).
     - Khách đánh giá: product_id = product.id → hiển thị theo sản phẩm đã mua.
     - Import: group = product.group_rating, product_id NULL → hiển thị theo nhóm.
-    Sắp xếp: khách thật trước (is_imported ASC), rồi useful DESC, created_at DESC.
+    Sắp xếp SQL chỉ để chọn tập bản ghi (khách thật trước, rồi useful, mới hơn).
+    Thứ tự hiển thị trên shop do order_storefront_reviews: import đổi số hữu ích theo product_id, số cao hơn lên trên.
     """
     q = db.query(ProductReview).filter(
         ProductReview.is_active == True,

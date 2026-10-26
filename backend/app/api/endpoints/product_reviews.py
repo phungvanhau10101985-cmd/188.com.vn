@@ -1,4 +1,5 @@
 # backend/app/api/endpoints/product_reviews.py - Đánh giá sản phẩm (chỉ admin trả lời)
+import copy
 import io
 import json
 import os
@@ -27,6 +28,7 @@ from app.core.admin_permissions import admin_allowed_operation
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission
 from app.utils.display_timeline import merge_imported_display_created_at, merge_review_reply_display_times
 from app.services import warehouse_clearance as warehouse_clearance_svc
+from app.services.rating_group_seed_reviews import SEED_USEFUL_MAX, SEED_USEFUL_MIN
 from app.services.product_reply_notify import (
     ADMIN_REPLY_EMAIL_DEBOUNCE_SECONDS,
     collect_new_review_reply,
@@ -43,6 +45,58 @@ def _dt_sort_key(dt) -> float:
         return dt.timestamp()
     except (AttributeError, OSError):
         return 0.0
+
+
+def _storefront_rank(item) -> tuple:
+    return (
+        -(getattr(item, "useful", 0) or 0),
+        -_dt_sort_key(getattr(item, "display_created_at", None) or getattr(item, "created_at", None)),
+        getattr(item, "id", 0) or 0,
+    )
+
+
+def imported_display_useful(product_id: int, review_id: int, user_has_voted: bool = False) -> int:
+    """Số hữu ích hiển thị cho đánh giá import: ổn định theo sản phẩm, khác nhau giữa các sản phẩm."""
+    rng = random.Random(f"review-useful:{int(product_id)}:{int(review_id)}")
+    shown = rng.randint(SEED_USEFUL_MIN, SEED_USEFUL_MAX)
+    if user_has_voted:
+        shown += 1
+    return shown
+
+
+def _with_useful(item, useful: int):
+    if hasattr(item, "model_copy"):
+        return item.model_copy(update={"useful": int(useful)})
+    cloned = copy.copy(item)
+    cloned.useful = int(useful)
+    return cloned
+
+
+def order_storefront_reviews(items: list, product_id: int) -> list:
+    """Thứ tự trên trang sản phẩm.
+
+    Đánh giá của người đang xem và đánh giá khách thật giữ số hữu ích thật.
+    Đánh giá import hiện số hữu ích riêng theo product_id, rồi xếp số cao hơn lên trên.
+    """
+    mine = []
+    real = []
+    imported = []
+    for item in items:
+        if getattr(item, "is_current_user", False):
+            mine.append(item)
+        elif getattr(item, "is_imported", False):
+            shown = imported_display_useful(
+                product_id,
+                getattr(item, "id", 0) or 0,
+                bool(getattr(item, "user_has_voted", False)),
+            )
+            imported.append(_with_useful(item, shown))
+        else:
+            real.append(item)
+    mine.sort(key=_storefront_rank)
+    real.sort(key=_storefront_rank)
+    imported.sort(key=_storefront_rank)
+    return mine + real + imported
 
 
 def _serialize_shop_review(
@@ -94,7 +148,7 @@ def get_reviews_for_product(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    """Lấy đánh giá cho trang sản phẩm. Khách thật trước import; đánh giá của user đang xem lên đầu."""
+    """Lấy đánh giá cho trang sản phẩm. Import hiện số hữu ích riêng từng sản phẩm, số cao hơn lên trên."""
     product = crud.product.get_product(db, product_id=product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Sản phẩm không tồn tại")
@@ -121,16 +175,7 @@ def get_reviews_for_product(
                 is_current_user=is_mine,
             )
         )
-    # 1) Đánh giá của khách đang xem; 2) khách thật; 3) import; trong từng nhóm: useful, mới hơn trước
-    result.sort(
-        key=lambda x: (
-            not (x.is_current_user or False),
-            x.is_imported,
-            -(x.useful or 0),
-            -_dt_sort_key(x.display_created_at or x.created_at),
-        )
-    )
-    return result
+    return order_storefront_reviews(result, product_id)
 
 
 @router.post("/submit", response_model=ProductReviewResponse)

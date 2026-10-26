@@ -15,6 +15,7 @@ import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../components/VerifiedPurchaserBadge';
 import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
+import { mergeReviewUsefulToggle } from '@/lib/review-useful-display';
 
 function formatDate(s: string | null | undefined) {
   if (!s) return '';
@@ -106,9 +107,7 @@ export default function ProductReviewsPage() {
     try {
       const res = await apiClient.toggleReviewUseful(reviewId);
       setReviews((prev) =>
-        prev.map((r) =>
-          r.id === reviewId ? { ...r, useful: res.useful, user_has_voted: res.user_has_voted } : r
-        )
+        prev.map((r) => (r.id === reviewId ? mergeReviewUsefulToggle(r, res) : r))
       );
     } catch {
       // ignore

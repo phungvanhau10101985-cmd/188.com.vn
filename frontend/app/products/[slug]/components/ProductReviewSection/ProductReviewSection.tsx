@@ -14,6 +14,7 @@ import ProductReviewFormModal from '../ProductReviewFormModal/ProductReviewFormM
 import { useToast } from '@/components/ToastProvider';
 import VerifiedPurchaserBadge from '../VerifiedPurchaserBadge';
 import { reviewShowsVerifiedPurchaserBadge } from '@/lib/product-qa-verified-display';
+import { mergeReviewUsefulToggle } from '@/lib/review-useful-display';
 
 interface ProductReviewSectionProps {
   product: Product;
@@ -127,9 +128,7 @@ export default function ProductReviewSection({
     try {
       const res = await apiClient.toggleReviewUseful(reviewId);
       setReviews((prev) =>
-        prev.map((r) =>
-          r.id === reviewId ? { ...r, useful: res.useful, user_has_voted: res.user_has_voted } : r
-        )
+        prev.map((r) => (r.id === reviewId ? mergeReviewUsefulToggle(r, res) : r))
       );
     } catch {
       // ignore
