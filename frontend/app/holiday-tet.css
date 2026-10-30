@@ -1,14 +1,7 @@
 /* Chủ đề Tết Nguyên Đán — chỉ khi shell có .holiday-on */
 
-.holiday-on.bg-gray-50,
-.holiday-on .bg-gray-50 {
+.holiday-on.bg-gray-50 {
   background-color: var(--h-paper);
-}
-
-.holiday-on {
-  background-image:
-    radial-gradient(ellipse 20rem 11rem at 0% 9rem, color-mix(in srgb, var(--h-gold) 42%, transparent), transparent 70%),
-    radial-gradient(ellipse 18rem 10rem at 100% 7rem, color-mix(in srgb, var(--h-mid) 30%, transparent), transparent 72%);
 }
 
 .holiday-on .storefront-chrome {
@@ -63,10 +56,6 @@
 
 .holiday-on .bg-orange-50 {
   background-color: var(--h-paper);
-}
-
-.holiday-on .bg-orange-100 {
-  background-color: color-mix(in srgb, var(--h-gold-soft) 70%, white);
 }
 
 .holiday-on .from-\[\#f97316\] {

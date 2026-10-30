@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
@@ -37,7 +38,13 @@ class HolidayProgram:
     sale_label: str
 
 
+_RULES_TTL_SECONDS = 30.0
+_rules_cache: tuple[float, list] | None = None
+
+
 def invalidate_public_cache() -> None:
+    global _rules_cache
+    _rules_cache = None
     ttl_cache.invalidate(HOLIDAY_THEME_PUBLIC_CACHE_KEY)
 
 
@@ -292,6 +299,10 @@ def merged_rules(db: Optional[Session]):
 
     if db is None:
         return list(CATALOG.values())
+    global _rules_cache
+    now = time.monotonic()
+    if _rules_cache is not None and now - _rules_cache[0] < _RULES_TTL_SECONDS:
+        return _rules_cache[1]
     try:
         ensure_occasion_rows(db)
         from app.models.holiday_occasion_setting import HolidayOccasionSetting
@@ -303,7 +314,9 @@ def merged_rules(db: Optional[Session]):
         except Exception:
             pass
         return list(CATALOG.values())
-    return [apply_override(rule, rows.get(code)) for code, rule in CATALOG.items()]
+    rules = [apply_override(rule, rows.get(code)) for code, rule in CATALOG.items()]
+    _rules_cache = (now, rules)
+    return rules
 
 
 def admin_theme_out(db: Session, today: Optional[date] = None):

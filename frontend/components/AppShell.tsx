@@ -432,10 +432,6 @@ export default function AppShell({ children, initialCategoryTree, initialSiteSal
       );
       metas.forEach((node) => node.setAttribute('content', '#f97316'));
     }
-    return () => {
-      delete root.dataset.holidayTheme;
-      metas.forEach((node) => node.setAttribute('content', '#f97316'));
-    };
   }, [showHolidayTet, holidayLook]);
 
   return (

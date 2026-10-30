@@ -133,17 +133,22 @@ export function HolidayThemeProvider({
 
   useEffect(() => {
     let cancel = false;
-    fetchPublicHolidayTheme().then((next) => {
-      if (cancel || next === undefined) return;
-      setRemote(next.theme);
-      setRemoteYear(next.year);
-      setRemoteYearEnd(next.yearEnd);
-      setYears(next.years);
-    });
+    const pull = () => {
+      void fetchPublicHolidayTheme().then((next) => {
+        if (cancel || next === undefined) return;
+        setRemote((prev) => (prev === next.theme ? prev : next.theme));
+        setRemoteYear((prev) => (prev === next.year ? prev : next.year));
+        setRemoteYearEnd((prev) => (prev === next.yearEnd ? prev : next.yearEnd));
+        setYears((prev) => (sameYearMap(prev, next.years) ? prev : next.years));
+      });
+    };
+    pull();
+    const timer = window.setInterval(pull, 60000);
     return () => {
       cancel = true;
+      window.clearInterval(timer);
     };
-  }, [pathname]);
+  }, []);
 
   const isAdmin = Boolean(pathname?.startsWith('/admin'));
 
@@ -153,19 +158,17 @@ export function HolidayThemeProvider({
     const load = () => {
       void fetchMineHolidayPreview().then((next) => {
         if (cancel || next === undefined) return;
-        setAccountPreview(next.theme);
-        setAccountExpires(next.expiresAt);
+        setAccountPreview((prev) => (prev === next.theme ? prev : next.theme));
+        setAccountExpires((prev) => (prev === next.expiresAt ? prev : next.expiresAt));
       });
     };
     load();
-    const timer = window.setInterval(load, 15000);
     window.addEventListener('focus', load);
     return () => {
       cancel = true;
-      window.clearInterval(timer);
       window.removeEventListener('focus', load);
     };
-  }, [isAdmin, pathname]);
+  }, [isAdmin]);
 
   const clearPreview = useCallback(() => {
     clearHolidayAdminPreview();
@@ -200,6 +203,13 @@ export function HolidayThemeProvider({
       </HolidayYearContext.Provider>
     </HolidayThemeContext.Provider>
   );
+}
+
+function sameYearMap(left: Record<string, number>, right: Record<string, number>): boolean {
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key) => left[key] === right[key]);
 }
 
 export function useHolidayTheme(): HolidayThemeId | null {

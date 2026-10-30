@@ -43,19 +43,35 @@ export async function fetchMineHolidayPreview(): Promise<{ theme: HolidayThemeId
   }
 }
 
+let publicCache: { at: number; data: PublicHolidayTheme } | null = null;
+let publicFlight: Promise<PublicHolidayTheme | undefined> | null = null;
+
+function rememberPublic(data: PublicHolidayTheme) {
+  publicCache = { at: Date.now(), data };
+  return data;
+}
+
 /** `undefined` = không gọi được API, giữ trạng thái đang có. */
 export async function fetchPublicHolidayTheme(): Promise<PublicHolidayTheme | undefined> {
+  if (typeof window !== 'undefined' && publicCache && Date.now() - publicCache.at < 20000) {
+    return publicCache.data;
+  }
+  if (typeof window !== 'undefined' && publicFlight) return publicFlight;
+  const run = loadPublicHolidayTheme();
+  if (typeof window === 'undefined') return run;
+  publicFlight = run.finally(() => {
+    publicFlight = null;
+  });
+  return publicFlight;
+}
+
+async function loadPublicHolidayTheme(): Promise<PublicHolidayTheme | undefined> {
   try {
     const init: RequestInit & { next?: { revalidate: number } } = {
       headers: { Accept: 'application/json' },
     };
     if (typeof window === 'undefined') {
-      const isDev = process.env.NODE_ENV === 'development';
-      const disableCache =
-        process.env.NEXT_PUBLIC_DISABLE_CACHE === '1' || process.env.DISABLE_CACHE === '1';
-      init.next = { revalidate: isDev || disableCache ? 0 : 20 };
-    } else {
-      init.cache = 'no-store';
+      init.next = { revalidate: 20 };
     }
     const res = await fetch(`${getApiBaseUrl()}/holiday-theme/public`, init);
     if (!res.ok) return undefined;
@@ -73,12 +89,12 @@ export async function fetchPublicHolidayTheme(): Promise<PublicHolidayTheme | un
     }
     const year = typeof data.event_year === 'number' ? data.event_year : null;
     const yearEnd = typeof data.event_year_end === 'number' ? data.event_year_end : year;
-    return {
+    return rememberPublic({
       theme: typeof data.active_theme === 'string' && isHolidayThemeId(data.active_theme) ? data.active_theme : null,
       year,
       yearEnd,
       years,
-    };
+    });
   } catch {
     return undefined;
   }

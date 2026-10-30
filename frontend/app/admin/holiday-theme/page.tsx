@@ -84,13 +84,16 @@ export default function AdminHolidayThemePage() {
       setPreviewLeft(preview ? preview.expiresAt - Date.now() : 0);
     };
     sync();
-    const timer = window.setInterval(sync, 1000);
     window.addEventListener('storage', sync);
+    if (!previewCode) {
+      return () => window.removeEventListener('storage', sync);
+    }
+    const timer = window.setInterval(sync, 1000);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('storage', sync);
     };
-  }, []);
+  }, [previewCode]);
 
   const togglePreview = (code: string, name: string) => {
     if (!isHolidayThemeId(code)) return;
