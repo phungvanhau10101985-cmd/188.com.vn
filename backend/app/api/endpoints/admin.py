@@ -80,7 +80,11 @@ from app.schemas.holiday_theme import (
     HolidayPreviewGrantOut,
     HolidayThemeAdminOut,
 )
-from app.services.holiday_preview_grant import issue_holiday_preview_token
+from app.services.holiday_preview_grant import (
+    clear_admin_holiday_preview,
+    issue_holiday_preview_token,
+    save_admin_holiday_preview,
+)
 from app.schemas.bunny_admin import BunnyCdnStatusOut, BunnyCdnUploadOut
 from app.schemas.integrations_admin import (
     AdminIntegrationKeyGroup,
@@ -1403,15 +1407,25 @@ def admin_put_holiday_theme(
 @router.post("/holiday-theme/preview", response_model=HolidayPreviewGrantOut)
 def admin_grant_holiday_preview(
     data: HolidayPreviewGrantIn,
+    db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
 ):
-    """Mã ngắn hạn để tab 188.com.vn hiện giao diện lễ. Admin host không chia localStorage với cửa hàng."""
-    del current_admin
+    """Bật xem trước cho tài khoản shop gắn với admin này, và cấp mã mở tab 188.com.vn."""
     try:
         token, expires_at = issue_holiday_preview_token(data.code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    save_admin_holiday_preview(db, current_admin, data.code, expires_at)
     return HolidayPreviewGrantOut(code=data.code, token=token, expires_at=expires_at)
+
+
+@router.delete("/holiday-theme/preview")
+def admin_clear_holiday_preview(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
+):
+    clear_admin_holiday_preview(db, current_admin)
+    return {"ok": True}
 
 
 # ========== Bunny CDN — đăng ảnh lên Storage Zone ==========

@@ -3433,6 +3433,10 @@ export const adminHolidayThemeAPI = {
       method: 'POST',
       body: JSON.stringify({ code }),
     }),
+  clearPreview: () =>
+    fetchAdmin<{ ok: boolean }>('/admin/holiday-theme/preview', {
+      method: 'DELETE',
+    }),
 };
 
 export interface AdminIntegrationKeyRow {

@@ -90,3 +90,8 @@ class HolidayPreviewGrantOut(BaseModel):
 class HolidayPreviewCheckOut(BaseModel):
     code: str
     expires_at: int
+
+
+class HolidayPreviewMineOut(BaseModel):
+    active_theme: Optional[str] = None
+    expires_at: Optional[int] = None

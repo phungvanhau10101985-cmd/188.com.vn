@@ -70,6 +70,14 @@ export default function AdminHolidayThemePage() {
   }, [load]);
 
   useEffect(() => {
+    const preview = readHolidayAdminPreview();
+    if (!preview) return;
+    void adminHolidayThemeAPI.previewGrant(preview.code).catch(() => {
+      /* Trang quản trị vẫn giữ công tắc; cửa hàng nhận bản xem trước khi gọi được API. */
+    });
+  }, []);
+
+  useEffect(() => {
     const sync = () => {
       const preview = readHolidayAdminPreview();
       setPreviewCode(preview?.code ?? null);
@@ -92,6 +100,9 @@ export default function AdminHolidayThemePage() {
       setPreviewLeft(0);
       setPreviewHref(null);
       setNotice(`Đã tắt xem trước ${name}.`);
+      void adminHolidayThemeAPI.clearPreview().catch(() => {
+        /* local đã tắt */
+      });
       return;
     }
     const started = startHolidayAdminPreview(code);
@@ -110,7 +121,9 @@ export default function AdminHolidayThemePage() {
         setError(null);
         if (popup && !popup.closed) {
           popup.location.replace(url);
-          setNotice(`${name} đã mở trên 188.com.vn trong 10 phút. Tab cửa hàng vừa mở sẽ thấy giao diện này.`);
+          setNotice(
+            `${name} đang hiện trên 188.com.vn trong 10 phút với tài khoản shop đã gắn quản trị này. Khách khác không thấy.`,
+          );
           return;
         }
         popup?.close();

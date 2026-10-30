@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
+  fetchMineHolidayPreview,
   fetchPublicHolidayTheme,
   formatHolidayYear,
   type HolidayThemeId,
@@ -43,6 +44,8 @@ export function HolidayThemeProvider({
   const [storedPreview, setStoredPreview] = useState<HolidayThemeId | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [accountPreview, setAccountPreview] = useState<HolidayThemeId | null>(null);
+  const [accountExpires, setAccountExpires] = useState(0);
   const [now, setNow] = useState(0);
   const verifiedGrant = useRef<string | null>(null);
 
@@ -117,10 +120,10 @@ export function HolidayThemeProvider({
   }, [applyStored]);
 
   useEffect(() => {
-    if (!storedPreview) return;
+    if (!storedPreview && !accountPreview) return;
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [storedPreview]);
+  }, [storedPreview, accountPreview]);
 
   useEffect(() => {
     if (!storedPreview || expiresAt <= 0 || now < expiresAt) return;
@@ -142,6 +145,28 @@ export function HolidayThemeProvider({
     };
   }, [pathname]);
 
+  const isAdmin = Boolean(pathname?.startsWith('/admin'));
+
+  useEffect(() => {
+    if (isAdmin) return;
+    let cancel = false;
+    const load = () => {
+      void fetchMineHolidayPreview().then((next) => {
+        if (cancel || next === undefined) return;
+        setAccountPreview(next.theme);
+        setAccountExpires(next.expiresAt);
+      });
+    };
+    load();
+    const timer = window.setInterval(load, 15000);
+    window.addEventListener('focus', load);
+    return () => {
+      cancel = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', load);
+    };
+  }, [isAdmin, pathname]);
+
   const clearPreview = useCallback(() => {
     clearHolidayAdminPreview();
     applyStored(null);
@@ -155,11 +180,13 @@ export function HolidayThemeProvider({
     router.replace(q ? `${pathname}?${q}` : pathname || '/', { scroll: false });
   }, [applyStored, pathname, router, searchParams]);
 
-  const isAdmin = Boolean(pathname?.startsWith('/admin'));
-  const previewId = !isAdmin && !dismissed ? storedPreview : null;
+  const accountLive = Boolean(accountPreview) && accountExpires > now;
+  const localPreview = !isAdmin && !dismissed ? storedPreview : null;
+  const previewId = localPreview ?? (!isAdmin && !dismissed && accountLive ? accountPreview : null);
   const theme: HolidayThemeId | null = isAdmin ? null : previewId ?? remote;
   const showPreviewChrome = Boolean(previewId);
-  const remainingMs = previewId ? Math.max(0, expiresAt - now) : 0;
+  const activeExpires = localPreview ? expiresAt : accountExpires;
+  const remainingMs = previewId ? Math.max(0, activeExpires - now) : 0;
   const yearStart = theme && theme === remote ? remoteYear : theme ? (years[theme] ?? null) : null;
   const yearEnd = theme && theme === remote ? remoteYearEnd : yearStart;
   const yearLabel = formatHolidayYear(yearStart, yearEnd);

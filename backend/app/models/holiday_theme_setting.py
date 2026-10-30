@@ -16,6 +16,9 @@ class HolidayThemeSetting(Base):
     lead_days = Column(Integer, nullable=False, default=0, server_default="0")
     after_days = Column(Integer, nullable=False, default=0, server_default="0")
     sale_percent = Column(Numeric(5, 2), nullable=True)
+    preview_code = Column(String(32), nullable=True)
+    preview_admin_id = Column(Integer, nullable=True)
+    preview_expires_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self) -> str:

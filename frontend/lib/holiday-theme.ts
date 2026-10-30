@@ -16,6 +16,33 @@ export type PublicHolidayTheme = {
   years: Record<string, number>;
 };
 
+/** Bản xem trước của tài khoản shop đang đăng nhập. `undefined` = lỗi mạng, giữ trạng thái cũ. */
+export async function fetchMineHolidayPreview(): Promise<{ theme: HolidayThemeId | null; expiresAt: number } | undefined> {
+  if (typeof window === 'undefined') return undefined;
+  let token = '';
+  try {
+    token = localStorage.getItem('access_token') || '';
+  } catch {
+    return { theme: null, expiresAt: 0 };
+  }
+  if (!token) return { theme: null, expiresAt: 0 };
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/holiday-theme/mine`, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return undefined;
+    const data = (await res.json()) as { active_theme?: unknown; expires_at?: unknown };
+    const theme =
+      typeof data.active_theme === 'string' && isHolidayThemeId(data.active_theme) ? data.active_theme : null;
+    const exp = typeof data.expires_at === 'number' ? data.expires_at : Number(data.expires_at);
+    const expiresAt = Number.isFinite(exp) && exp > 0 ? (exp > 1e12 ? exp : exp * 1000) : 0;
+    return { theme, expiresAt };
+  } catch {
+    return undefined;
+  }
+}
+
 /** `undefined` = không gọi được API, giữ trạng thái đang có. */
 export async function fetchPublicHolidayTheme(): Promise<PublicHolidayTheme | undefined> {
   try {

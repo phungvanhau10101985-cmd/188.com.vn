@@ -15,6 +15,22 @@ def test_holiday_theme_update_accepts_tet_and_off():
     assert HolidayThemeAdminUpdate(active_theme=None).active_theme is None
 
 
+def test_shop_account_sees_only_its_admin_preview():
+    from types import SimpleNamespace
+
+    from app.services.holiday_preview_grant import shop_user_can_see_admin_preview
+
+    admin = SimpleNamespace(is_active=True, linked_user_id=7, email="desk@example.com")
+    linked = SimpleNamespace(id=7, email="shop@example.com")
+    stranger = SimpleNamespace(id=8, email="other@example.com")
+    assert shop_user_can_see_admin_preview(admin, linked) is True
+    assert shop_user_can_see_admin_preview(admin, stranger) is False
+    same_email = SimpleNamespace(is_active=True, linked_user_id=None, email="Shop@Example.com")
+    assert shop_user_can_see_admin_preview(same_email, SimpleNamespace(id=3, email="shop@example.com")) is True
+    inactive = SimpleNamespace(is_active=False, linked_user_id=7, email="desk@example.com")
+    assert shop_user_can_see_admin_preview(inactive, linked) is False
+
+
 def test_holiday_preview_token_roundtrip_and_rejects_tamper():
     from app.services.holiday_preview_grant import issue_holiday_preview_token, parse_holiday_preview_token
 
