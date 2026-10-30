@@ -81,10 +81,11 @@ export function rememberHolidayPreviewGrant(
   return next;
 }
 
-export async function acceptHolidayPreviewGrant(
+/** `undefined` = lỗi mạng, giữ bản đang xem. `null` = server đã tắt hoặc mã hết hạn. */
+export async function syncHolidayPreviewGrant(
   code: HolidayThemeId,
   token: string,
-): Promise<HolidayAdminPreview | null> {
+): Promise<HolidayAdminPreview | null | undefined> {
   const trimmed = token.trim();
   if (!trimmed) return null;
   try {
@@ -92,7 +93,8 @@ export async function acceptHolidayPreviewGrant(
       `${getApiBaseUrl()}/holiday-theme/preview?token=${encodeURIComponent(trimmed)}`,
       { cache: 'no-store', headers: { Accept: 'application/json' } },
     );
-    if (!res.ok) return null;
+    if (res.status === 404) return null;
+    if (!res.ok) return undefined;
     const data = (await res.json()) as { code?: unknown; expires_at?: unknown };
     const returned = typeof data.code === 'string' ? data.code : null;
     if (returned !== code || !isHolidayThemeId(returned)) return null;
@@ -102,8 +104,16 @@ export async function acceptHolidayPreviewGrant(
     if (expiresAt <= Date.now()) return null;
     return rememberHolidayPreviewGrant(code, expiresAt, trimmed);
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+export async function acceptHolidayPreviewGrant(
+  code: HolidayThemeId,
+  token: string,
+): Promise<HolidayAdminPreview | null> {
+  const synced = await syncHolidayPreviewGrant(code, token);
+  return synced ?? null;
 }
 
 export function clearHolidayAdminPreview() {

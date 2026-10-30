@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   adminHolidayThemeAPI,
   type HolidayOccasionAdmin,
@@ -47,6 +47,7 @@ export default function AdminHolidayThemePage() {
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewLeft, setPreviewLeft] = useState(0);
   const [previewHref, setPreviewHref] = useState<string | null>(null);
+  const releasedServerPreview = useRef(false);
 
   const apply = useCallback((data: HolidayThemeAdminState) => {
     setState(data);
@@ -82,6 +83,15 @@ export default function AdminHolidayThemePage() {
       const preview = readHolidayAdminPreview();
       setPreviewCode(preview?.code ?? null);
       setPreviewLeft(preview ? preview.expiresAt - Date.now() : 0);
+      if (preview) {
+        releasedServerPreview.current = false;
+        return;
+      }
+      if (releasedServerPreview.current) return;
+      releasedServerPreview.current = true;
+      void adminHolidayThemeAPI.clearPreview().catch(() => {
+        releasedServerPreview.current = false;
+      });
     };
     sync();
     window.addEventListener('storage', sync);

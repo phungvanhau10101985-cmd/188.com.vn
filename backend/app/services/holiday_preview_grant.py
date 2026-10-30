@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.services.holiday_schedule import CATALOG
+from app.utils.display_timeline import db_datetime_to_utc
 
 PREVIEW_TTL_SECONDS = 10 * 60
 
@@ -62,6 +63,50 @@ def shop_user_can_see_admin_preview(admin, user) -> bool:
     return bool(admin_email and admin_email == user_email)
 
 
+def coerce_preview_expiry(expires_at: datetime | None, *, now: datetime | None = None) -> int | None:
+    """Unix giây còn hiệu lực.
+
+    psycopg2 thường trả timestamptz thành datetime naive theo giờ Việt Nam.
+    Gắn UTC vào giá trị đó làm bản xem trước 10 phút còn đếm thêm nhiều giờ.
+    """
+    aware = db_datetime_to_utc(expires_at)
+    if aware is None:
+        return None
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    if aware <= current:
+        return None
+    return int(aware.timestamp())
+
+
+def _clear_preview_fields(row) -> None:
+    row.preview_code = None
+    row.preview_admin_id = None
+    row.preview_expires_at = None
+
+
+def live_holiday_preview(db: Session, *, now: datetime | None = None) -> tuple[str, int] | None:
+    """Bản xem trước còn hiệu lực. Hết hạn thì xóa khỏi DB để cửa hàng ngừng đếm."""
+    from app.crud import holiday_theme as holiday_theme_crud
+
+    row = holiday_theme_crud.get_singleton(db)
+    if row is None or not row.preview_code or row.preview_expires_at is None:
+        return None
+    if row.preview_code not in CATALOG:
+        _clear_preview_fields(row)
+        db.commit()
+        return None
+    expires_unix = coerce_preview_expiry(row.preview_expires_at, now=now)
+    if expires_unix is None:
+        _clear_preview_fields(row)
+        db.commit()
+        return None
+    return row.preview_code, expires_unix
+
+
 def save_admin_holiday_preview(db: Session, admin, code: str, expires_at: int) -> None:
     from app.crud import holiday_theme as holiday_theme_crud
 
@@ -78,27 +123,21 @@ def clear_admin_holiday_preview(db: Session, admin) -> None:
     row = holiday_theme_crud.get_singleton(db)
     if row is None or row.preview_admin_id != int(admin.id):
         return
-    row.preview_code = None
-    row.preview_admin_id = None
-    row.preview_expires_at = None
+    _clear_preview_fields(row)
     db.commit()
 
 
-def holiday_preview_for_shop_user(db: Session, user) -> tuple[str, int] | None:
+def holiday_preview_for_shop_user(db: Session, user, *, now: datetime | None = None) -> tuple[str, int] | None:
     from app.crud import holiday_theme as holiday_theme_crud
     from app.models.admin import AdminUser
 
     row = holiday_theme_crud.get_singleton(db)
-    if row is None or not row.preview_code or row.preview_admin_id is None or row.preview_expires_at is None:
+    if row is None or row.preview_admin_id is None:
         return None
-    if row.preview_code not in CATALOG:
-        return None
-    expires_at = row.preview_expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at <= datetime.now(timezone.utc):
+    live = live_holiday_preview(db, now=now)
+    if live is None:
         return None
     admin = db.query(AdminUser).filter(AdminUser.id == row.preview_admin_id).first()
     if not shop_user_can_see_admin_preview(admin, user):
         return None
-    return row.preview_code, int(expires_at.timestamp())
+    return live

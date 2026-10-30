@@ -31,6 +31,44 @@ def test_shop_account_sees_only_its_admin_preview():
     assert shop_user_can_see_admin_preview(inactive, linked) is False
 
 
+def test_naive_preview_expiry_is_vietnam_wall_clock_not_utc():
+    """09:45 naive là giờ VN (02:45 UTC). Lúc 04:24 UTC bản xem trước 10 phút đã hết."""
+    from app.services.holiday_preview_grant import coerce_preview_expiry
+
+    naive = datetime(2026, 10, 30, 9, 45, 24)
+    now = datetime(2026, 10, 30, 4, 24, tzinfo=timezone.utc)
+    assert coerce_preview_expiry(naive, now=now) is None
+
+    still = datetime(2026, 10, 30, 11, 35, 0)
+    expected = int(datetime(2026, 10, 30, 4, 35, tzinfo=timezone.utc).timestamp())
+    assert coerce_preview_expiry(still, now=now) == expected
+
+
+def test_expired_naive_preview_row_is_cleared(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.services.holiday_preview_grant import live_holiday_preview
+
+    row = SimpleNamespace(
+        preview_code="valentine",
+        preview_admin_id=2,
+        preview_expires_at=datetime(2026, 10, 30, 9, 45, 24),
+    )
+    db = SimpleNamespace(committed=False)
+
+    def commit():
+        db.committed = True
+
+    db.commit = commit
+    monkeypatch.setattr("app.crud.holiday_theme.get_singleton", lambda _db: row)
+    now = datetime(2026, 10, 30, 4, 24, tzinfo=timezone.utc)
+    assert live_holiday_preview(db, now=now) is None
+    assert row.preview_code is None
+    assert row.preview_admin_id is None
+    assert row.preview_expires_at is None
+    assert db.committed is True
+
+
 def test_holiday_preview_token_roundtrip_and_rejects_tamper():
     from app.services.holiday_preview_grant import issue_holiday_preview_token, parse_holiday_preview_token
 

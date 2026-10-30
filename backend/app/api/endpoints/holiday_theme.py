@@ -7,7 +7,11 @@ from app.crud import holiday_theme as holiday_theme_crud
 from app.db.session import SessionLocal, get_db
 from app.models.user import User
 from app.schemas.holiday_theme import HolidayPreviewCheckOut, HolidayPreviewMineOut, HolidayThemePublicOut
-from app.services.holiday_preview_grant import holiday_preview_for_shop_user, parse_holiday_preview_token
+from app.services.holiday_preview_grant import (
+    holiday_preview_for_shop_user,
+    live_holiday_preview,
+    parse_holiday_preview_token,
+)
 from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
@@ -39,13 +43,19 @@ def my_holiday_preview(
 
 
 @router.get("/preview", response_model=HolidayPreviewCheckOut)
-def check_holiday_preview(token: str = Query(..., min_length=8, max_length=120)):
-    """Xác nhận mã xem trước do admin vừa cấp. Không có mã hợp lệ thì cửa hàng giữ giao diện thường."""
+def check_holiday_preview(
+    token: str = Query(..., min_length=8, max_length=120),
+    db: Session = Depends(get_db),
+):
+    """Xác nhận mã xem trước. Admin đã tắt hoặc hết hạn thì cửa hàng giữ giao diện thường."""
     parsed = parse_holiday_preview_token(token)
     if parsed is None:
         raise HTTPException(status_code=404, detail="Bản xem trước không còn hiệu lực")
-    code, expires_at = parsed
-    return HolidayPreviewCheckOut(code=code, expires_at=expires_at)
+    code, token_expires_at = parsed
+    live = live_holiday_preview(db)
+    if live is None or live[0] != code:
+        raise HTTPException(status_code=404, detail="Bản xem trước không còn hiệu lực")
+    return HolidayPreviewCheckOut(code=code, expires_at=min(token_expires_at, live[1]))
 
 
 @router.get("/public", response_model=HolidayThemePublicOut)

@@ -16,6 +16,7 @@ import {
   readHolidayAdminPreview,
   readHolidayPreviewGrant,
   startHolidayAdminPreview,
+  syncHolidayPreviewGrant,
   type HolidayAdminPreview,
 } from '@/lib/holiday-preview';
 
@@ -161,14 +162,35 @@ export function HolidayThemeProvider({
         setAccountPreview((prev) => (prev === next.theme ? prev : next.theme));
         setAccountExpires((prev) => (prev === next.expiresAt ? prev : next.expiresAt));
       });
+      const grant = readHolidayPreviewGrant();
+      if (!grant) return;
+      void syncHolidayPreviewGrant(grant.code, grant.token).then((preview) => {
+        if (cancel || preview === undefined) return;
+        if (!preview) {
+          clearHolidayAdminPreview();
+          applyStored(null);
+          verifiedGrant.current = null;
+          return;
+        }
+        verifiedGrant.current = grant.token;
+        applyStored(preview);
+      });
     };
     load();
+    const watching = Boolean(storedPreview || accountPreview);
+    const timer = watching ? window.setInterval(load, 10000) : 0;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
     window.addEventListener('focus', load);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancel = true;
+      if (timer) window.clearInterval(timer);
       window.removeEventListener('focus', load);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [isAdmin]);
+  }, [accountPreview, applyStored, isAdmin, storedPreview]);
 
   const clearPreview = useCallback(() => {
     clearHolidayAdminPreview();
