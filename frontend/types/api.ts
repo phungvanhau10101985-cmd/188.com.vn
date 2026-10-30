@@ -9,7 +9,7 @@ export interface SiteSaleProductPricing {
   event_label?: string | null;
   event_date?: string | null;
   countdown_to?: string | null;
-  kind?: 'flash' | 'holiday' | string;
+  kind?: 'flash' | 'holiday' | string | null;
 }
 
 export interface SiteSaleCalendarState {

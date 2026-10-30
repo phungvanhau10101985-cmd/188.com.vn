@@ -22,12 +22,13 @@ export function readHolidayAdminPreview(now = Date.now()): HolidayAdminPreview |
     const raw = localStorage.getItem(PREVIEW_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as { code?: unknown; expiresAt?: unknown };
-    if (!isHolidayThemeId(typeof data.code === 'string' ? data.code : null)) return null;
+    const code = typeof data.code === 'string' ? data.code : null;
+    if (!isHolidayThemeId(code)) return null;
     if (typeof data.expiresAt !== 'number' || data.expiresAt <= now) {
       localStorage.removeItem(PREVIEW_KEY);
       return null;
     }
-    return { code: data.code, expiresAt: data.expiresAt };
+    return { code, expiresAt: data.expiresAt };
   } catch {
     return null;
   }
