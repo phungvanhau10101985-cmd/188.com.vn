@@ -562,7 +562,7 @@ export default function Navigation({
             (dropdownRef as React.MutableRefObject<HTMLElement | null>).current = el;
           }
         }}
-        className={`fixed ${stickyBarTopClass} left-0 right-0 z-[62] bg-[#ea580c] transition-all duration-300 ease-out ${
+        className={`storefront-chrome fixed ${stickyBarTopClass} left-0 right-0 z-[62] bg-[#ea580c] transition-all duration-300 ease-out ${
           hideListingCategoryPills ? 'border-b-0' : 'border-b border-gray-100'
         } ${
           showStickyBar ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'
@@ -690,7 +690,7 @@ export default function Navigation({
       <nav
         ref={dropdownRef}
         className={`${navLayoutClass} ${catalogMenuOpen || openLevel1 ? 'z-[68]' : 'z-40'} transition-all duration-300 ${
-          isScrolled ? 'bg-[#ea580c]/95 backdrop-blur-md shadow-md border-b border-orange-600' : 'bg-[#ea580c] border-b border-orange-600 shadow-sm'
+          isScrolled ? 'storefront-chrome bg-[#ea580c]/95 backdrop-blur-md shadow-md border-b border-orange-600' : 'storefront-chrome bg-[#ea580c] border-b border-orange-600 shadow-sm'
         }`}
       >
         <div ref={categoryBarWrapRef} className="relative max-w-7xl mx-auto px-3">

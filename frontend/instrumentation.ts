@@ -1,7 +1,21 @@
-import fs from 'fs';
-import path from 'path';
-
 let cachedSecret: string | null = null;
+
+/** Edge/proxy không có `fs`. Chỉ Node đọc file .env; import tĩnh làm hỏng bundle edge. */
+function readTextFile(file: string): string | null {
+  if (process.env.NEXT_RUNTIME === 'edge') return null;
+  try {
+    const nodeRequire = (0, eval)('require') as (id: string) => {
+      readFileSync: (p: string, enc: 'utf8') => string;
+      resolve: (...parts: string[]) => string;
+    };
+    const fs = nodeRequire('fs');
+    const path = nodeRequire('path');
+    const resolved = path.resolve(file);
+    return fs.readFileSync(resolved, 'utf8');
+  } catch {
+    return null;
+  }
+}
 
 function ingestSecret(): string {
   if (cachedSecret !== null) return cachedSecret;
@@ -10,20 +24,14 @@ function ingestSecret(): string {
     cachedSecret = fromEnv;
     return cachedSecret;
   }
-  const candidates = [
-    path.resolve(process.cwd(), '../backend/.env'),
-    path.resolve(process.cwd(), 'backend/.env'),
-  ];
+  const candidates = ['../backend/.env', 'backend/.env'];
   for (const file of candidates) {
-    try {
-      const text = fs.readFileSync(file, 'utf8');
-      const match = text.match(/^CRON_SECRET=(.*)$/m);
-      if (!match) continue;
-      cachedSecret = match[1].trim().replace(/^['"]|['"]$/g, '').replace(/\r$/, '');
-      return cachedSecret;
-    } catch {
-      /* không có file */
-    }
+    const text = readTextFile(file);
+    if (!text) continue;
+    const match = text.match(/^CRON_SECRET=(.*)$/m);
+    if (!match) continue;
+    cachedSecret = match[1].trim().replace(/^['"]|['"]$/g, '').replace(/\r$/, '');
+    return cachedSecret;
   }
   cachedSecret = '';
   return '';

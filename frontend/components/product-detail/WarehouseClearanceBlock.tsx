@@ -15,7 +15,7 @@ import {
   warehouseVariantSizeLabel,
   warehouseVariantsInStock,
 } from '@/lib/warehouse-clearance';
-import { FLASH_SALE_PROGRAM_NAME, WAREHOUSE_SALE_PROGRAM_NAME, calendarSaleProgramLabel } from '@/lib/site-sale';
+import { FLASH_SALE_PROGRAM_NAME, WAREHOUSE_SALE_PROGRAM_NAME, siteSaleProgramLabel } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 import Button from '@/components/ui/Button';
 
@@ -76,7 +76,7 @@ export default function WarehouseClearanceBlock({
   onSelectVariant,
 }: WarehouseClearanceBlockProps) {
   const { state: siteSaleState } = useSiteSale();
-  const calendarProgramName = calendarSaleProgramLabel(null, siteSaleState);
+  const calendarProgramName = siteSaleProgramLabel(null, siteSaleState);
   const variants = useMemo(() => warehouseVariantsInStock(product), [product]);
   const isControlled = onSelectVariant != null;
   const [internalId, setInternalId] = useState<number | null>(null);

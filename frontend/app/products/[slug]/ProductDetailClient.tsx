@@ -38,6 +38,7 @@ import {
 } from '@/lib/google-automated-discount';
 import { productPathSlugFromApi } from '@/lib/product-path-slug';
 import NanoAiProductPageContext from '@/components/NanoAiProductPageContext';
+import { TetProductNote } from '@/components/holiday/TetTheme';
 import NanoAiLauncherGatewaySync from '@/components/NanoAiLauncherGatewaySync';
 import { buildNanoAiGatewayPayloadFrom188Product } from '@/lib/nanoai-hosted-chat';
 import { resolveProductGroupListingPath } from '@/lib/product-oos-redirect';
@@ -310,6 +311,9 @@ export default function ProductDetailClient({
       <NanoAiLauncherGatewaySync payload={nanoGatewayPayload} />
       {/* Mobile: giao diện chi tiết sản phẩm theo bản mobile (chỉ trang này) */}
       <div className="md:hidden">
+        <div className="px-3 pt-3">
+          <TetProductNote />
+        </div>
         <ProductDetailMobile
           product={product}
           isFavorited={isFavorited}
@@ -330,6 +334,7 @@ export default function ProductDetailClient({
           role="main"
           aria-label="Nội dung chính - Chi tiết sản phẩm"
         >
+          <TetProductNote />
           <article className="bg-white rounded-xl shadow-lg overflow-visible" aria-label={product.name}>
             <div className="p-4">
               <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-6">

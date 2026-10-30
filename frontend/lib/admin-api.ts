@@ -3380,6 +3380,56 @@ export const adminShopVideoFabAPI = {
     }),
 };
 
+export interface HolidayOccasionAdmin {
+  code: string;
+  name: string;
+  calendar: 'solar' | 'lunar';
+  calendar_label: string;
+  tagline: string;
+  summary: string;
+  start_month: number;
+  start_day: number;
+  end_month: number;
+  end_day: number;
+  lead_days: number;
+  after_days: number;
+  sale_percent: number;
+  enabled: boolean;
+  priority: number;
+  solar_label: string;
+  start_year: number | null;
+  end_year: number | null;
+  showing_today: boolean;
+}
+
+export interface HolidayThemeAdminState {
+  active_theme: string | null;
+  active_label: string | null;
+  schedule_note: string;
+  occasions: HolidayOccasionAdmin[];
+}
+
+export interface HolidayOccasionUpdate {
+  code: string;
+  enabled?: boolean;
+  start_month?: number;
+  start_day?: number;
+  end_month?: number;
+  end_day?: number;
+  lead_days?: number;
+  after_days?: number;
+  sale_percent?: number;
+}
+
+export const adminHolidayThemeAPI = {
+  get: () => fetchAdmin<HolidayThemeAdminState>('/admin/holiday-theme'),
+  update: (body: HolidayOccasionUpdate) =>
+    fetchAdmin<HolidayThemeAdminState>('/admin/holiday-theme', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+};
+
 export interface AdminIntegrationKeyRow {
   env_var: string;
   label: string;

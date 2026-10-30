@@ -101,7 +101,12 @@ def current_marketing_banners(
             )
 
     sale = sale_svc.resolve_sale_calendar_state(db, user=current_user)
-    if sale.phase and sale.event_date and sale.event_date.day == sale.event_date.month:
+    if (
+        getattr(sale, "kind", None) != "holiday"
+        and sale.phase
+        and sale.event_date
+        and sale.event_date.day == sale.event_date.month
+    ):
         sale_asset = banner_svc.find_active_asset(
             db,
             kind="sale",

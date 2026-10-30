@@ -109,6 +109,12 @@ print("[OK] SiteEmbedCode model loaded")
 from app.models.shop_video_fab_setting import ShopVideoFabSetting
 print("[OK] ShopVideoFabSetting model loaded")
 
+from app.models.holiday_theme_setting import HolidayThemeSetting
+print("[OK] HolidayThemeSetting model loaded")
+
+from app.models.holiday_occasion_setting import HolidayOccasionSetting
+print("[OK] HolidayOccasionSetting model loaded")
+
 from app.models.deposit_settings import DepositSettings
 print("[OK] DepositSettings model loaded")
 

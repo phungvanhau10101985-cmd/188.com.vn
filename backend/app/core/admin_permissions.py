@@ -35,6 +35,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "api_stats",
     "chat_embeds",
     "shop_video_fab",
+    "holiday_theme",
     "api_keys",
     "vps_backup",
     "notifications",
@@ -67,6 +68,7 @@ LEGACY_ROLE_MODULES = {
             "category_seo",
             "embed_codes",
             "chat_embeds",
+            "holiday_theme",
         }
     ),
 }

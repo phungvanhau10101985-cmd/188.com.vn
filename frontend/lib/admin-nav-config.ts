@@ -76,6 +76,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         skipModuleCatalog: true,
       },
       { href: '/admin/shop-video-fab', label: 'Nút video', moduleKey: 'shop_video_fab' },
+      { href: '/admin/holiday-theme', label: 'Giao diện ngày lễ', moduleKey: 'holiday_theme' },
       { href: '/admin/embed-codes', label: 'Mã nhúng analytics', moduleKey: 'embed_codes' },
       {
         href: '/admin/api-stats',

@@ -9,7 +9,7 @@ export interface SiteSaleProductPricing {
   event_label?: string | null;
   event_date?: string | null;
   countdown_to?: string | null;
-  kind?: 'flash' | string;
+  kind?: 'flash' | 'holiday' | string;
 }
 
 export interface SiteSaleCalendarState {
@@ -22,6 +22,8 @@ export interface SiteSaleCalendarState {
   active_start_at?: string | null;
   active_end_at?: string | null;
   countdown_to?: string | null;
+  /** `holiday` = sale lễ, thay sale trùng ngày-tháng khi hai kỳ trùng nhau. */
+  kind?: 'holiday' | string | null;
 }
 
 export interface MarketingBannerItem {

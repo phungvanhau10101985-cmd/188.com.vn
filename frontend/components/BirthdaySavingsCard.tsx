@@ -2,7 +2,7 @@
 
 import { formatPrice } from '@/lib/utils';
 import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
-import { calendarSaleProgramLabel, FLASH_SALE_PROGRAM_NAME } from '@/lib/site-sale';
+import { siteSaleProgramLabel, FLASH_SALE_PROGRAM_NAME } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 
 interface BirthdaySavingsCardProps {
@@ -28,7 +28,7 @@ export default function BirthdaySavingsCard({
   const { state: siteSaleState } = useSiteSale();
   const stackedHint =
     siteSaleState?.enabled && (siteSaleState.phase === 'active' || siteSaleState.phase === 'teaser')
-      ? `${FLASH_SALE_PROGRAM_NAME} / ${calendarSaleProgramLabel(null, siteSaleState)}`
+      ? `${FLASH_SALE_PROGRAM_NAME} / ${siteSaleProgramLabel(null, siteSaleState)}`
       : FLASH_SALE_PROGRAM_NAME;
 
   if (!active || percent <= 0 || savings <= 0) return null;

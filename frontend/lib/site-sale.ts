@@ -169,11 +169,22 @@ export function calendarSaleProgramLabel(
   return 'Sale trùng ngày-tháng';
 }
 
+export function isHolidaySale(
+  sale?: { kind?: string | null; event_label?: string | null } | null,
+  calendar?: { kind?: string | null; event_label?: string | null } | null,
+): boolean {
+  return sale?.kind === 'holiday' || calendar?.kind === 'holiday';
+}
+
 export function siteSaleProgramLabel(
   sale?: SiteSaleProductPricing | null,
-  calendar?: Pick<SiteSaleCalendarState, 'event_date' | 'event_label'> | null,
+  calendar?: Pick<SiteSaleCalendarState, 'event_date' | 'event_label' | 'kind'> | null,
 ): string {
   if (sale && isFlashSalePricing(sale)) return FLASH_SALE_PROGRAM_NAME;
+  if (isHolidaySale(sale, calendar)) {
+    const label = (sale?.event_label || calendar?.event_label || '').trim();
+    return label || 'Sale ngày lễ';
+  }
   return calendarSaleProgramLabel(sale, calendar);
 }
 
@@ -313,7 +324,8 @@ export function mergeProductSiteSaleFromCalendar(
     const needsPatch =
       (!existing.countdown_to && liveCal.countdown_to) ||
       (!existing.event_label && liveCal.event_label) ||
-      (!existing.event_date && liveCal.event_date);
+      (!existing.event_date && liveCal.event_date) ||
+      (!existing.kind && liveCal.kind);
     if (!needsPatch) return product;
     return {
       ...product,
@@ -322,6 +334,7 @@ export function mergeProductSiteSaleFromCalendar(
         countdown_to: existing.countdown_to ?? liveCal.countdown_to ?? null,
         event_label: existing.event_label ?? liveCal.event_label ?? null,
         event_date: existing.event_date ?? liveCal.event_date ?? null,
+        kind: existing.kind ?? liveCal.kind ?? null,
       },
     };
   }
@@ -336,6 +349,7 @@ export function mergeProductSiteSaleFromCalendar(
     event_label: liveCal.event_label ?? null,
     event_date: liveCal.event_date ?? null,
     countdown_to: liveCal.countdown_to ?? null,
+    kind: liveCal.kind ?? null,
   };
 
   const merged: Product = { ...product, site_sale: siteSale };
@@ -425,7 +439,8 @@ export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput
     const needsPatch =
       (!existing.countdown_to && liveCal.countdown_to) ||
       (!existing.event_label && liveCal.event_label) ||
-      (!existing.event_date && liveCal.event_date);
+      (!existing.event_date && liveCal.event_date) ||
+      (!existing.kind && liveCal.kind);
     if (!needsPatch) {
       return { ...next, list_price: base };
     }
@@ -437,6 +452,7 @@ export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput
         countdown_to: existing.countdown_to ?? liveCal.countdown_to ?? null,
         event_label: existing.event_label ?? liveCal.event_label ?? null,
         event_date: existing.event_date ?? liveCal.event_date ?? null,
+        kind: existing.kind ?? liveCal.kind ?? null,
       },
     };
   }
@@ -451,6 +467,7 @@ export function mergeCartLineSiteSaleFromCalendar<T extends CartLinePricingInput
     event_label: liveCal.event_label ?? null,
     event_date: liveCal.event_date ?? null,
     countdown_to: liveCal.countdown_to ?? null,
+    kind: liveCal.kind ?? null,
   };
 
   return {
@@ -577,6 +594,10 @@ export function siteSaleDateBadgeLabel(siteSale: SiteSaleProductPricing): string
 
   if (isFlashSalePricing(siteSale)) {
     return `${FLASH_SALE_PROGRAM_NAME} -${pct}%`;
+  }
+
+  if (isHolidaySale(siteSale)) {
+    return `${siteSaleProgramLabel(siteSale)} -${pct}%`;
   }
 
   const dayMonth = calendarSaleDayMonth(siteSale);
@@ -727,7 +748,7 @@ export function resolveProductDisplayPricing(
     siteLabel: isFlashSalePricing(site)
       ? FLASH_SALE_PROGRAM_NAME
       : sitePhase && sitePercent > 0
-        ? calendarSaleProgramLabel(site)
+        ? siteSaleProgramLabel(site)
         : null,
     countdownTo: site?.countdown_to ?? null,
     beforeBirthday,
@@ -902,7 +923,7 @@ export function resolveCartLineDisplayPricing(
     siteLabel: isFlashSalePricing(site)
       ? FLASH_SALE_PROGRAM_NAME
       : sitePhase && sitePercent > 0
-        ? calendarSaleProgramLabel(site)
+        ? siteSaleProgramLabel(site)
         : null,
     siteSavings,
     expectedSalePrice,
@@ -919,7 +940,7 @@ export function resolveCartLineDisplayPricing(
 export function siteSaleBannerMessage(state: SiteSaleCalendarState | null): string | null {
   if (!state?.enabled || !state.phase) return null;
   const pct = state.discount_percent ?? 0;
-  const label = calendarSaleProgramLabel(null, state);
+  const label = siteSaleProgramLabel(null, state);
   if (state.phase === 'teaser') {
     return `${label} sắp diễn ra — giảm ${pct}% vào ${label}. Còn ${formatCountdownLabel(state.countdown_to)}`;
   }

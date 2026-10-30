@@ -180,10 +180,12 @@ def init_database_tables():
             from app.db.session import SessionLocal
             from app.crud.site_embed_code import ensure_default_embed_codes, deactivate_nanoai_try_on_embeds
             from app.crud import shop_video_fab as shop_video_fab_crud
+            from app.crud import holiday_theme as holiday_theme_crud
             from app.crud import deposit_settings as deposit_settings_crud
             _s = SessionLocal()
             try:
                 shop_video_fab_crud.get_or_create_singleton(_s)
+                holiday_theme_crud.get_or_create_singleton(_s)
                 deposit_settings_crud.get_or_create_singleton(_s)
                 n = ensure_default_embed_codes(_s)
                 tn = deactivate_nanoai_try_on_embeds(_s)
@@ -231,6 +233,7 @@ def load_api_routes():
         ("api_stats_admin", "/admin/api-stats", "admin-api-stats"),
         ("embed_codes", "/embed-codes", "embed-codes"),
         ("shop_video_fab", "/shop-video-fab", "shop-video-fab"),
+        ("holiday_theme", "/holiday-theme", "holiday-theme"),
         ("categories", "/categories", "categories"),
         ("category_seo", "/category-seo", "category-seo"),
         ("taxonomy_admin", "/taxonomy", "taxonomy-admin"),

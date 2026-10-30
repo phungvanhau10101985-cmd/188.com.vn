@@ -76,7 +76,14 @@ export function presetModuleKeysForStaffRole(
         'bunny_cdn',
       ];
     case 'content_manager':
-      return ['product_questions', 'product_reviews', 'category_seo', 'embed_codes', 'chat_embeds'];
+      return [
+        'product_questions',
+        'product_reviews',
+        'category_seo',
+        'embed_codes',
+        'chat_embeds',
+        'holiday_theme',
+      ];
     case 'admin':
     case 'none':
     default:

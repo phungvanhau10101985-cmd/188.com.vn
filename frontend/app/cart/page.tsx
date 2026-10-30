@@ -40,7 +40,6 @@ import SiteSaleBanner from '@/components/SiteSaleBanner';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 import CartVoucherPicker from '@/components/cart/CartVoucherPicker';
 import {
-  calendarSaleProgramLabel,
   cartLineHasActiveFlash,
   FLASH_SALE_PROGRAM_NAME,
   liveCalendarState,
@@ -95,6 +94,7 @@ import {
 } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 import { useToast } from '@/components/ToastProvider';
+import { TetCartNote, TetCheckoutBanner } from '@/components/holiday/TetTheme';
 
 function formatAddressLine(addr: UserAddress): string {
   const parts = [addr.street_address];
@@ -541,10 +541,13 @@ export default function CartPage() {
 
   if (!isClientAuthLikelyLoggedIn(isAuthenticated, authLoading)) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6">
-        <p className="text-sm text-gray-600">
-          {authLoading ? 'Đang tải phiên đăng nhập…' : 'Đang chuyển đến đăng nhập...'}
-        </p>
+      <div className="min-h-screen bg-gray-50 px-4 py-6">
+        <div className="mx-auto max-w-7xl">
+          <TetCartNote />
+          <p className="text-center text-sm text-gray-600">
+            {authLoading ? 'Đang tải phiên đăng nhập…' : 'Đang chuyển đến đăng nhập...'}
+          </p>
+        </div>
       </div>
     );
   }
@@ -996,6 +999,7 @@ export default function CartPage() {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="mx-auto max-w-7xl px-3 pb-8 pt-2 sm:px-3 md:px-4 md:py-12 md:pb-6 md:pt-3">
+          <TetCartNote />
           <div className="mx-auto max-w-2xl text-center">
             <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-sm sm:p-10 md:p-12">
               <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 md:mb-6 md:h-24 md:w-24">
@@ -1026,6 +1030,7 @@ export default function CartPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-7xl px-3 pb-5 pt-2 sm:px-3 md:px-4 md:py-8 md:pb-6 md:pt-3">
+        <TetCartNote />
         <div className="mb-3 flex flex-col gap-3 md:mb-6 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-base font-bold tracking-tight text-gray-900 sm:text-lg md:text-2xl">
@@ -1071,7 +1076,7 @@ export default function CartPage() {
           <SiteSaleLiveCountdown
             countdownTo={siteSaleState.countdown_to}
             phase={siteSaleState.phase}
-            eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
+            eventLabel={siteSaleProgramLabel(null, siteSaleState)}
             className="mb-4"
           />
         ) : null}
@@ -1456,6 +1461,7 @@ export default function CartPage() {
           </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <TetCheckoutBanner />
           <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 md:px-5 md:py-4">
             <CartVoucherPicker
               vouchers={promoVouchers}
@@ -1472,7 +1478,7 @@ export default function CartPage() {
               <div className="mb-2 space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] md:text-sm">
                   <span className="text-amber-700">
-                    Tiết kiệm dự kiến khi {calendarSaleProgramLabel(null, siteSaleState)}{' '}
+                    Tiết kiệm dự kiến khi {siteSaleProgramLabel(null, siteSaleState)}{' '}
                     <span className="font-bold">
                       (-{siteSaleState?.discount_percent ?? 0}%)
                     </span>
@@ -1483,7 +1489,7 @@ export default function CartPage() {
                   <SiteSaleLiveCountdown
                     countdownTo={siteSaleState.countdown_to}
                     phase="teaser"
-                    eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
+                    eventLabel={siteSaleProgramLabel(null, siteSaleState)}
                     size="sm"
                   />
                 ) : null}
@@ -1494,7 +1500,7 @@ export default function CartPage() {
               <SiteSaleLiveCountdown
                 countdownTo={siteSaleState.countdown_to}
                 phase="active"
-                eventLabel={calendarSaleProgramLabel(null, siteSaleState)}
+                eventLabel={siteSaleProgramLabel(null, siteSaleState)}
                 size="sm"
                 className="mb-2"
               />
@@ -1528,7 +1534,7 @@ export default function CartPage() {
             {regularCalendarSaleSavings > 0 ? (
               <div className="flex items-center justify-between mb-1 text-[11px] md:text-sm">
                 <span className="text-gray-500">
-                  {calendarSaleProgramLabel(null, siteSaleState)}{' '}
+                  {siteSaleProgramLabel(null, siteSaleState)}{' '}
                   <span className="font-bold text-red-600">
                     {siteSaleState?.discount_percent ? `(-${siteSaleState.discount_percent}%)` : ''}
                   </span>

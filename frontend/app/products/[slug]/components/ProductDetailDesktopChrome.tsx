@@ -109,7 +109,7 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
       <ProductHeader product={product} />
       <div
         ref={stickyBarRef}
-        className={`sticky top-0 left-0 right-0 z-[30] overflow-visible backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'bg-[#ea580c]' : 'bg-white/95'}`}
+        className={`sticky top-0 left-0 right-0 z-[30] overflow-visible backdrop-blur border-b border-gray-100 ${isStickyPinned ? 'storefront-chrome bg-[#ea580c]' : 'bg-white/95'}`}
       >
         <div className="max-w-7xl mx-auto px-4 py-0">
           <div className="grid grid-cols-[minmax(12rem,20.75rem)_minmax(0,1fr)_9.33rem] items-center gap-2 md:gap-3 xl:grid-cols-[minmax(13.33rem,22rem)_minmax(0,1fr)_9.33rem]">
@@ -250,7 +250,7 @@ export default function ProductDetailDesktopChrome({ product }: ProductDetailDes
               </div>
             </div>
 
-            <div className={`flex flex-wrap items-center justify-center gap-2 ${isStickyPinned ? 'bg-transparent px-2 py-1.5' : 'bg-[#ea580c] rounded-lg px-2 py-1.5'}`}>
+            <div className={`flex flex-wrap items-center justify-center gap-2 ${isStickyPinned ? 'bg-transparent px-2 py-1.5' : 'storefront-chrome bg-[#ea580c] rounded-lg px-2 py-1.5'}`}>
               {homeListingParams.bestselling && (
                 <Link
                   href={`/?${searchParamsToEncodedQueryString(homeListingParams.bestselling)}`}

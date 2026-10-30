@@ -73,6 +73,8 @@ from app.schemas.site_embed_code import (
 from app.crud import site_embed_code as embed_crud
 from app.crud import shop_video_fab as shop_video_fab_crud
 from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
+from app.crud import holiday_theme as holiday_theme_crud
+from app.schemas.holiday_theme import HolidayOccasionUpdate, HolidayThemeAdminOut
 from app.schemas.bunny_admin import BunnyCdnStatusOut, BunnyCdnUploadOut
 from app.schemas.integrations_admin import (
     AdminIntegrationKeyGroup,
@@ -1369,6 +1371,27 @@ def admin_put_shop_video_fab_settings(
         row = shop_video_fab_crud.get_or_create_singleton(db)
         return shop_video_fab_crud.row_to_public_out(row)
     return shop_video_fab_crud.update_singleton(db, data)
+
+
+# ========== Giao diện ngày lễ ==========
+@router.get("/holiday-theme", response_model=HolidayThemeAdminOut)
+def admin_get_holiday_theme(
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
+):
+    return holiday_theme_crud.admin_theme_out(db)
+
+
+@router.put("/holiday-theme", response_model=HolidayThemeAdminOut)
+def admin_put_holiday_theme(
+    data: HolidayOccasionUpdate,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
+):
+    try:
+        return holiday_theme_crud.update_occasion(db, data)
+    except holiday_theme_crud.HolidayScheduleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ========== Bunny CDN — đăng ảnh lên Storage Zone ==========

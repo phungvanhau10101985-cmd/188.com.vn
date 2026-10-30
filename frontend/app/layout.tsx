@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import "./holiday-tet.css";
 import { AuthProvider } from "@/features/auth/hooks/useAuth";
 import { CartProvider } from "@/features/cart/hooks/useCart";
 import { FavoriteProvider } from "@/features/favorites/hooks/useFavorites";
@@ -29,6 +30,8 @@ import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { getSiteOrigin } from "@/lib/site-origin";
 import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/site-json-ld";
 import { getInitialSiteSaleCalendar } from "@/lib/site-sale-public";
+import { fetchPublicHolidayTheme } from "@/lib/holiday-theme";
+import { HolidayThemeProvider } from "@/lib/holiday-theme-context";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -170,11 +173,13 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [initialCategoryTree, siteEmbeds, currentAppIcon, initialSiteSale] = await Promise.all([
+  const [initialCategoryTree, siteEmbeds, currentAppIcon, initialSiteSale, initialHolidayTheme] =
+    await Promise.all([
     getCategoryTreeForLayout(),
     fetchPublicSiteEmbeds(),
     fetchCurrentAppWebIcon(),
     getInitialSiteSaleCalendar(),
+    fetchPublicHolidayTheme().then((snap) => snap ?? null),
   ]);
   const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
   const siteOrigin = getSiteOrigin();
@@ -239,6 +244,7 @@ export default async function RootLayout({
             <CartProvider>
               <FavoriteProvider>
                 <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+                  <HolidayThemeProvider initialSnapshot={initialHolidayTheme}>
                   <AppShell initialCategoryTree={initialCategoryTree} initialSiteSale={initialSiteSale}>
                     <Suspense fallback={null}>
                       <AnalyticsTracker />
@@ -272,6 +278,7 @@ export default async function RootLayout({
                       {children}
                     </Suspense>
                   </AppShell>
+                  </HolidayThemeProvider>
                 </Suspense>
               </FavoriteProvider>
             </CartProvider>

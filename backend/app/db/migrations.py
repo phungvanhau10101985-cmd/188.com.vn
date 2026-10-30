@@ -210,7 +210,8 @@ class MigrationManager:
             return "TEXT" + default_empty
         if t == DateTime:
             return "DATETIME" + default_empty if not IS_POSTGRESQL else "TIMESTAMP" + default_empty
-        if t == Date:
+        impl = getattr(col.type, "impl", None)
+        if t == Date or impl == Date or getattr(impl, "__visit_name__", None) == "date":
             return "DATE" + default_empty
         if t == Numeric or t == Float:
             if not getattr(col, "nullable", True):
@@ -1980,6 +1981,24 @@ class MigrationManager:
         )
         results['shop_cat2_size_laundry_posters_sync'] = self._sync_table_columns(
             "shop_cat2_size_laundry_posters", ShopCat2SizeLaundryPoster
+        )
+
+        from app.models.holiday_theme_setting import HolidayThemeSetting
+
+        results['holiday_theme_settings_create'] = self._create_table_if_not_exists(
+            "holiday_theme_settings", HolidayThemeSetting
+        )
+        results['holiday_theme_settings_sync'] = self._sync_table_columns(
+            "holiday_theme_settings", HolidayThemeSetting
+        )
+
+        from app.models.holiday_occasion_setting import HolidayOccasionSetting
+
+        results['holiday_occasion_settings_create'] = self._create_table_if_not_exists(
+            "holiday_occasion_settings", HolidayOccasionSetting
+        )
+        results['holiday_occasion_settings_sync'] = self._sync_table_columns(
+            "holiday_occasion_settings", HolidayOccasionSetting
         )
 
         return results

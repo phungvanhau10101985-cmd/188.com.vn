@@ -484,7 +484,9 @@ def current_sale_icon_state(
         "phase": sale.phase,
         "version": None,
     }
-    if not (sale.phase and sale.event_date and sale.event_date.day == sale.event_date.month):
+    if getattr(sale, "kind", None) == "holiday" or not (
+        sale.phase and sale.event_date and sale.event_date.day == sale.event_date.month
+    ):
         return payload
     row = find_active_icon(
         db,

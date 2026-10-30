@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { BIRTHDAY_PROGRAM_NAME } from '@/lib/birthday-discount';
-import { calendarSaleProgramLabel, FLASH_SALE_PROGRAM_NAME } from '@/lib/site-sale';
+import { siteSaleProgramLabel, FLASH_SALE_PROGRAM_NAME } from '@/lib/site-sale';
 import { useSiteSale } from '@/lib/use-site-sale';
 
 interface BirthdayPromoBannerProps {
@@ -25,7 +25,7 @@ export default function BirthdayPromoBanner({
   const stackedPrograms = useMemo(() => {
     const names = [FLASH_SALE_PROGRAM_NAME];
     if (siteSaleState?.enabled && (siteSaleState.phase === 'active' || siteSaleState.phase === 'teaser')) {
-      names.push(calendarSaleProgramLabel(null, siteSaleState));
+      names.push(siteSaleProgramLabel(null, siteSaleState));
     }
     return names.join(' / ');
   }, [siteSaleState]);

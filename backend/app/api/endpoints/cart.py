@@ -122,6 +122,7 @@ def _cart_items_with_site_sale_pricing(
                     **pricing,
                     "event_label": pricing.get("event_label") or sale_state.event_label,
                     "event_date": sale_state.event_date.isoformat() if sale_state.event_date and not flash_pct else None,
+                    "kind": pricing.get("kind") if flash_pct else sale_state.kind,
                     "countdown_to": pricing.get("countdown_to")
                     or (sale_state.countdown_to.isoformat() if sale_state.countdown_to else None),
                 }

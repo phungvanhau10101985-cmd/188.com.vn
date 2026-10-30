@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import type { SiteSaleCalendarState } from '@/types/api';
-import { calendarSaleProgramLabel, siteSaleBannerMessage } from '@/lib/site-sale';
+import { siteSaleBannerMessage, siteSaleProgramLabel } from '@/lib/site-sale';
 import SiteSaleLiveCountdown from '@/components/SiteSaleLiveCountdown';
 
 type Props = {
@@ -67,7 +67,7 @@ export default function SiteSaleBanner({
         ×
       </button>
       <div className="pr-8">
-        <p className="font-semibold">{calendarSaleProgramLabel(null, visibleState)}</p>
+        <p className="font-semibold">{siteSaleProgramLabel(null, visibleState)}</p>
         <p className="text-xs sm:text-sm opacity-90" suppressHydrationWarning>
           {message}
         </p>
@@ -76,7 +76,7 @@ export default function SiteSaleBanner({
             <SiteSaleLiveCountdown
               countdownTo={visibleState.countdown_to}
               phase={visibleState.phase}
-              eventLabel={calendarSaleProgramLabel(null, visibleState)}
+              eventLabel={siteSaleProgramLabel(null, visibleState)}
               size="sm"
               inline
               className="block opacity-95"

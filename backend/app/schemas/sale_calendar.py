@@ -31,6 +31,7 @@ class SaleCalendarPublicResponse(BaseModel):
     countdown_to: Optional[str] = None
     feed_title_prefix_teaser: str = "Sắp giảm giá"
     feed_title_prefix_active: str = "Đang giảm giá"
+    kind: Optional[str] = None
 
 
 class SaleCalendarMonthRuleOut(BaseModel):

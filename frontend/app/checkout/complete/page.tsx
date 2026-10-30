@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { useLoginRedirectHref } from '@/lib/use-login-redirect-href';
+import { TetThanksNote } from '@/components/holiday/TetTheme';
 
 function CompleteInner() {
   const loginHref = useLoginRedirectHref();
@@ -14,6 +15,7 @@ function CompleteInner() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-6 py-12">
       <div className="bg-white border border-gray-200 rounded-2xl p-8 max-w-lg w-full text-center shadow-sm">
+        <TetThanksNote />
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Cảm ơn bạn đã đặt hàng</h1>
         {code ? (
           <p className="text-sm text-gray-700 mb-2">

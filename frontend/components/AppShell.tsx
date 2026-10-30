@@ -52,6 +52,9 @@ import NanoAiShopOverlayGuard from '@/components/NanoAiShopOverlayGuard';
 import { AppCategoryTreeProvider } from '@/lib/app-category-tree-context';
 import NanoAiEmbedContextRouteSync from '@/components/NanoAiEmbedContextRouteSync';
 import { isMobileSearchComposePath } from '@/lib/mobile-search-path';
+import { useHolidayTheme } from '@/lib/holiday-theme-context';
+import { HOLIDAY_LOOKS, holidayCssVars } from '@/lib/holiday-themes';
+import { TetArrivalRibbon, TetPreviewBar } from '@/components/holiday/TetTheme';
 
 /** Chiều cao thanh cam mỏng (logo + tìm + icon) khi trang listing ghim header đã thu gọn — khớp offset sticky bộ lọc. */
 const DESKTOP_LISTING_THIN_CHROME_PX = 54;
@@ -73,6 +76,7 @@ export default function AppShell({ children, initialCategoryTree, initialSiteSal
   const { getCartItemCount } = useCart();
   const { favoriteCount } = useFavorites();
   const { state: siteSaleState, loading: siteSaleLoading } = useSiteSale();
+  const holidayTheme = useHolidayTheme();
   const [viewedProductsCount, setViewedProductsCount] = useState(0);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [headerVisible, setHeaderVisible] = useState(true);
@@ -405,12 +409,42 @@ export default function AppShell({ children, initialCategoryTree, initialSiteSal
     !isShopVideoFeedPage &&
     !isCartAddLandingPage;
 
+  const holidayLook = holidayTheme ? HOLIDAY_LOOKS[holidayTheme] : null;
+  const showHolidayTet =
+    Boolean(holidayLook) &&
+    !isAdminPage &&
+    !isShopVideoFeedPage &&
+    !isCartAddLandingPage &&
+    !isMobileSearchComposePage;
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    const metas = document.querySelectorAll('meta[name="theme-color"]');
+    const vars = holidayLook ? holidayCssVars(holidayLook) : null;
+    if (showHolidayTet && holidayLook && vars) {
+      root.dataset.holidayTheme = holidayLook.id;
+      Object.entries(vars).forEach(([key, value]) => root.style.setProperty(key, value));
+      metas.forEach((node) => node.setAttribute('content', holidayLook.themeColor));
+    } else {
+      delete root.dataset.holidayTheme;
+      ['--h-strong', '--h-deep', '--h-mid', '--h-gold', '--h-gold-soft', '--h-paper', '--h-ink', '--h-dark'].forEach(
+        (key) => root.style.removeProperty(key),
+      );
+      metas.forEach((node) => node.setAttribute('content', '#f97316'));
+    }
+    return () => {
+      delete root.dataset.holidayTheme;
+      metas.forEach((node) => node.setAttribute('content', '#f97316'));
+    };
+  }, [showHolidayTet, holidayLook]);
+
   return (
     <AppCategoryTreeProvider tree={initialCategoryTree ?? []}>
     <div
-      className={`min-h-[100dvh] flex flex-col ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
+      className={`min-h-[100dvh] flex flex-col ${showHolidayTet ? 'holiday-on' : ''} ${isCartAddLandingPage ? 'bg-black/50' : 'bg-gray-50'}`}
       style={
         {
+          ...(showHolidayTet && holidayLook ? holidayCssVars(holidayLook) : {}),
           '--listing-chrome-height': keepDesktopHeaderPinned ? `${listingChromeHeight}px` : '0px',
           /** Offset sticky bộ lọc: khi head mỏng trừ vài px để bù subpixel + viền mờ (backdrop), tránh khe. */
           '--listing-filter-sticky-top': !keepDesktopHeaderPinned
@@ -493,6 +527,9 @@ export default function AppShell({ children, initialCategoryTree, initialSiteSal
           initialCategoryTree={categoryTree}
         />
       )}
+
+      {showHolidayTet && <TetPreviewBar />}
+      {showHolidayTet && <TetArrivalRibbon />}
 
       {!isAdminPage && !isAuthPage && !isCartAddLandingPage && !isShopVideoFeedPage && !isMobileSearchComposePage && (
         <SiteSaleBanner

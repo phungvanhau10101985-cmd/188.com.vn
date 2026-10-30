@@ -20,6 +20,7 @@ import PersonalizedHeroBanner from '@/components/home/PersonalizedHeroBanner';
 import MarketingBannerCarousel from '@/components/home/MarketingBannerCarousel';
 import HomeSectionErrorBoundary from '@/components/home/HomeSectionErrorBoundary';
 import HomeFlashSaleSection from '@/components/home/HomeFlashSaleSection';
+import { TetHomeWelcome } from '@/components/holiday/TetTheme';
 import SameShopRecommendationHeader from '@/components/home/SameShopRecommendationHeader';
 import HomeProductPagination from '@/components/home/HomeProductPagination';
 import Button from '@/components/ui/Button';
@@ -1435,6 +1436,7 @@ export default function HomePageClient({
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-4 md:py-6">
+        <TetHomeWelcome />
         {error && (
           <div className="mb-6 bg-red-50/90 border border-red-200 rounded-xl p-4 flex items-center justify-between gap-4 shadow-sm">
             <p className="text-red-700 font-medium">{error}</p>

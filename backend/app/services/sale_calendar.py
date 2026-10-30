@@ -39,6 +39,7 @@ class SaleCalendarState:
     active_start_at: Optional[datetime]
     active_end_at: Optional[datetime]
     countdown_to: Optional[datetime]
+    kind: Optional[str] = None
 
     @property
     def is_teaser(self) -> bool:
@@ -61,6 +62,7 @@ class SaleCalendarState:
             "countdown_to": self.countdown_to.isoformat() if self.countdown_to else None,
             "feed_title_prefix_teaser": FEED_TITLE_PREFIX_TEASER,
             "feed_title_prefix_active": FEED_TITLE_PREFIX_ACTIVE,
+            "kind": self.kind,
         }
 
 
@@ -361,6 +363,10 @@ def resolve_sale_calendar_state(
         current = current.astimezone(_VN_TZ)
 
     today = current.date()
+    holiday_state = _holiday_sale_state(db, today)
+    if holiday_state is not None:
+        return holiday_state
+
     cfg = _load_settings(db)
     rules = _month_rule_map(db)
     teaser_days = max(1, min(14, cfg.teaser_days))
@@ -433,6 +439,43 @@ def resolve_sale_calendar_state(
     )
 
 
+def _holiday_sale_state(db: Session, today: date) -> Optional[SaleCalendarState]:
+    """Sale của đúng dịp đang hiện. Dịp nhỏ trong ngày của nó thay dịp lớn."""
+    from app.crud.holiday_theme import merged_rules
+    from app.services.holiday_schedule import resolve_visible_holiday
+
+    try:
+        rules = merged_rules(db)
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    program = resolve_visible_holiday(rules, today)
+    if program is None or program.sale_phase not in ("teaser", "active") or program.sale_percent <= 0:
+        return None
+    active_start = datetime.combine(program.core_start, time(0, 0, 0), tzinfo=_VN_TZ)
+    active_end = datetime.combine(program.core_end, time(23, 59, 59), tzinfo=_VN_TZ)
+    countdown = active_start if program.sale_phase == "teaser" else active_end
+    if program.core_start.year == program.core_end.year:
+        year_label = str(program.core_start.year)
+    else:
+        year_label = f"{program.core_start.year}–{program.core_end.year}"
+    return SaleCalendarState(
+        phase=program.sale_phase,
+        enabled=True,
+        event_date=program.core_start,
+        event_label=f"{program.sale_label} {year_label}",
+        discount_percent=program.sale_percent,
+        teaser_days=max(1, program.lead_days),
+        active_start_at=active_start,
+        active_end_at=active_end,
+        countdown_to=countdown,
+        kind="holiday",
+    )
+
+
 def apply_site_sale_to_price(list_price: float, state: SaleCalendarState) -> Dict[str, Any]:
     """Tính giá hiển thị theo phase sale site-wide."""
     base = max(0.0, float(list_price or 0))
@@ -486,6 +529,7 @@ def enrich_product_payload_with_site_sale(payload: Dict[str, Any], state: SaleCa
         "event_label": state.event_label,
         "event_date": state.event_date.isoformat() if state.event_date else None,
         "countdown_to": state.countdown_to.isoformat() if state.countdown_to else None,
+        "kind": state.kind,
     }
     if state.is_active and pricing["savings_amount"] > 0:
         payload["original_price"] = base
