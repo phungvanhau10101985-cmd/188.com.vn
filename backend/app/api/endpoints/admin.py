@@ -74,7 +74,13 @@ from app.crud import site_embed_code as embed_crud
 from app.crud import shop_video_fab as shop_video_fab_crud
 from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
 from app.crud import holiday_theme as holiday_theme_crud
-from app.schemas.holiday_theme import HolidayOccasionUpdate, HolidayThemeAdminOut
+from app.schemas.holiday_theme import (
+    HolidayOccasionUpdate,
+    HolidayPreviewGrantIn,
+    HolidayPreviewGrantOut,
+    HolidayThemeAdminOut,
+)
+from app.services.holiday_preview_grant import issue_holiday_preview_token
 from app.schemas.bunny_admin import BunnyCdnStatusOut, BunnyCdnUploadOut
 from app.schemas.integrations_admin import (
     AdminIntegrationKeyGroup,
@@ -1392,6 +1398,20 @@ def admin_put_holiday_theme(
         return holiday_theme_crud.update_occasion(db, data)
     except holiday_theme_crud.HolidayScheduleError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/holiday-theme/preview", response_model=HolidayPreviewGrantOut)
+def admin_grant_holiday_preview(
+    data: HolidayPreviewGrantIn,
+    current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
+):
+    """Mã ngắn hạn để tab 188.com.vn hiện giao diện lễ. Admin host không chia localStorage với cửa hàng."""
+    del current_admin
+    try:
+        token, expires_at = issue_holiday_preview_token(data.code)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return HolidayPreviewGrantOut(code=data.code, token=token, expires_at=expires_at)
 
 
 # ========== Bunny CDN — đăng ảnh lên Storage Zone ==========

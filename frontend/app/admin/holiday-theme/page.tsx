@@ -46,6 +46,7 @@ export default function AdminHolidayThemePage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewLeft, setPreviewLeft] = useState(0);
+  const [previewHref, setPreviewHref] = useState<string | null>(null);
 
   const apply = useCallback((data: HolidayThemeAdminState) => {
     setState(data);
@@ -89,6 +90,7 @@ export default function AdminHolidayThemePage() {
       clearHolidayAdminPreview();
       setPreviewCode(null);
       setPreviewLeft(0);
+      setPreviewHref(null);
       setNotice(`Đã tắt xem trước ${name}.`);
       return;
     }
@@ -97,14 +99,31 @@ export default function AdminHolidayThemePage() {
       setNotice('Cần đăng nhập quản trị thì bản xem trước mới hiện.');
       return;
     }
-    setPreviewCode(code);
-    setPreviewLeft(started.expiresAt - Date.now());
-    const opened = window.open(`${getStorefrontOrigin()}/`, '_blank', 'noopener');
-    setNotice(
-      opened
-        ? `${name} đang hiện trên cửa hàng trong 10 phút. Chỉ trình duyệt đang đăng nhập admin thấy.`
-        : `Đã bật ${name} trong 10 phút. Mở trang cửa hàng để xem. Khách không thấy bản này.`,
-    );
+    const popup = window.open('', '_blank');
+    void (async () => {
+      try {
+        const grant = await adminHolidayThemeAPI.previewGrant(code);
+        const url = `${getStorefrontOrigin()}/?preview_holiday=${encodeURIComponent(code)}&preview_token=${encodeURIComponent(grant.token)}`;
+        setPreviewCode(code);
+        setPreviewLeft(started.expiresAt - Date.now());
+        setPreviewHref(url);
+        setError(null);
+        if (popup && !popup.closed) {
+          popup.location.replace(url);
+          setNotice(`${name} đã mở trên 188.com.vn trong 10 phút. Tab cửa hàng vừa mở sẽ thấy giao diện này.`);
+          return;
+        }
+        popup?.close();
+        setNotice(`${name} đã bật trong 10 phút. Trình duyệt chặn cửa sổ mới — bấm Mở 188.com.vn.`);
+      } catch (e) {
+        popup?.close();
+        clearHolidayAdminPreview();
+        setPreviewCode(null);
+        setPreviewLeft(0);
+        setPreviewHref(null);
+        setError((e as Error)?.message || 'Không mở được bản xem trước trên cửa hàng.');
+      }
+    })();
   };
 
   const patchDraft = (code: string, patch: Partial<Draft>) => {
@@ -174,7 +193,12 @@ export default function AdminHolidayThemePage() {
       ) : null}
       {notice ? (
         <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {notice}
+          {notice}{' '}
+          {previewHref ? (
+            <a href={previewHref} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
+              Mở 188.com.vn
+            </a>
+          ) : null}
         </div>
       ) : null}
       {loading && !state ? (

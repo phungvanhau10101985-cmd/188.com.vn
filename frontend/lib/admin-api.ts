@@ -3428,6 +3428,11 @@ export const adminHolidayThemeAPI = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  previewGrant: (code: string) =>
+    fetchAdmin<{ code: string; token: string; expires_at: number }>('/admin/holiday-theme/preview', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
 };
 
 export interface AdminIntegrationKeyRow {

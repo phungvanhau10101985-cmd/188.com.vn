@@ -66,3 +66,27 @@ class HolidayOccasionUpdate(BaseModel):
         if value not in CATALOG:
             raise ValueError("Dịp lễ không có trong danh sách")
         return value
+
+
+class HolidayPreviewGrantIn(BaseModel):
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def known_code(cls, value: str) -> str:
+        from app.services.holiday_schedule import CATALOG
+
+        if value not in CATALOG:
+            raise ValueError("Dịp lễ không có trong danh sách")
+        return value
+
+
+class HolidayPreviewGrantOut(BaseModel):
+    code: str
+    token: str
+    expires_at: int
+
+
+class HolidayPreviewCheckOut(BaseModel):
+    code: str
+    expires_at: int

@@ -15,6 +15,16 @@ def test_holiday_theme_update_accepts_tet_and_off():
     assert HolidayThemeAdminUpdate(active_theme=None).active_theme is None
 
 
+def test_holiday_preview_token_roundtrip_and_rejects_tamper():
+    from app.services.holiday_preview_grant import issue_holiday_preview_token, parse_holiday_preview_token
+
+    token, expires_at = issue_holiday_preview_token("duong-lich", now=1_700_000_000)
+    assert parse_holiday_preview_token(token, now=1_700_000_000) == ("duong-lich", expires_at)
+    assert parse_holiday_preview_token(token, now=expires_at) is None
+    flipped = token[:-1] + ("a" if token[-1] != "a" else "b")
+    assert parse_holiday_preview_token(flipped, now=1_700_000_000) is None
+
+
 def test_holiday_theme_update_rejects_unknown():
     with pytest.raises(ValidationError):
         HolidayOccasionUpdate(code="christmas")
