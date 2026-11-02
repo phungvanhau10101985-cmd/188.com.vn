@@ -1476,16 +1476,6 @@ def admin_generate_holiday_banners(
             "message": f"Đã bắt đầu tạo banner {CATALOG[data.code].name}.",
         }
 
-    generating = (
-        db.query(MarketingBannerAsset.id)
-        .filter(
-            MarketingBannerAsset.kind == "holiday",
-            MarketingBannerAsset.status == "generating",
-        )
-        .first()
-    )
-    if generating:
-        raise HTTPException(status_code=409, detail="Đang tạo banner ngày lễ. Đợi xong rồi bấm lại.")
     background_tasks.add_task(banner_svc.generate_all_holiday_banners_job, force=data.force)
     return {
         "accepted": True,

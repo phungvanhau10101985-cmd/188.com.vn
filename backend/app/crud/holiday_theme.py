@@ -329,7 +329,11 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
     banners: dict[str, Any] = {}
     try:
         from app.models.marketing_banner import MarketingBannerAsset
-        from app.services.marketing_banner import holiday_code_from_campaign_key
+        from app.services.marketing_banner import (
+            _is_stale_generating,
+            _mark_stale_generating,
+            holiday_code_from_campaign_key,
+        )
 
         rows = (
             db.query(MarketingBannerAsset)
@@ -338,6 +342,8 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
             .all()
         )
         for row in rows:
+            if row.status == "generating" and _is_stale_generating(row):
+                _mark_stale_generating(db, row)
             code = holiday_code_from_campaign_key(row.campaign_key)
             if not code or code in banners:
                 continue

@@ -236,14 +236,15 @@ export default function AdminHolidayThemePage() {
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
           type="button"
-          disabled={Boolean(bannerWorking) || generatingAny}
+          disabled={bannerWorking === 'all'}
           onClick={() => void generateBanners()}
           className="rounded-lg bg-[#9f1239] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
         >
-          {bannerWorking === 'all' || generatingAny ? 'Đang tạo banner GPT…' : 'Tạo tất cả banner GPT'}
+          {bannerWorking === 'all' ? 'Đang tạo banner GPT…' : 'Tạo tất cả banner GPT'}
         </button>
         <p className="text-xs text-gray-500">
           Một lượt đủ 16 dịp. Ảnh sẵn giữ lại; muốn vẽ lại từng dịp thì bấm Tạo lại trên thẻ đó.
+          {generatingAny ? ' Có dịp đang vẽ — các dịp khác vẫn bấm tạo được.' : ''}
         </p>
       </div>
       {state?.schedule_note ? (

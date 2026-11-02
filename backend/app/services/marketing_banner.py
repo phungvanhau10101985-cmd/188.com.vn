@@ -370,6 +370,7 @@ def gpt_generate_image_from_text(prompt: str) -> bytes:
         getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
     ).strip() or "gpt-image-2"
     timeout = max(60, int(getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_TIMEOUT_SEC", 300) or 300))
+    connect_timeout = min(20, timeout)
     quality = (
         getattr(settings, "IMAGE_LOCALIZATION_OPENAI_DEFAULT_IMAGE_QUALITY", "") or "high"
     ).strip() or "high"
@@ -384,7 +385,7 @@ def gpt_generate_image_from_text(prompt: str) -> bytes:
         "https://api.openai.com/v1/images/generations",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=timeout,
+        timeout=(connect_timeout, timeout),
     )
     if response.status_code != 200:
         detail = (response.text or "")[:800]
@@ -1334,38 +1335,8 @@ def ensure_daily_banners(
     else:
         _try_create("warehouse", 0, 0, float(warehouse_pct), "warehouse")
 
-    holiday_codes = upcoming_holiday_codes(db, current)
-    if not holiday_codes:
-        result["holiday"]["skipped"] += 1
-    else:
-        from app.services.holiday_schedule import CATALOG
-
-        for code in holiday_codes:
-            rule = CATALOG.get(code)
-            if rule is None:
-                continue
-            existing = find_active_holiday_asset(db, code)
-            if existing:
-                result["holiday"]["reused"] += 1
-                continue
-            if budget <= 0:
-                result["holiday"]["pending"] += 1
-                continue
-            try:
-                row = generate_banner(
-                    db,
-                    kind="holiday",
-                    occasion_code=code,
-                    discount_percent=float(rule.sale_percent or 0),
-                    notify_admin=notify_admin,
-                )
-                if getattr(row, "status", None) == "ready":
-                    result["holiday"]["created"] += 1
-                else:
-                    result["holiday"]["pending"] += 1
-            except Exception:
-                result["holiday"]["failed"] += 1
-            budget -= 1
+    # Banner lễ tạo một lượt từ trang quản trị — cron ngày không vẽ để khỏi treo nút tạo tất cả.
+    result["holiday"]["skipped"] += 1
 
     from app.services.marketing_icon import ensure_daily_sale_icons
 
