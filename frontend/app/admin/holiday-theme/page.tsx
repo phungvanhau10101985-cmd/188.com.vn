@@ -23,6 +23,8 @@ type Draft = {
   lead_days: string;
   after_days: string;
   sale_percent: string;
+  sale_lead_days: string;
+  sale_days: string;
 };
 
 function draftFrom(row: HolidayOccasionAdmin): Draft {
@@ -34,6 +36,8 @@ function draftFrom(row: HolidayOccasionAdmin): Draft {
     lead_days: String(row.lead_days),
     after_days: String(row.after_days),
     sale_percent: String(row.sale_percent),
+    sale_lead_days: row.sale_lead_days ? String(row.sale_lead_days) : '',
+    sale_days: row.sale_days ? String(row.sale_days) : '',
   };
 }
 
@@ -193,8 +197,20 @@ export default function AdminHolidayThemePage() {
     const lead = Number(draft.lead_days);
     const after = Number(draft.after_days);
     const pct = Number(draft.sale_percent);
+    const saleLeadRaw = draft.sale_lead_days.trim();
+    const saleDaysRaw = draft.sale_days.trim();
+    const saleLead = saleLeadRaw === '' ? null : Number(saleLeadRaw);
+    const saleDays = saleDaysRaw === '' ? null : Number(saleDaysRaw);
     if (![startDay, startMonth, endDay, endMonth, lead, after].every((n) => Number.isInteger(n))) {
       setError('Ngày, tháng và số ngày phải là số nguyên.');
+      return;
+    }
+    if (saleLead !== null && (!Number.isInteger(saleLead) || saleLead < 0 || saleLead > 60)) {
+      setError('Sale trước lễ phải để trống hoặc 0–60 ngày.');
+      return;
+    }
+    if (saleDays !== null && (!Number.isInteger(saleDays) || saleDays < 0 || saleDays > 60)) {
+      setError('Số ngày sale phải để trống hoặc 0–60 ngày.');
       return;
     }
     if (!Number.isFinite(pct) || pct < 0 || pct > 50) {
@@ -215,6 +231,8 @@ export default function AdminHolidayThemePage() {
         lead_days: lead,
         after_days: after,
         sale_percent: pct,
+        sale_lead_days: saleLead,
+        sale_days: saleDays,
       });
       apply(saved);
       setNotice(`Đã lưu ${row.name}.`);
@@ -230,8 +248,9 @@ export default function AdminHolidayThemePage() {
       <h1 className="text-xl font-bold text-gray-900">Giao diện ngày lễ</h1>
       <p className="mt-1 text-sm text-gray-600">
         Tự bật trước và sale giống sale cùng ngày cùng tháng: lưu ngày/tháng, lặp mỗi năm. Ngày bật /
-        ngày tắt chỉnh tay bằng ngày lễ và số ngày trước/sau. Banner GPT chỉ ghi tên dịp, không ghi
-        ngày tháng — dùng lại các năm. Âm lịch tự đổi sang dương lịch năm đó.
+        ngày tắt là giao diện. Số ngày sale / sale trước lễ để trống thì chỉ giảm đúng ngày lễ. Banner
+        GPT chỉ ghi tên dịp, không ghi ngày tháng — dùng lại các năm. Âm lịch tự đổi sang dương lịch
+        năm đó.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <button
@@ -320,7 +339,10 @@ export default function AdminHolidayThemePage() {
                   </button>
                 </div>
                 {draft ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-gray-700">Ngày lễ và giao diện</p>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-3">
                     <label className="text-xs text-gray-600">
                       Ngày bắt đầu
                       <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.start_day} onChange={(e) => patchDraft(row.code, { start_day: e.target.value })} />
@@ -359,14 +381,50 @@ export default function AdminHolidayThemePage() {
                         <span className="mt-1 block text-[11px] text-gray-500">Ngày tắt: {row.window_off_label}</span>
                       ) : null}
                     </label>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-gray-700">Sale</p>
+                      <div className="mt-2 grid gap-3 sm:grid-cols-3">
                     <label className="text-xs text-gray-600">
                       % sale
                       <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.sale_percent} onChange={(e) => patchDraft(row.code, { sale_percent: e.target.value })} />
+                    </label>
+                    <label className="text-xs text-gray-600">
+                      Số ngày được sale
+                      <input
+                        className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
+                        value={draft.sale_days}
+                        onChange={(e) => patchDraft(row.code, { sale_days: e.target.value })}
+                        placeholder="Để trống: đúng ngày lễ"
+                        inputMode="numeric"
+                      />
+                      {row.sale_on_label && row.sale_off_label ? (
+                        <span className="mt-1 block text-[11px] text-gray-500">
+                          Sale: {row.sale_on_label}
+                          {row.sale_on_label !== row.sale_off_label ? ` – ${row.sale_off_label}` : ''}
+                        </span>
+                      ) : null}
+                    </label>
+                    <label className="text-xs text-gray-600">
+                      Sale trước ngày lễ
+                      <input
+                        className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"
+                        value={draft.sale_lead_days}
+                        onChange={(e) => patchDraft(row.code, { sale_lead_days: e.target.value })}
+                        placeholder="Để trống: đúng ngày lễ"
+                        inputMode="numeric"
+                      />
+                      <span className="mt-1 block text-[11px] text-gray-500">
+                        Để trống thì chỉ sale đúng ngày lễ.
+                      </span>
                     </label>
                     <div className="flex items-end">
                       <button type="button" disabled={busy} onClick={() => save(row)} className="rounded-lg bg-[#9f1239] px-3 py-2 text-sm font-medium text-white disabled:opacity-60">
                         {busy ? 'Đang lưu…' : 'Lưu'}
                       </button>
+                    </div>
+                      </div>
                     </div>
                   </div>
                 ) : null}

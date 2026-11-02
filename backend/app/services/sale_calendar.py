@@ -442,7 +442,7 @@ def resolve_sale_calendar_state(
 def _holiday_sale_state(db: Session, today: date) -> Optional[SaleCalendarState]:
     """Sale của đúng dịp đang hiện. Dịp nhỏ trong ngày của nó thay dịp lớn."""
     from app.crud.holiday_theme import merged_rules
-    from app.services.holiday_schedule import resolve_visible_holiday
+    from app.services.holiday_schedule import resolve_holiday_sale, resolve_visible_holiday
 
     try:
         rules = merged_rules(db)
@@ -452,11 +452,13 @@ def _holiday_sale_state(db: Session, today: date) -> Optional[SaleCalendarState]
         except Exception:
             pass
         return None
-    program = resolve_visible_holiday(rules, today)
+    program = resolve_holiday_sale(rules, today) or resolve_visible_holiday(rules, today)
     if program is None or program.sale_phase not in ("teaser", "active") or program.sale_percent <= 0:
         return None
-    active_start = datetime.combine(program.core_start, time(0, 0, 0), tzinfo=_VN_TZ)
-    active_end = datetime.combine(program.core_end, time(23, 59, 59), tzinfo=_VN_TZ)
+    sale_start = getattr(program, "sale_start", None) or program.core_start
+    sale_end = getattr(program, "sale_end", None) or program.core_end
+    active_start = datetime.combine(sale_start, time(0, 0, 0), tzinfo=_VN_TZ)
+    active_end = datetime.combine(sale_end, time(23, 59, 59), tzinfo=_VN_TZ)
     countdown = active_start if program.sale_phase == "teaser" else active_end
     if program.core_start.year == program.core_end.year:
         year_label = str(program.core_start.year)
@@ -468,7 +470,7 @@ def _holiday_sale_state(db: Session, today: date) -> Optional[SaleCalendarState]
         event_date=program.core_start,
         event_label=f"{program.sale_label} {year_label}",
         discount_percent=program.sale_percent,
-        teaser_days=max(1, program.lead_days),
+        teaser_days=max(1, (program.core_start - sale_start).days or program.lead_days),
         active_start_at=active_start,
         active_end_at=active_end,
         countdown_to=countdown,

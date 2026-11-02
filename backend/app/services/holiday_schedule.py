@@ -32,6 +32,8 @@ class HolidayRule:
     tagline: str
     summary: str
     enabled: bool = True
+    sale_lead_days: int = 0
+    sale_days: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,8 @@ class VisibleHoliday:
     core_end: date
     window_start: date
     window_end: date
+    sale_start: date
+    sale_end: date
 
 
 def _catalog() -> tuple[HolidayRule, ...]:
@@ -148,6 +152,30 @@ def _anchor(kind: CalendarKind, month: int, day: int, year: int) -> Optional[dat
     return lunar_to_solar(day, month, year, 0)
 
 
+def sale_span(rule: HolidayRule, core_start: date, core_end: date) -> tuple[date, date]:
+    """Khoảng sale. Để trống lead/số ngày thì đúng ngày lễ (core_start–core_end)."""
+    lead = max(0, min(60, int(rule.sale_lead_days or 0)))
+    start = core_start - timedelta(days=lead)
+    raw_days = rule.sale_days
+    if raw_days is None or int(raw_days) <= 0:
+        end = core_end
+    else:
+        end = start + timedelta(days=max(1, min(60, int(raw_days))) - 1)
+    if end < start:
+        end = start
+    return start, end
+
+
+def _sale_phase_for(rule: HolidayRule, today: date, sale_start: date, sale_end: date) -> Optional[str]:
+    if float(rule.sale_percent or 0) <= 0:
+        return None
+    if sale_start <= today <= sale_end:
+        return "active"
+    if today < sale_start:
+        return "teaser"
+    return None
+
+
 def _core_span(rule: HolidayRule, year: int) -> Optional[tuple[date, date]]:
     start = _anchor(rule.calendar, rule.start_month, rule.start_day, year)
     end = _anchor(rule.calendar, rule.end_month, rule.end_day, year)
@@ -211,20 +239,18 @@ def resolve_visible_holiday(rules: list[HolidayRule], today: date) -> Optional[V
     else:
         hits.sort(key=lambda item: (item.rule.priority, -(item.window_end - item.window_start).days, item.rule.code))
         chosen = hits[0]
+    sale_start, sale_end = sale_span(chosen.rule, chosen.core_start, chosen.core_end)
     if chosen.core_start <= today <= chosen.core_end:
         mode = "active"
-        sale_phase = "active" if chosen.rule.sale_percent > 0 else None
     elif today < chosen.core_start:
         mode = "teaser"
-        sale_phase = "teaser" if chosen.rule.sale_percent > 0 else None
     else:
         mode = "after"
-        sale_phase = None
     return VisibleHoliday(
         code=chosen.rule.code,
         name=chosen.rule.name,
         mode=mode,
-        sale_phase=sale_phase,
+        sale_phase=_sale_phase_for(chosen.rule, today, sale_start, sale_end),
         sale_percent=chosen.rule.sale_percent,
         sale_label=chosen.rule.sale_label,
         lead_days=chosen.rule.lead_days,
@@ -232,7 +258,54 @@ def resolve_visible_holiday(rules: list[HolidayRule], today: date) -> Optional[V
         core_end=chosen.core_end,
         window_start=chosen.window_start,
         window_end=chosen.window_end,
+        sale_start=sale_start,
+        sale_end=sale_end,
     )
+
+
+def resolve_holiday_sale(rules: list[HolidayRule], today: date) -> Optional[VisibleHoliday]:
+    """Dịp đang giảm giá hôm nay — kể cả khi cửa sổ giao diện đã tắt."""
+    hits: list[VisibleHoliday] = []
+    for rule in rules:
+        if not rule.enabled or float(rule.sale_percent or 0) <= 0:
+            continue
+        for year in (today.year - 1, today.year, today.year + 1):
+            span = _core_span(rule, year)
+            if span is None:
+                continue
+            core_start, core_end = span
+            sale_start, sale_end = sale_span(rule, core_start, core_end)
+            if not (sale_start <= today <= sale_end):
+                continue
+            lead = max(0, min(60, int(rule.lead_days or 0)))
+            after = max(0, min(60, int(rule.after_days or 0)))
+            if core_start <= today <= core_end:
+                mode = "active"
+            elif today < core_start:
+                mode = "teaser"
+            else:
+                mode = "after"
+            hits.append(
+                VisibleHoliday(
+                    code=rule.code,
+                    name=rule.name,
+                    mode=mode,
+                    sale_phase="active",
+                    sale_percent=rule.sale_percent,
+                    sale_label=rule.sale_label,
+                    lead_days=rule.lead_days,
+                    core_start=core_start,
+                    core_end=core_end,
+                    window_start=core_start - timedelta(days=lead),
+                    window_end=core_end + timedelta(days=after),
+                    sale_start=sale_start,
+                    sale_end=sale_end,
+                )
+            )
+    if not hits:
+        return None
+    hits.sort(key=lambda item: ((item.sale_end - item.sale_start).days, item.core_end - item.core_start, item.code))
+    return hits[0]
 
 
 def apply_override(rule: HolidayRule, row: object) -> HolidayRule:
@@ -247,6 +320,13 @@ def apply_override(rule: HolidayRule, row: object) -> HolidayRule:
         value = getattr(row, name, None)
         return fallback if value is None else float(value)
 
+    def _opt_int(name: str, fallback: Optional[int]) -> Optional[int]:
+        value = getattr(row, name, None)
+        if value is None:
+            return fallback
+        parsed = int(value)
+        return None if parsed <= 0 else max(0, min(60, parsed))
+
     updated = replace(
         rule,
         enabled=bool(getattr(row, "enabled", rule.enabled)),
@@ -257,5 +337,7 @@ def apply_override(rule: HolidayRule, row: object) -> HolidayRule:
         lead_days=_int("lead_days", rule.lead_days),
         after_days=_int("after_days", rule.after_days),
         sale_percent=max(0.0, min(50.0, _float("sale_percent", rule.sale_percent))),
+        sale_lead_days=max(0, min(60, _int("sale_lead_days", rule.sale_lead_days))),
+        sale_days=_opt_int("sale_days", rule.sale_days),
     )
     return updated

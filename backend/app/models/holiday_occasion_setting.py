@@ -16,3 +16,5 @@ class HolidayOccasionSetting(Base):
     lead_days = Column(Integer, nullable=False, default=0)
     after_days = Column(Integer, nullable=False, default=0)
     sale_percent = Column(Numeric(5, 2), nullable=True)
+    sale_lead_days = Column(Integer, nullable=True)
+    sale_days = Column(Integer, nullable=True)

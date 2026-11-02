@@ -26,6 +26,8 @@ class HolidayOccasionOut(BaseModel):
     lead_days: int
     after_days: int
     sale_percent: float
+    sale_lead_days: Optional[int] = None
+    sale_days: Optional[int] = None
     enabled: bool
     priority: int
     solar_label: str = ""
@@ -33,6 +35,8 @@ class HolidayOccasionOut(BaseModel):
     end_year: Optional[int] = None
     window_on_label: str = ""
     window_off_label: str = ""
+    sale_on_label: str = ""
+    sale_off_label: str = ""
     banner_headline: str = ""
     banner_url: Optional[str] = None
     banner_status: Optional[str] = None
@@ -80,6 +84,8 @@ class HolidayOccasionUpdate(BaseModel):
     lead_days: Optional[int] = Field(None, ge=0, le=60)
     after_days: Optional[int] = Field(None, ge=0, le=60)
     sale_percent: Optional[float] = Field(None, ge=0, le=50)
+    sale_lead_days: Optional[int] = Field(None, ge=0, le=60)
+    sale_days: Optional[int] = Field(None, ge=0, le=60)
 
     @field_validator("code")
     @classmethod

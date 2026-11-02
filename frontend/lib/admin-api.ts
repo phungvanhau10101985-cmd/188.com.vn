@@ -3394,6 +3394,8 @@ export interface HolidayOccasionAdmin {
   lead_days: number;
   after_days: number;
   sale_percent: number;
+  sale_lead_days?: number | null;
+  sale_days?: number | null;
   enabled: boolean;
   priority: number;
   solar_label: string;
@@ -3401,6 +3403,8 @@ export interface HolidayOccasionAdmin {
   end_year: number | null;
   window_on_label?: string;
   window_off_label?: string;
+  sale_on_label?: string;
+  sale_off_label?: string;
   banner_headline?: string;
   banner_url?: string | null;
   banner_status?: string | null;
@@ -3425,6 +3429,8 @@ export interface HolidayOccasionUpdate {
   lead_days?: number;
   after_days?: number;
   sale_percent?: number;
+  sale_lead_days?: number | null;
+  sale_days?: number | null;
 }
 
 export const adminHolidayThemeAPI = {

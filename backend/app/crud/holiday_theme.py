@@ -362,11 +362,18 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
             solar_label = f"Năm {span[0].year}–{span[1].year}"
         window_on = ""
         window_off = ""
+        sale_on = ""
+        sale_off = ""
         if span is not None:
+            from app.services.holiday_schedule import sale_span
+
             lead = max(0, min(60, int(rule.lead_days or 0)))
             after = max(0, min(60, int(rule.after_days or 0)))
             window_on = _fmt_vi(span[0] - timedelta(days=lead))
             window_off = _fmt_vi(span[1] + timedelta(days=after))
+            sale_start, sale_end = sale_span(rule, span[0], span[1])
+            sale_on = _fmt_vi(sale_start)
+            sale_off = _fmt_vi(sale_end)
         occasions.append(
             HolidayOccasionOut(
                 code=rule.code,
@@ -382,6 +389,8 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
                 lead_days=rule.lead_days,
                 after_days=rule.after_days,
                 sale_percent=rule.sale_percent,
+                sale_lead_days=rule.sale_lead_days or None,
+                sale_days=rule.sale_days or None,
                 enabled=rule.enabled,
                 priority=rule.priority,
                 solar_label=solar_label,
@@ -389,6 +398,8 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
                 end_year=span[1].year if span else None,
                 window_on_label=window_on,
                 window_off_label=window_off,
+                sale_on_label=sale_on,
+                sale_off_label=sale_off,
                 banner_headline=banner_headline(rule.code),
                 banner_url=getattr(banners.get(rule.code), "image_url", None),
                 banner_status=getattr(banners.get(rule.code), "status", None),
@@ -401,9 +412,21 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
     elif visible.mode == "active":
         note = f"Hôm nay khách thấy {visible.name}. Đúng ngày lễ nên giao diện dịp này phủ lên dịp lớn hơn nếu hai kỳ trùng."
     elif visible.mode == "teaser":
-        note = f"Hôm nay khách thấy {visible.name}. Đang những ngày trước lễ, báo sắp giảm giá."
+        if visible.sale_phase == "active":
+            note = (
+                f"Hôm nay khách thấy {visible.name}. Đang sale trước ngày lễ "
+                f"(đến hết {_fmt_vi(visible.sale_end)})."
+            )
+        else:
+            note = f"Hôm nay khách thấy {visible.name}. Đang những ngày trước lễ, báo sắp giảm giá."
     else:
-        note = f"Hôm nay khách thấy {visible.name}. Đang giữ giao diện sau lễ, sale lễ đã tắt."
+        if visible.sale_phase == "active":
+            note = (
+                f"Hôm nay khách thấy {visible.name}. Đang giữ giao diện sau lễ, "
+                f"sale còn đến hết {_fmt_vi(visible.sale_end)}."
+            )
+        else:
+            note = f"Hôm nay khách thấy {visible.name}. Đang giữ giao diện sau lễ, sale lễ đã tắt."
     return HolidayThemeAdminOut(
         active_theme=visible.code if visible else None,
         active_label=visible.name if visible else None,
@@ -425,6 +448,10 @@ def update_occasion(db: Session, data) -> object:
     for key in ("enabled", "start_month", "start_day", "end_month", "end_day", "lead_days", "after_days", "sale_percent"):
         if key in payload and payload[key] is not None:
             setattr(row, key, payload[key])
+    for key in ("sale_lead_days", "sale_days"):
+        if key in payload:
+            value = payload[key]
+            setattr(row, key, None if value in (None, 0) else value)
     if not valid_month_day(rule.calendar, int(row.start_month), int(row.start_day)):
         raise HolidayScheduleError("Ngày bắt đầu không hợp lệ với loại lịch của dịp này")
     if not valid_month_day(rule.calendar, int(row.end_month), int(row.end_day)):

@@ -7,7 +7,14 @@ from pydantic import ValidationError
 from app.crud.holiday_theme import describe_holiday_program, normalize_theme
 from app.schemas.holiday_theme import HolidayOccasionUpdate, HolidayThemeAdminUpdate
 from app.services import sale_calendar as sale_calendar_svc
-from app.services.holiday_schedule import BANNER_HEADLINES, CATALOG, banner_headline, resolve_visible_holiday
+from app.services.holiday_schedule import (
+    BANNER_HEADLINES,
+    CATALOG,
+    banner_headline,
+    resolve_holiday_sale,
+    resolve_visible_holiday,
+    sale_span,
+)
 
 
 def test_holiday_theme_update_accepts_tet_and_off():
@@ -186,6 +193,58 @@ def test_inner_festival_day_interrupts_outer_then_returns():
     assert back is not None and back.code == "tet" and back.mode == "teaser"
     tet_day = resolve_visible_holiday(rules, date(2027, 2, 6))
     assert tet_day is not None and tet_day.code == "tet" and tet_day.mode == "active"
+
+
+def test_sale_span_empty_means_holiday_dates_only():
+    from dataclasses import replace
+
+    rule = CATALOG["giang-sinh"]
+    start, end = sale_span(rule, date(2026, 12, 24), date(2026, 12, 25))
+    assert start == date(2026, 12, 24)
+    assert end == date(2026, 12, 25)
+
+    before = replace(rule, sale_lead_days=3, sale_days=None)
+    start, end = sale_span(before, date(2026, 12, 24), date(2026, 12, 25))
+    assert start == date(2026, 12, 21)
+    assert end == date(2026, 12, 25)
+
+    duration = replace(rule, sale_lead_days=0, sale_days=5)
+    start, end = sale_span(duration, date(2026, 12, 24), date(2026, 12, 25))
+    assert start == date(2026, 12, 24)
+    assert end == date(2026, 12, 28)
+
+    both = replace(rule, sale_lead_days=3, sale_days=5)
+    start, end = sale_span(both, date(2026, 12, 24), date(2026, 12, 25))
+    assert start == date(2026, 12, 21)
+    assert end == date(2026, 12, 25)
+
+
+def test_sale_before_holiday_is_active_while_theme_is_teaser():
+    from dataclasses import replace
+
+    rule = replace(CATALOG["giang-sinh"], sale_lead_days=3, sale_percent=10)
+    vis = resolve_visible_holiday([rule], date(2026, 12, 21))
+    assert vis is not None
+    assert vis.mode == "teaser"
+    assert vis.sale_phase == "active"
+    assert vis.sale_start == date(2026, 12, 21)
+    assert vis.sale_end == date(2026, 12, 25)
+
+    teaser = resolve_visible_holiday([rule], date(2026, 12, 20))
+    assert teaser is not None
+    assert teaser.sale_phase == "teaser"
+
+
+def test_sale_continues_after_theme_window():
+    from dataclasses import replace
+
+    rule = replace(CATALOG["valentine"], lead_days=0, after_days=0, sale_days=3, sale_percent=8)
+    assert resolve_visible_holiday([rule], date(2027, 2, 15)) is None
+    sale = resolve_holiday_sale([rule], date(2027, 2, 15))
+    assert sale is not None
+    assert sale.sale_phase == "active"
+    assert sale.sale_start == date(2027, 2, 14)
+    assert sale.sale_end == date(2027, 2, 16)
 
 
 def test_banner_headlines_cover_catalog_without_dates():

@@ -641,24 +641,25 @@ def generate_all_holiday_banners(
     notify_admin: bool = False,
 ) -> Dict[str, Any]:
     """Tạo đủ banner mọi dịp lễ. Ảnh cũ ready được giữ nếu không force."""
+    from app.db.retry import safe_rollback
     from app.services.holiday_schedule import CATALOG
 
     stats = _empty_kind_stats()
     items: list[Dict[str, Any]] = []
     for rule in CATALOG.values():
         key = campaign_key("holiday", 0, 0, 0, occasion_code=rule.code)
-        if not force:
-            existing = find_active_holiday_asset(db, rule.code)
-            if existing:
-                stats["reused"] += 1
-                items.append({"code": rule.code, "status": "ready", "id": existing.id})
-                continue
-            generating = _find_generating_asset(db, kind="holiday", key=key)
-            if generating and not _is_stale_generating(generating):
-                stats["pending"] += 1
-                items.append({"code": rule.code, "status": "generating", "id": generating.id})
-                continue
         try:
+            if not force:
+                existing = find_active_holiday_asset(db, rule.code)
+                if existing:
+                    stats["reused"] += 1
+                    items.append({"code": rule.code, "status": "ready", "id": existing.id})
+                    continue
+                generating = _find_generating_asset(db, kind="holiday", key=key)
+                if generating and not _is_stale_generating(generating):
+                    stats["pending"] += 1
+                    items.append({"code": rule.code, "status": "generating", "id": generating.id})
+                    continue
             row = generate_banner(
                 db,
                 kind="holiday",
@@ -674,6 +675,7 @@ def generate_all_holiday_banners(
                 stats["pending"] += 1
             items.append({"code": rule.code, "status": status, "id": getattr(row, "id", None)})
         except Exception as exc:
+            safe_rollback(db)
             stats["failed"] += 1
             items.append({"code": rule.code, "status": "failed", "error": str(exc)[:300]})
             logger.exception("Tạo banner dịp lễ %s thất bại", rule.code)
@@ -681,15 +683,27 @@ def generate_all_holiday_banners(
 
 
 def generate_all_holiday_banners_job(*, force: bool = False) -> None:
+    """Mỗi dịp một session — GPT/Gemini chạy vài phút, không dùng chung transaction."""
+    from app.db.retry import safe_rollback
     from app.db.session import SessionLocal
+    from app.services.holiday_schedule import CATALOG
 
-    db = SessionLocal()
-    try:
-        generate_all_holiday_banners(db, force=force, notify_admin=False)
-    except Exception:
-        logger.exception("Tạo hàng loạt banner ngày lễ thất bại")
-    finally:
-        db.close()
+    for rule in CATALOG.values():
+        db = SessionLocal()
+        try:
+            generate_banner(
+                db,
+                kind="holiday",
+                occasion_code=rule.code,
+                discount_percent=float(rule.sale_percent or 0),
+                force=force,
+                notify_admin=False,
+            )
+        except Exception:
+            logger.exception("Tạo banner dịp lễ %s thất bại", rule.code)
+            safe_rollback(db)
+        finally:
+            db.close()
 
 
 def find_active_warehouse_asset(
@@ -955,6 +969,37 @@ def _find_generating_asset(
     )
 
 
+def _reload_asset(db: Session, asset_id: int) -> MarketingBannerAsset:
+    """Tải lại banner sau GPT/Gemini — rollback + đóng connection nếu SSL đã chết."""
+    from app.db.retry import is_transient_db_error, safe_rollback
+
+    last_exc: Optional[BaseException] = None
+    for attempt in range(3):
+        try:
+            return (
+                db.query(MarketingBannerAsset)
+                .filter(MarketingBannerAsset.id == asset_id)
+                .one()
+            )
+        except Exception as exc:
+            last_exc = exc
+            safe_rollback(db)
+            try:
+                db.close()
+            except Exception:
+                pass
+            if not is_transient_db_error(exc) or attempt >= 2:
+                raise
+            logger.warning(
+                "Tải lại banner %s lần %s vì DB rớt kết nối: %s",
+                asset_id,
+                attempt + 1,
+                exc,
+            )
+    assert last_exc is not None
+    raise last_exc
+
+
 def _delete_superseded_campaign_assets(
     db: Session, *, kind: str, key: str, keep_id: int
 ) -> None:
@@ -1110,6 +1155,8 @@ def generate_banner(
     )
     db.add(row)
     try:
+        db.flush()
+        asset_id = int(row.id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -1125,20 +1172,14 @@ def generate_banner(
         if concurrent:
             return concurrent
         raise
-    asset_id = int(row.id)
 
     try:
         _probe_bunny_before_image(kind=kind, key=key, version=version)
-        # Không refresh/giữ transaction lúc gọi model ảnh (30–120s).
         raw, provider_used, model_used = _render_banner_pixels(prompt, kind=kind)
         fitted = fit_banner_bytes(raw)
         width, height, _ = _image_dimensions(fitted)
         image_url = _upload_banner(fitted, kind=kind, key=key, version=version)
-        row = (
-            db.query(MarketingBannerAsset)
-            .filter(MarketingBannerAsset.id == asset_id)
-            .one()
-        )
+        row = _reload_asset(db, asset_id)
         (
             db.query(MarketingBannerAsset)
             .filter(
@@ -1162,26 +1203,25 @@ def generate_banner(
         _delete_superseded_campaign_assets(
             db, kind=kind, key=key, keep_id=int(row.id)
         )
-        row = (
-            db.query(MarketingBannerAsset)
-            .filter(MarketingBannerAsset.id == asset_id)
-            .one()
-        )
+        row = _reload_asset(db, asset_id)
         if notify_admin:
             _admin_preview_email(db, row)
         return row
     except Exception as exc:
-        row = (
-            db.query(MarketingBannerAsset)
-            .filter(MarketingBannerAsset.id == asset_id)
-            .first()
-        )
-        if row is not None:
+        from app.db.retry import safe_rollback
+
+        safe_rollback(db)
+        try:
+            row = _reload_asset(db, asset_id)
             row.status = "failed"
             row.error_message = str(exc)[:4000]
             row.is_active = False
             db.commit()
-            _notify_banner_error(db, row, reason=str(exc))
+            if notify_admin:
+                _notify_banner_error(db, row, reason=str(exc))
+        except Exception:
+            logger.exception("Không ghi được trạng thái failed cho banner %s", key)
+            safe_rollback(db)
         logger.exception("Tạo banner %s thất bại", key)
         raise
 
