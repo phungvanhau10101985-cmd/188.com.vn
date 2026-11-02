@@ -47,6 +47,7 @@ export default function AdminHolidayThemePage() {
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewLeft, setPreviewLeft] = useState(0);
   const [previewHref, setPreviewHref] = useState<string | null>(null);
+  const [bannerWorking, setBannerWorking] = useState<string | null>(null);
   const releasedServerPreview = useRef(false);
 
   const apply = useCallback((data: HolidayThemeAdminState) => {
@@ -156,6 +157,32 @@ export default function AdminHolidayThemePage() {
     setDrafts((prev) => ({ ...prev, [code]: { ...prev[code], ...patch } }));
   };
 
+  const generatingAny = (state?.occasions ?? []).some((row) => row.banner_status === 'generating');
+
+  useEffect(() => {
+    if (!generatingAny) return;
+    const timer = window.setInterval(() => {
+      void adminHolidayThemeAPI.get().then(apply).catch(() => undefined);
+    }, 8000);
+    return () => window.clearInterval(timer);
+  }, [apply, generatingAny]);
+
+  const generateBanners = async (code?: string, force = false) => {
+    if (bannerWorking) return;
+    setBannerWorking(code ?? 'all');
+    setNotice(null);
+    setError(null);
+    try {
+      const res = await adminHolidayThemeAPI.generateBanners(code ? { code, force } : { force });
+      setNotice(res.message);
+      apply(await adminHolidayThemeAPI.get());
+    } catch (e) {
+      setError((e as Error)?.message || 'Không tạo được banner');
+    } finally {
+      setBannerWorking(null);
+    }
+  };
+
   const save = async (row: HolidayOccasionAdmin, extra?: { enabled: boolean }) => {
     const draft = drafts[row.code];
     if (!draft || savingId) return;
@@ -202,10 +229,23 @@ export default function AdminHolidayThemePage() {
     <div className="mx-auto max-w-4xl p-4 sm:p-6">
       <h1 className="text-xl font-bold text-gray-900">Giao diện ngày lễ</h1>
       <p className="mt-1 text-sm text-gray-600">
-        Mỗi dịp chỉ lưu ngày và tháng, dùng lại mọi năm. Âm lịch tự đổi sang ngày dương của năm đó.
-        Nếu Tết bật quá dài và đè lên ngày Ông Táo, đúng ngày Ông Táo sẽ hiện giao diện Ông Táo, hết
-        ngày đó thì quay lại Tết.
+        Tự bật trước và sale giống sale cùng ngày cùng tháng: lưu ngày/tháng, lặp mỗi năm. Ngày bật /
+        ngày tắt chỉnh tay bằng ngày lễ và số ngày trước/sau. Banner GPT chỉ ghi tên dịp, không ghi
+        ngày tháng — dùng lại các năm. Âm lịch tự đổi sang dương lịch năm đó.
       </p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={Boolean(bannerWorking) || generatingAny}
+          onClick={() => void generateBanners()}
+          className="rounded-lg bg-[#9f1239] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+        >
+          {bannerWorking === 'all' || generatingAny ? 'Đang tạo banner GPT…' : 'Tạo tất cả banner GPT'}
+        </button>
+        <p className="text-xs text-gray-500">
+          Một lượt đủ 16 dịp. Ảnh sẵn giữ lại; muốn vẽ lại từng dịp thì bấm Tạo lại trên thẻ đó.
+        </p>
+      </div>
       {state?.schedule_note ? (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">{state.schedule_note}</p>
       ) : null}
@@ -249,7 +289,8 @@ export default function AdminHolidayThemePage() {
                       {row.calendar_label} · {row.summary}
                     </p>
                     <p className="mt-1 text-xs text-gray-600">
-                      {row.solar_label}. Ô năm tự đổi theo năm của dịp lễ, không lưu số năm.
+                      {row.solar_label}. Năm nay bật {row.window_on_label || '—'}, tắt{' '}
+                      {row.window_off_label || '—'}. Đổi ngày/tháng hoặc số ngày trước/sau để chỉnh tay.
                     </p>
                     <button
                       type="button"
@@ -306,10 +347,16 @@ export default function AdminHolidayThemePage() {
                     <label className="text-xs text-gray-600">
                       Số ngày bật trước
                       <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.lead_days} onChange={(e) => patchDraft(row.code, { lead_days: e.target.value })} />
+                      {row.window_on_label ? (
+                        <span className="mt-1 block text-[11px] text-gray-500">Ngày bật: {row.window_on_label}</span>
+                      ) : null}
                     </label>
                     <label className="text-xs text-gray-600">
-                      Số ngày giữ sau lễ
+                      Số ngày tắt sau lễ
                       <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.after_days} onChange={(e) => patchDraft(row.code, { after_days: e.target.value })} />
+                      {row.window_off_label ? (
+                        <span className="mt-1 block text-[11px] text-gray-500">Ngày tắt: {row.window_off_label}</span>
+                      ) : null}
                     </label>
                     <label className="text-xs text-gray-600">
                       % sale
@@ -322,6 +369,41 @@ export default function AdminHolidayThemePage() {
                     </div>
                   </div>
                 ) : null}
+                <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-gray-700">
+                      Banner {row.banner_headline || row.name}
+                      {row.banner_status ? (
+                        <span className="ml-2 font-normal text-gray-500">· {row.banner_status}</span>
+                      ) : (
+                        <span className="ml-2 font-normal text-gray-500">· chưa có ảnh</span>
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={Boolean(bannerWorking) || row.banner_status === 'generating'}
+                      onClick={() => void generateBanners(row.code, Boolean(row.banner_url))}
+                      className="rounded-lg border border-[#9f1239] px-3 py-1.5 text-xs font-medium text-[#9f1239] disabled:opacity-50"
+                    >
+                      {row.banner_status === 'generating' || bannerWorking === row.code
+                        ? 'Đang tạo…'
+                        : row.banner_url
+                          ? 'Tạo lại banner'
+                          : 'Tạo banner GPT'}
+                    </button>
+                  </div>
+                  {row.banner_url ? (
+                    <img
+                      src={row.banner_url}
+                      alt={`Banner ${row.name}`}
+                      className="mt-2 h-auto w-full rounded-lg border border-gray-200"
+                    />
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-500">
+                      {row.banner_error || 'Chưa có banner. Tạo một lượt ở trên hoặc tạo riêng dịp này.'}
+                    </p>
+                  )}
+                </div>
               </li>
             );
           })}

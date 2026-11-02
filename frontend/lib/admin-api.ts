@@ -3399,6 +3399,12 @@ export interface HolidayOccasionAdmin {
   solar_label: string;
   start_year: number | null;
   end_year: number | null;
+  window_on_label?: string;
+  window_off_label?: string;
+  banner_headline?: string;
+  banner_url?: string | null;
+  banner_status?: string | null;
+  banner_error?: string | null;
   showing_today: boolean;
 }
 
@@ -3436,6 +3442,11 @@ export const adminHolidayThemeAPI = {
   clearPreview: () =>
     fetchAdmin<{ ok: boolean }>('/admin/holiday-theme/preview', {
       method: 'DELETE',
+    }),
+  generateBanners: (body?: { code?: string; force?: boolean }) =>
+    fetchAdmin<{ accepted: boolean; message: string }>('/admin/holiday-theme/banners', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
     }),
 };
 
@@ -4726,7 +4737,7 @@ export const adminSaleCalendarAPI = {
     }),
 };
 
-export type AdminMarketingBannerKind = 'sale' | 'birthday' | 'warehouse';
+export type AdminMarketingBannerKind = 'sale' | 'birthday' | 'warehouse' | 'holiday';
 
 export type AdminMarketingBannerAsset = {
   id: number;
@@ -4794,10 +4805,16 @@ export const adminMarketingBannerAPI = {
     day?: number;
     month?: number;
     discount_percent?: number;
+    code?: string;
   }) =>
     fetchAdmin<{ accepted: boolean; message: string }>('/marketing-banners/admin/regenerate', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+  regenerateHolidays: (force?: boolean) =>
+    fetchAdmin<{ accepted: boolean; message: string }>('/marketing-banners/admin/regenerate-holidays', {
+      method: 'POST',
+      body: JSON.stringify({ force: Boolean(force) }),
     }),
   activate: (assetId: number) =>
     fetchAdmin<AdminMarketingBannerAsset>(

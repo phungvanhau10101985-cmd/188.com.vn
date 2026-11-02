@@ -17,6 +17,7 @@ function defaultDateKey() {
 function kindLabel(kind: AdminMarketingBannerKind | string) {
   if (kind === 'birthday') return 'Sinh nhật';
   if (kind === 'warehouse') return 'Sale kho';
+  if (kind === 'holiday') return 'Ngày lễ';
   return 'Sale';
 }
 

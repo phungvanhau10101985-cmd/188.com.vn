@@ -109,6 +109,7 @@ export default function MarketingBannerCarousel({ refreshKey, initialItems = nul
   const bannerAriaLabel = (item: MarketingBannerItem) => {
     if (item.kind === 'birthday') return `${BIRTHDAY_PROGRAM_NAME} giảm ${item.discount_percent}%`;
     if (item.kind === 'warehouse') return `${WAREHOUSE_SALE_PROGRAM_NAME} giảm ${item.discount_percent}%`;
+    if (item.kind === 'holiday') return item.greeting || 'Ưu đãi ngày lễ';
     return `${calendarSaleProgramLabel(null, { event_date: item.date_key, event_label: item.date_key })} giảm ${item.discount_percent}%`;
   };
 
@@ -118,6 +119,9 @@ export default function MarketingBannerCarousel({ refreshKey, initialItems = nul
     }
     if (item.kind === 'warehouse') {
       return `Banner ${WAREHOUSE_SALE_PROGRAM_NAME}, giảm ${item.discount_percent}%`;
+    }
+    if (item.kind === 'holiday') {
+      return `Banner ${item.greeting || 'ngày lễ'}`;
     }
     return `Banner ${calendarSaleProgramLabel(null, { event_date: item.date_key, event_label: item.date_key })}, giảm ${item.discount_percent}%`;
   };

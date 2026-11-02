@@ -81,6 +81,53 @@ def _catalog() -> tuple[HolidayRule, ...]:
 
 CATALOG: dict[str, HolidayRule] = {row.code: row for row in _catalog()}
 
+# Chữ trên banner: chỉ tên dịp, không ngày/tháng/năm — dùng lại mọi năm.
+BANNER_HEADLINES: dict[str, str] = {
+    "duong-lich": "SALE TẾT DƯƠNG",
+    "tao-quan": "SALE ÔNG TÁO",
+    "tet": "SALE TẾT",
+    "valentine": "SALE VALENTINE",
+    "nguyen-tieu": "SALE NGUYÊN TIÊU",
+    "phu-nu-83": "SALE PHỤ NỮ",
+    "gio-to": "SALE GIỖ TỔ",
+    "dai-le": "SALE ĐẠI LỄ",
+    "thieu-nhi": "SALE THIẾU NHI",
+    "doan-ngo": "SALE ĐOAN NGỌ",
+    "vu-lan": "SALE VU LAN",
+    "quoc-khanh": "SALE QUỐC KHÁNH",
+    "trung-thu": "SALE TRUNG THU",
+    "phu-nu-2010": "SALE PHỤ NỮ VIỆT NAM",
+    "nha-giao": "SALE NHÀ GIÁO",
+    "giang-sinh": "SALE GIÁNG SINH",
+}
+
+BANNER_ART: dict[str, str] = {
+    "duong-lich": "đồng hồ năm mới, confetti navy",
+    "tao-quan": "cá chép, lửa bếp, sắc cam",
+    "tet": "hoa mai đào, lì xì đỏ vàng",
+    "valentine": "hoa hồng, quà tặng, sắc hồng",
+    "nguyen-tieu": "đèn lồng, trăng rằm",
+    "phu-nu-83": "hoa tươi, quà, sắc hồng",
+    "gio-to": "hương khói, sắc vàng đồng",
+    "dai-le": "cờ đỏ sao vàng, năng lượng lễ",
+    "thieu-nhi": "bóng bay, vui nhộn, xanh trời",
+    "doan-ngo": "lá xanh, giữa năm",
+    "vu-lan": "sen tím, ấm gia đình",
+    "quoc-khanh": "cờ đỏ, tự hào",
+    "trung-thu": "đèn ông sao, trăng, bánh",
+    "phu-nu-2010": "hoa hồng, duyên dáng",
+    "nha-giao": "hoa cúc, sách, xanh dương",
+    "giang-sinh": "thông Noel, đèn ấm, đỏ xanh",
+}
+
+
+def banner_headline(code: str) -> str:
+    return BANNER_HEADLINES.get(code, "SALE NGÀY LỄ")
+
+
+def banner_art_direction(code: str) -> str:
+    return BANNER_ART.get(code, "lễ hội thời trang cao cấp")
+
 
 def valid_month_day(kind: CalendarKind, month: int, day: int) -> bool:
     if not 1 <= month <= 12:

@@ -321,17 +321,46 @@ def merged_rules(db: Optional[Session]):
 
 def admin_theme_out(db: Session, today: Optional[date] = None):
     from app.schemas.holiday_theme import HolidayOccasionOut, HolidayThemeAdminOut
-    from app.services.holiday_schedule import next_core, resolve_visible_holiday
+    from app.services.holiday_schedule import banner_headline, next_core, resolve_visible_holiday
 
     current = today or vn_today()
     rules = merged_rules(db)
     visible = resolve_visible_holiday(rules, current)
+    banners: dict[str, Any] = {}
+    try:
+        from app.models.marketing_banner import MarketingBannerAsset
+        from app.services.marketing_banner import holiday_code_from_campaign_key
+
+        rows = (
+            db.query(MarketingBannerAsset)
+            .filter(MarketingBannerAsset.kind == "holiday")
+            .order_by(MarketingBannerAsset.version.desc(), MarketingBannerAsset.id.desc())
+            .all()
+        )
+        for row in rows:
+            code = holiday_code_from_campaign_key(row.campaign_key)
+            if not code or code in banners:
+                continue
+            banners[code] = row
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        banners = {}
     occasions = []
     for rule in rules:
         span = next_core(rule, current)
         solar_label = f"Năm {span[0].year}" if span else "Chưa tính được năm"
         if span and span[0].year != span[1].year:
             solar_label = f"Năm {span[0].year}–{span[1].year}"
+        window_on = ""
+        window_off = ""
+        if span is not None:
+            lead = max(0, min(60, int(rule.lead_days or 0)))
+            after = max(0, min(60, int(rule.after_days or 0)))
+            window_on = _fmt_vi(span[0] - timedelta(days=lead))
+            window_off = _fmt_vi(span[1] + timedelta(days=after))
         occasions.append(
             HolidayOccasionOut(
                 code=rule.code,
@@ -352,6 +381,12 @@ def admin_theme_out(db: Session, today: Optional[date] = None):
                 solar_label=solar_label,
                 start_year=span[0].year if span else None,
                 end_year=span[1].year if span else None,
+                window_on_label=window_on,
+                window_off_label=window_off,
+                banner_headline=banner_headline(rule.code),
+                banner_url=getattr(banners.get(rule.code), "image_url", None),
+                banner_status=getattr(banners.get(rule.code), "status", None),
+                banner_error=getattr(banners.get(rule.code), "error_message", None),
                 showing_today=bool(visible and visible.code == rule.code),
             )
         )

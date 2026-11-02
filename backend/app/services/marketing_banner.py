@@ -40,8 +40,9 @@ ASPECT_RATIO = "21:9"
 # Banner vẽ 2K (~3168px) nhưng ô web tối đa ~1200px CSS. Giữ q90, chỉ hạ pixel khi vượt 1600.
 WEB_BANNER_MAX_WIDTH = 1600
 WEB_BANNER_JPEG_QUALITY = 90
-BANNER_KINDS = ("sale", "birthday", "warehouse")
+BANNER_KINDS = ("sale", "birthday", "warehouse", "holiday")
 WAREHOUSE_DATE_KEY = "kho"
+HOLIDAY_DATE_KEY = "le"
 MAX_BANNER_CREATE_ATTEMPTS = 3
 ADMIN_NOTIFIED_MARKER = "[đã báo admin]"
 
@@ -51,10 +52,29 @@ def _pct_key(value: float | Decimal) -> str:
     return normalized.replace(".", "_")
 
 
-def campaign_key(kind: str, day: int, month: int, discount_percent: float) -> str:
+def campaign_key(
+    kind: str,
+    day: int,
+    month: int,
+    discount_percent: float,
+    occasion_code: Optional[str] = None,
+) -> str:
     if kind == "warehouse":
         return f"warehouse-p{_pct_key(discount_percent)}"
+    if kind == "holiday":
+        code = re.sub(r"[^a-z0-9-]+", "-", (occasion_code or "").strip().lower()).strip("-")
+        if not code:
+            raise ValueError("Banner ngày lễ cần mã dịp")
+        return f"holiday-{code}"
     return f"{kind}-{month:02d}-{day:02d}-p{_pct_key(discount_percent)}"
+
+
+def holiday_code_from_campaign_key(key: str) -> Optional[str]:
+    raw = (key or "").strip().lower()
+    if not raw.startswith("holiday-"):
+        return None
+    code = raw[len("holiday-") :]
+    return code or None
 
 
 def _display_pct(value: float | Decimal) -> str:
@@ -79,10 +99,17 @@ def _fallback_dynamic_copy(
         ("Thanh lý gấp - deal lớn trao tay", "MUA NGAY HÔM NAY", "kho hàng rực lửa, sản phẩm phát sáng"),
         ("Kho xả giá mạnh - bỏ lỡ tiếc lâu", "VÀO KHO SALE", "sân khấu cam đỏ, tương phản cực mạnh"),
     ]
+    holiday_options = [
+        ("Dịp lễ rộn ràng - chọn đồ mới ngay", "SĂN DEAL LỄ", "lễ hội thời trang, ánh sáng ấm"),
+        ("Ưu đãi ngày lễ - chốt liền hôm nay", "MUA NGAY", "sân khấu lễ hội, sản phẩm nổi"),
+        ("Mùa lễ đang về - sắm đồ kịp lúc", "VÀO SHOP NGAY", "editorial lễ hội, tương phản mạnh"),
+    ]
     if kind == "birthday":
         options = birthday_options
     elif kind == "warehouse":
         options = warehouse_options
+    elif kind == "holiday":
+        options = holiday_options
     else:
         options = sale_options
     verse, cta, art_direction = options[(day + month + version) % len(options)]
@@ -98,11 +125,20 @@ def generate_dynamic_copy(
     month: int,
     discount_percent: float,
     version: int,
+    occasion_code: Optional[str] = None,
+    occasion_name: Optional[str] = None,
 ) -> Dict[str, str]:
     """Gemini text sáng tác copy mới; ngày và % vẫn do hệ thống khóa ở headline."""
     fallback = _fallback_dynamic_copy(
         kind=kind, day=day, month=month, version=version
     )
+    if kind == "holiday":
+        from app.services.holiday_schedule import banner_art_direction
+
+        fallback = {
+            **fallback,
+            "art_direction": banner_art_direction(occasion_code or ""),
+        }
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if not api_key:
         return fallback
@@ -113,6 +149,12 @@ def generate_dynamic_copy(
         campaign = f"sale ngày trùng tháng {day}.{month}, giảm thật {pct}"
     elif kind == "warehouse":
         campaign = f"sale kho thanh lý, giảm thật {pct}, hàng hoàn trong kho"
+    elif kind == "holiday":
+        holiday_name = (occasion_name or "ngày lễ").strip()
+        campaign = (
+            f"dịp {holiday_name}. Chỉ nhắc tên dịp lễ, tuyệt đối không viết ngày, tháng, năm "
+            "hay số ngày"
+        )
     else:
         campaign = f"sinh nhật khách ngày {label}, quà giảm giá {pct}"
     prompt = (
@@ -170,6 +212,8 @@ def build_banner_prompt(
     month: int,
     discount_percent: float,
     copy: Optional[Dict[str, str]] = None,
+    occasion_code: Optional[str] = None,
+    occasion_name: Optional[str] = None,
 ) -> str:
     label = f"{day:02d}/{month:02d}"
     pct = _display_pct(discount_percent)
@@ -202,6 +246,20 @@ def build_banner_prompt(
             "Banner sale kho phải cực ấn tượng, chuyển đổi cao: nền đỏ-cam rực, tia lửa, "
             "ánh sáng xuyên tâm, cảm giác cháy hàng và khẩn cấp. Xếp túi xách, giày, "
             "đồng hồ, áo vest quanh chữ lớn, mỗi món có viền lửa/phát sáng. Không ghi ngày tháng."
+        )
+    if kind == "holiday":
+        from app.services.holiday_schedule import banner_headline
+
+        headline = banner_headline(occasion_code or "")
+        name = (occasion_name or "ngày lễ").strip()
+        return shared + (
+            f'Bắt buộc ghi nguyên văn: "{headline}". '
+            f'Ghi nguyên văn câu sáng tác mới: "{verse}". '
+            f'Nút CTA ghi nguyên văn: "{cta}". '
+            f"Định hướng mỹ thuật cho dịp {name}: {art_direction}. "
+            "Chỉ nhắc tên dịp lễ. Cấm ghi ngày, tháng, năm, số ngày "
+            "(không viết dạng ngày/tháng như lễ 8 tháng 3 hay Noel 24 tháng 12). "
+            "Không ghi phần trăm giảm. Dùng hình thời trang, quà, không watermark."
         )
     return shared + (
         f'Bắt buộc ghi nguyên văn: "MỪNG SINH NHẬT {label} - TẶNG {pct}". '
@@ -272,6 +330,109 @@ def _probe_bunny_before_image(*, kind: str, key: str, version: int) -> None:
     finally:
         if uploaded:
             _delete_bunny_probe(zone, access_key, remote_path)
+
+
+def crop_to_banner_aspect(data: bytes, ratio_w: int = 21, ratio_h: int = 9) -> bytes:
+    """Cắt giữa ảnh về 21:9 trước khi thu về kích thước web."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                return data
+            target = ratio_w / ratio_h
+            current = width / height
+            if abs(current - target) < 0.02:
+                return data
+            if current > target:
+                new_w = max(1, round(height * target))
+                left = max(0, (width - new_w) // 2)
+                cropped = image.crop((left, 0, left + new_w, height))
+            else:
+                new_h = max(1, round(width / target))
+                top = max(0, (height - new_h) // 2)
+                cropped = image.crop((0, top, width, top + new_h))
+            buf = io.BytesIO()
+            cropped.convert("RGB").save(buf, format="JPEG", quality=WEB_BANNER_JPEG_QUALITY, optimize=True)
+            return buf.getvalue()
+    except Exception:
+        logger.warning("Không cắt được banner về 21:9, giữ file gốc", exc_info=True)
+        return data
+
+
+def gpt_generate_image_from_text(prompt: str) -> bytes:
+    """Text → ảnh GPT Image (OpenAI /v1/images/generations)."""
+    import base64
+
+    key = (getattr(settings, "OPENAI_API_KEY", "") or "").strip()
+    if len(key) < 10:
+        raise RuntimeError("Thiếu OPENAI_API_KEY cho banner ngày lễ.")
+    model = (
+        getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
+    ).strip() or "gpt-image-2"
+    timeout = max(60, int(getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_TIMEOUT_SEC", 300) or 300))
+    quality = (
+        getattr(settings, "IMAGE_LOCALIZATION_OPENAI_DEFAULT_IMAGE_QUALITY", "") or "high"
+    ).strip() or "high"
+    payload: Dict[str, Any] = {
+        "model": model,
+        "prompt": prompt.strip(),
+        "n": 1,
+        "size": "1536x1024",
+        "quality": quality if quality in ("high", "medium", "low", "auto") else "high",
+    }
+    response = requests.post(
+        "https://api.openai.com/v1/images/generations",
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=timeout,
+    )
+    if response.status_code != 200:
+        detail = (response.text or "")[:800]
+        try:
+            err_obj = response.json().get("error") or {}
+            if isinstance(err_obj, dict) and err_obj.get("message"):
+                detail = str(err_obj.get("message"))[:800]
+        except Exception:
+            pass
+        raise RuntimeError(f"OpenAI images/generations HTTP {response.status_code}: {detail}")
+    rows = response.json().get("data") or []
+    if not rows:
+        raise RuntimeError("OpenAI không trả data ảnh.")
+    b64 = rows[0].get("b64_json")
+    if not b64:
+        raise RuntimeError("OpenAI không trả b64_json (kiểm tra model GPT Image).")
+    return base64.b64decode(b64)
+
+
+def _render_banner_pixels(prompt: str, *, kind: str) -> tuple[bytes, str, str]:
+    """Sinh pixel banner. Ngày lễ ưu tiên GPT; lỗi thì Gemini 21:9."""
+    gemini_model = (
+        getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
+        or "gemini-3-pro-image-preview"
+    ).strip()
+    if kind == "holiday":
+        gpt_model = (
+            getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
+        ).strip() or "gpt-image-2"
+        try:
+            raw = gpt_generate_image_from_text(prompt)
+            return crop_to_banner_aspect(raw), "openai", gpt_model
+        except Exception as exc:
+            logger.warning("GPT banner lễ lỗi, dùng Gemini: %s", exc)
+            raw = gemini_generate_image_from_text(
+                prompt,
+                image_model=gemini_model,
+                image_size="2K",
+                aspect_ratio=ASPECT_RATIO,
+            )
+            return raw, "gemini", gemini_model
+    raw = gemini_generate_image_from_text(
+        prompt,
+        image_model=gemini_model,
+        image_size="2K",
+        aspect_ratio=ASPECT_RATIO,
+    )
+    return raw, "gemini", gemini_model
 
 
 def fit_banner_bytes(data: bytes) -> bytes:
@@ -428,6 +589,108 @@ def find_active_asset(
     )
 
 
+def find_active_holiday_asset(db: Session, occasion_code: str) -> Optional[MarketingBannerAsset]:
+    key = campaign_key("holiday", 0, 0, 0, occasion_code=occasion_code)
+    return (
+        db.query(MarketingBannerAsset)
+        .filter(
+            MarketingBannerAsset.kind == "holiday",
+            MarketingBannerAsset.campaign_key == key,
+            MarketingBannerAsset.status == "ready",
+            MarketingBannerAsset.is_active.is_(True),
+        )
+        .order_by(MarketingBannerAsset.version.desc())
+        .first()
+    )
+
+
+def upcoming_holiday_codes(db: Session, today: date, ahead_days: int = 14) -> list[str]:
+    """Dịp lễ đang hiện hoặc sắp vào cửa sổ trong `ahead_days` ngày."""
+    from app.crud.holiday_theme import merged_rules
+    from app.services.holiday_schedule import next_core
+
+    codes: list[str] = []
+    try:
+        rules = merged_rules(db)
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return codes
+    for rule in rules:
+        if not rule.enabled:
+            continue
+        span = next_core(rule, today)
+        if span is None:
+            continue
+        lead = max(0, min(60, int(rule.lead_days or 0)))
+        after = max(0, min(60, int(rule.after_days or 0)))
+        window_start = span[0] - timedelta(days=lead)
+        window_end = span[1] + timedelta(days=after)
+        if today <= window_end and window_start <= today + timedelta(days=ahead_days):
+            codes.append(rule.code)
+    return codes
+
+
+def generate_all_holiday_banners(
+    db: Session,
+    *,
+    force: bool = False,
+    notify_admin: bool = False,
+) -> Dict[str, Any]:
+    """Tạo đủ banner mọi dịp lễ. Ảnh cũ ready được giữ nếu không force."""
+    from app.services.holiday_schedule import CATALOG
+
+    stats = _empty_kind_stats()
+    items: list[Dict[str, Any]] = []
+    for rule in CATALOG.values():
+        key = campaign_key("holiday", 0, 0, 0, occasion_code=rule.code)
+        if not force:
+            existing = find_active_holiday_asset(db, rule.code)
+            if existing:
+                stats["reused"] += 1
+                items.append({"code": rule.code, "status": "ready", "id": existing.id})
+                continue
+            generating = _find_generating_asset(db, kind="holiday", key=key)
+            if generating and not _is_stale_generating(generating):
+                stats["pending"] += 1
+                items.append({"code": rule.code, "status": "generating", "id": generating.id})
+                continue
+        try:
+            row = generate_banner(
+                db,
+                kind="holiday",
+                occasion_code=rule.code,
+                discount_percent=float(rule.sale_percent or 0),
+                force=force,
+                notify_admin=notify_admin,
+            )
+            status = getattr(row, "status", None) or "pending"
+            if status == "ready":
+                stats["created"] += 1
+            else:
+                stats["pending"] += 1
+            items.append({"code": rule.code, "status": status, "id": getattr(row, "id", None)})
+        except Exception as exc:
+            stats["failed"] += 1
+            items.append({"code": rule.code, "status": "failed", "error": str(exc)[:300]})
+            logger.exception("Tạo banner dịp lễ %s thất bại", rule.code)
+    return {"holiday": stats, "items": items}
+
+
+def generate_all_holiday_banners_job(*, force: bool = False) -> None:
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        generate_all_holiday_banners(db, force=force, notify_admin=False)
+    except Exception:
+        logger.exception("Tạo hàng loạt banner ngày lễ thất bại")
+    finally:
+        db.close()
+
+
 def find_active_warehouse_asset(
     db: Session,
     discount_percent: float,
@@ -582,7 +845,7 @@ def _send_banner_error_email(db: Session, row: MarketingBannerAsset, *, reason: 
     current = row.error_message or ""
     if ADMIN_NOTIFIED_MARKER in current:
         return
-    title = {"birthday": "sinh nhật", "warehouse": "sale kho"}.get(row.kind, "sale")
+    title = {"birthday": "sinh nhật", "warehouse": "sale kho", "holiday": "ngày lễ"}.get(row.kind, "sale")
     admin_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/admin/promotions#ai-banners"
     reason_text = (reason or current or "Không tạo được ảnh.").strip()
     if ADMIN_NOTIFIED_MARKER in reason_text:
@@ -627,7 +890,7 @@ def _admin_preview_email(db: Session, row: MarketingBannerAsset) -> None:
     if not recipients:
         return
     admin_url = f"{settings.FRONTEND_BASE_URL.rstrip('/')}/admin/promotions#ai-banners"
-    title = {"birthday": "sinh nhật", "warehouse": "sale kho"}.get(row.kind, "sale")
+    title = {"birthday": "sinh nhật", "warehouse": "sale kho", "holiday": "ngày lễ"}.get(row.kind, "sale")
     subject = f"[188.com.vn] Banner {title} {row.date_key} vừa được tạo"
     safe_url = html.escape(row.image_url or "", quote=True)
     body = (
@@ -722,24 +985,40 @@ def generate_banner(
     db: Session,
     *,
     kind: str,
-    day: int,
-    month: int,
-    discount_percent: float,
+    day: int = 0,
+    month: int = 0,
+    discount_percent: float = 0,
+    occasion_code: Optional[str] = None,
     force: bool = False,
     notify_admin: bool = True,
 ) -> MarketingBannerAsset:
     if kind not in BANNER_KINDS:
-        raise ValueError("kind phải là sale, birthday hoặc warehouse")
+        raise ValueError("kind phải là sale, birthday, warehouse hoặc holiday")
     if kind == "warehouse" and float(discount_percent) <= 0:
         raise ValueError("Banner sale kho chỉ tạo khi giảm giá lớn hơn 0%.")
-    key = campaign_key(kind, day, month, discount_percent)
+    holiday_name = None
+    if kind == "holiday":
+        from app.services.holiday_schedule import CATALOG
+
+        code = (occasion_code or "").strip().lower()
+        if code not in CATALOG:
+            raise ValueError("Dịp lễ không có trong danh sách")
+        occasion_code = code
+        holiday_name = CATALOG[code].name
+        discount_percent = float(discount_percent or CATALOG[code].sale_percent or 0)
+        day, month = 0, 0
+    key = campaign_key(kind, day, month, discount_percent, occasion_code=occasion_code)
     if not force:
-        existing = find_active_asset(
-            db,
-            kind=kind,
-            day=day,
-            month=month,
-            discount_percent=discount_percent,
+        existing = (
+            find_active_holiday_asset(db, occasion_code)
+            if kind == "holiday"
+            else find_active_asset(
+                db,
+                kind=kind,
+                day=day,
+                month=month,
+                discount_percent=discount_percent,
+            )
         )
         if existing:
             return existing
@@ -776,10 +1055,26 @@ def generate_banner(
         .first()
     )
     version = int(latest.version if latest else 0) + 1
-    model = (
-        getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
-        or "gemini-3-pro-image-preview"
-    ).strip()
+    if kind == "holiday":
+        model = (
+            getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
+        ).strip() or "gpt-image-2"
+        provider = "openai"
+        date_key = HOLIDAY_DATE_KEY
+    elif kind == "warehouse":
+        model = (
+            getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
+            or "gemini-3-pro-image-preview"
+        ).strip()
+        provider = "gemini"
+        date_key = WAREHOUSE_DATE_KEY
+    else:
+        model = (
+            getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
+            or "gemini-3-pro-image-preview"
+        ).strip()
+        provider = "gemini"
+        date_key = f"{month:02d}-{day:02d}"
     # Nhả connection trước Gemini text — tránh idle-in-transaction timeout ~35s.
     db.commit()
     dynamic_copy = generate_dynamic_copy(
@@ -788,6 +1083,8 @@ def generate_banner(
         month=month,
         discount_percent=discount_percent,
         version=version,
+        occasion_code=occasion_code,
+        occasion_name=holiday_name,
     )
     prompt = build_banner_prompt(
         kind=kind,
@@ -795,13 +1092,16 @@ def generate_banner(
         month=month,
         discount_percent=discount_percent,
         copy=dynamic_copy,
+        occasion_code=occasion_code,
+        occasion_name=holiday_name,
     )
     row = MarketingBannerAsset(
         kind=kind,
         campaign_key=key,
-        date_key=WAREHOUSE_DATE_KEY if kind == "warehouse" else f"{month:02d}-{day:02d}",
+        date_key=date_key,
         discount_percent=discount_percent,
         prompt=prompt,
+        provider=provider,
         model=model,
         version=version,
         status="generating",
@@ -828,13 +1128,8 @@ def generate_banner(
 
     try:
         _probe_bunny_before_image(kind=kind, key=key, version=version)
-        # Không refresh/giữ transaction lúc gọi Gemini ảnh (30–120s).
-        raw = gemini_generate_image_from_text(
-            prompt,
-            image_model=model,
-            image_size="2K",
-            aspect_ratio=ASPECT_RATIO,
-        )
+        # Không refresh/giữ transaction lúc gọi model ảnh (30–120s).
+        raw, provider_used, model_used = _render_banner_pixels(prompt, kind=kind)
         fitted = fit_banner_bytes(raw)
         width, height, _ = _image_dimensions(fitted)
         image_url = _upload_banner(fitted, kind=kind, key=key, version=version)
@@ -855,6 +1150,8 @@ def generate_banner(
         row.image_url = image_url
         row.image_width = width
         row.image_height = height
+        row.provider = provider_used
+        row.model = model_used
         row.status = "ready"
         row.is_active = True
         row.generated_at = datetime.now(timezone.utc)
@@ -946,6 +1243,7 @@ def ensure_daily_banners(
         "birthday": _empty_kind_stats(),
         "sale": _empty_kind_stats(),
         "warehouse": _empty_kind_stats(extra={"skipped": 0}),
+        "holiday": _empty_kind_stats(extra={"skipped": 0}),
         "sale_icons": _empty_kind_stats(extra={"skipped": 0}),
     }
     budget = max(0, int(max_create))
@@ -1035,6 +1333,39 @@ def ensure_daily_banners(
         result["warehouse"]["skipped"] += 1
     else:
         _try_create("warehouse", 0, 0, float(warehouse_pct), "warehouse")
+
+    holiday_codes = upcoming_holiday_codes(db, current)
+    if not holiday_codes:
+        result["holiday"]["skipped"] += 1
+    else:
+        from app.services.holiday_schedule import CATALOG
+
+        for code in holiday_codes:
+            rule = CATALOG.get(code)
+            if rule is None:
+                continue
+            existing = find_active_holiday_asset(db, code)
+            if existing:
+                result["holiday"]["reused"] += 1
+                continue
+            if budget <= 0:
+                result["holiday"]["pending"] += 1
+                continue
+            try:
+                row = generate_banner(
+                    db,
+                    kind="holiday",
+                    occasion_code=code,
+                    discount_percent=float(rule.sale_percent or 0),
+                    notify_admin=notify_admin,
+                )
+                if getattr(row, "status", None) == "ready":
+                    result["holiday"]["created"] += 1
+                else:
+                    result["holiday"]["pending"] += 1
+            except Exception:
+                result["holiday"]["failed"] += 1
+            budget -= 1
 
     from app.services.marketing_icon import ensure_daily_sale_icons
 

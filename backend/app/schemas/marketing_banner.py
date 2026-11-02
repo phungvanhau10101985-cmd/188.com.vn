@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class MarketingBannerItem(BaseModel):
     id: int
-    kind: Literal["sale", "birthday", "warehouse"]
+    kind: Literal["sale", "birthday", "warehouse", "holiday"]
     campaign_key: str
     date_key: str
     discount_percent: float
@@ -47,7 +47,12 @@ class MarketingBannerAdminListResponse(BaseModel):
 
 
 class MarketingBannerRegenerateRequest(BaseModel):
-    kind: Literal["sale", "birthday", "warehouse"]
+    kind: Literal["sale", "birthday", "warehouse", "holiday"]
     day: Optional[int] = Field(None, ge=1, le=31)
     month: Optional[int] = Field(None, ge=1, le=12)
     discount_percent: Optional[float] = Field(None, ge=0.5, le=80)
+    code: Optional[str] = Field(None, max_length=32)
+
+
+class MarketingBannerHolidayBatchRequest(BaseModel):
+    force: bool = False

@@ -14,6 +14,7 @@ from app.schemas.marketing_banner import (
     MarketingBannerAdminItem,
     MarketingBannerAdminListResponse,
     MarketingBannerCurrentResponse,
+    MarketingBannerHolidayBatchRequest,
     MarketingBannerItem,
     MarketingBannerRegenerateRequest,
 )
@@ -100,6 +101,38 @@ def current_marketing_banners(
                 )
             )
 
+    holiday_code = None
+    holiday_name = None
+    holiday_event_date = None
+    try:
+        from app.crud.holiday_theme import merged_rules, vn_today
+        from app.services.holiday_preview_grant import holiday_preview_for_shop_user
+        from app.services.holiday_schedule import CATALOG, resolve_visible_holiday
+
+        if current_user is not None:
+            preview = holiday_preview_for_shop_user(db, current_user)
+            if preview is not None:
+                holiday_code = preview[0]
+        if holiday_code is None:
+            visible = resolve_visible_holiday(merged_rules(db), vn_today())
+            if visible is not None:
+                holiday_code = visible.code
+                holiday_event_date = visible.core_start
+        if holiday_code and holiday_code in CATALOG:
+            holiday_name = CATALOG[holiday_code].name
+            holiday_asset = banner_svc.find_active_holiday_asset(db, holiday_code)
+            holiday_asset = banner_svc.ensure_banner_web_size(db, holiday_asset)
+            if holiday_asset and holiday_asset.image_url:
+                items.append(
+                    _public_item(
+                        holiday_asset,
+                        event_date=holiday_event_date.isoformat() if holiday_event_date else None,
+                        greeting=holiday_name,
+                    )
+                )
+    except Exception:
+        holiday_code = None
+
     sale = sale_svc.resolve_sale_calendar_state(db, user=current_user)
     if (
         getattr(sale, "kind", None) != "holiday"
@@ -137,7 +170,7 @@ def _admin_item(row: MarketingBannerAsset) -> MarketingBannerAdminItem:
 
 @router.get("/admin/assets", response_model=MarketingBannerAdminListResponse)
 def admin_list_banner_assets(
-    kind: str | None = Query(default=None, pattern="^(sale|birthday|warehouse)$"),
+    kind: str | None = Query(default=None, pattern="^(sale|birthday|warehouse|holiday)$"),
     limit: int = Query(default=80, ge=1, le=300),
     db: Session = Depends(get_db),
     _: AdminUser = Depends(require_module_permission("promotions", need="view")),
@@ -166,7 +199,13 @@ def _sale_percent_for_date(db: Session, day: int, month: int) -> float:
     raise ValueError("Không tìm thấy campaign sale sắp tới cho ngày này.")
 
 
-def _generate_in_background(kind: str, day: int, month: int, discount: float) -> None:
+def _generate_in_background(
+    kind: str,
+    day: int,
+    month: int,
+    discount: float,
+    occasion_code: str | None = None,
+) -> None:
     db = SessionLocal()
     try:
         banner_svc.generate_banner(
@@ -175,8 +214,9 @@ def _generate_in_background(kind: str, day: int, month: int, discount: float) ->
             day=day,
             month=month,
             discount_percent=discount,
+            occasion_code=occasion_code,
             force=True,
-            notify_admin=True,
+            notify_admin=kind != "holiday",
         )
     finally:
         db.close()
@@ -190,11 +230,20 @@ def admin_regenerate_banner(
     _: AdminUser = Depends(require_module_permission("promotions", need="update")),
 ):
     try:
+        occasion_code = None
         if payload.kind == "warehouse":
             discount = float(payload.discount_percent or 0)
             if discount <= 0:
                 raise ValueError("Cần nhập phần trăm giảm giá kho lớn hơn 0.")
             day, month = 0, 0
+        elif payload.kind == "holiday":
+            from app.services.holiday_schedule import CATALOG
+
+            occasion_code = (payload.code or "").strip().lower()
+            if occasion_code not in CATALOG:
+                raise ValueError("Cần chọn dịp lễ hợp lệ.")
+            day, month = 0, 0
+            discount = float(CATALOG[occasion_code].sale_percent or 0)
         else:
             if payload.day is None or payload.month is None:
                 raise ValueError("Cần chọn ngày-tháng cho banner này.")
@@ -208,17 +257,18 @@ def admin_regenerate_banner(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    campaign = banner_svc.campaign_key(
+        payload.kind,
+        day,
+        month,
+        discount,
+        occasion_code=occasion_code,
+    )
     active_generation = (
         db.query(MarketingBannerAsset)
         .filter(
             MarketingBannerAsset.kind == payload.kind,
-            MarketingBannerAsset.campaign_key
-            == banner_svc.campaign_key(
-                payload.kind,
-                day,
-                month,
-                discount,
-            ),
+            MarketingBannerAsset.campaign_key == campaign,
             MarketingBannerAsset.status == "generating",
         )
         .first()
@@ -232,13 +282,49 @@ def admin_regenerate_banner(
         day,
         month,
         discount,
+        occasion_code,
     )
     if payload.kind == "warehouse":
         return {
             "accepted": True,
             "message": f"Đã bắt đầu tạo banner sale kho giảm {discount:g}%.",
         }
+    if payload.kind == "holiday":
+        from app.services.holiday_schedule import CATALOG as HOLIDAYS
+
+        return {
+            "accepted": True,
+            "message": f"Đã bắt đầu tạo banner {HOLIDAYS[occasion_code].name}.",
+        }
     return {"accepted": True, "message": "Đã bắt đầu tạo lại banner."}
+
+
+@router.post("/admin/regenerate-holidays", status_code=202)
+def admin_regenerate_all_holiday_banners(
+    payload: MarketingBannerHolidayBatchRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: AdminUser = Depends(require_module_permission("promotions", need="update")),
+):
+    generating = (
+        db.query(MarketingBannerAsset.id)
+        .filter(
+            MarketingBannerAsset.kind == "holiday",
+            MarketingBannerAsset.status == "generating",
+        )
+        .first()
+    )
+    if generating:
+        raise HTTPException(status_code=409, detail="Đang tạo banner ngày lễ. Đợi xong rồi bấm lại.")
+    background_tasks.add_task(banner_svc.generate_all_holiday_banners_job, force=payload.force)
+    return {
+        "accepted": True,
+        "message": (
+            "Đang tạo lại toàn bộ banner dịp lễ bằng GPT."
+            if payload.force
+            else "Đang tạo đủ banner mọi dịp lễ bằng GPT. Ảnh sẵn sẽ giữ lại."
+        ),
+    }
 
 
 @router.post("/admin/assets/{asset_id}/activate")

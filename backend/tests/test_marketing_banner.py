@@ -253,6 +253,7 @@ def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatc
     )
     monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
     monkeypatch.setattr(svc, "list_upcoming_events", lambda db, limit=12: [])
+    monkeypatch.setattr(svc, "upcoming_holiday_codes", lambda db, today, ahead_days=14: [])
 
     import app.services.warehouse_clearance as warehouse_svc
 
@@ -417,6 +418,7 @@ def test_banner_stops_after_three_failures_and_emails_admin_once(monkeypatch):
         lambda to, subject, body, html_body, prevent_threading=True: calls["email"].append(subject),
     )
     monkeypatch.setattr(svc, "list_upcoming_events", lambda db, limit=12: [])
+    monkeypatch.setattr(svc, "upcoming_holiday_codes", lambda db, today, ahead_days=14: [])
 
     import app.services.warehouse_clearance as warehouse_svc
 
@@ -533,3 +535,74 @@ def test_warehouse_banner_reuses_percent_and_creates_new_percent(monkeypatch):
     assert "SALE KHO - GIẢM 60%" in sixty.prompt
     assert hidden is None
     assert svc.find_active_warehouse_asset(db, 30).id == first.id
+
+
+def test_holiday_campaign_key_has_no_date_or_percent():
+    assert svc.campaign_key("holiday", 0, 0, 12, occasion_code="tet") == "holiday-tet"
+    assert svc.campaign_key("holiday", 14, 2, 8, occasion_code="valentine") == "holiday-valentine"
+    assert svc.holiday_code_from_campaign_key("holiday-phu-nu-83") == "phu-nu-83"
+
+
+def test_holiday_prompt_names_occasion_without_dates():
+    from app.services.holiday_schedule import BANNER_HEADLINES, CATALOG
+
+    for code in ("tet", "valentine", "phu-nu-83", "phu-nu-2010", "nha-giao", "dai-le", "thieu-nhi"):
+        prompt = svc.build_banner_prompt(
+            kind="holiday",
+            day=0,
+            month=0,
+            discount_percent=8,
+            occasion_code=code,
+            occasion_name=CATALOG[code].name,
+            copy={
+                "verse": "Dịp lễ rộn ràng - chọn đồ mới ngay",
+                "cta": "SĂN DEAL LỄ",
+                "art_direction": "lễ hội thời trang",
+            },
+        )
+        assert BANNER_HEADLINES[code] in prompt
+        lowered = prompt.lower()
+        assert "21:9" in prompt
+        assert "không 14/2" in lowered or "cấm ghi ngày" in lowered
+        assert "giảm 8%" not in lowered
+        assert "2026" not in prompt
+        assert "14/2" not in BANNER_HEADLINES[code]
+        assert "8/3" not in BANNER_HEADLINES[code]
+        assert "20/10" not in BANNER_HEADLINES[code]
+
+
+def test_generate_holiday_banner_reuses_and_batch_skips_ready(monkeypatch):
+    db = _session()
+    raw = _png_bytes()
+    _allow_bunny_probe(monkeypatch)
+    monkeypatch.setattr(svc, "_render_banner_pixels", lambda prompt, *, kind: (raw, "openai", "gpt-image-2"))
+    monkeypatch.setattr(
+        svc,
+        "generate_dynamic_copy",
+        lambda **kwargs: {
+            "verse": "Dịp lễ rộn ràng - chọn đồ mới ngay",
+            "cta": "SĂN DEAL LỄ",
+            "art_direction": "lễ hội thời trang",
+        },
+    )
+    monkeypatch.setattr(
+        svc,
+        "_upload_banner",
+        lambda data, *, kind, key, version: f"https://cdn.test/{key}/v{version}.png",
+    )
+    monkeypatch.setattr(svc, "_admin_preview_email", lambda db, row: None)
+
+    first = svc.generate_banner(db, kind="holiday", occasion_code="tet")
+    reused = svc.generate_banner(db, kind="holiday", occasion_code="tet")
+    assert first.campaign_key == "holiday-tet"
+    assert first.date_key == "le"
+    assert reused.id == first.id
+    assert "SALE TẾT" in first.prompt
+    assert "2026" not in first.prompt
+    assert first.provider == "openai"
+
+    batch = svc.generate_all_holiday_banners(db, force=False, notify_admin=False)
+    tet = next(item for item in batch["items"] if item["code"] == "tet")
+    assert tet["status"] == "ready"
+    assert batch["holiday"]["reused"] >= 1
+    assert svc.find_active_holiday_asset(db, "tet").id == first.id

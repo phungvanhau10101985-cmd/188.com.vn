@@ -31,7 +31,30 @@ class HolidayOccasionOut(BaseModel):
     solar_label: str = ""
     start_year: Optional[int] = None
     end_year: Optional[int] = None
+    window_on_label: str = ""
+    window_off_label: str = ""
+    banner_headline: str = ""
+    banner_url: Optional[str] = None
+    banner_status: Optional[str] = None
+    banner_error: Optional[str] = None
     showing_today: bool = False
+
+
+class HolidayBannerGenerateIn(BaseModel):
+    code: Optional[str] = None
+    force: bool = False
+
+    @field_validator("code")
+    @classmethod
+    def known_code(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or not str(value).strip():
+            return None
+        from app.services.holiday_schedule import CATALOG
+
+        key = str(value).strip().lower()
+        if key not in CATALOG:
+            raise ValueError("Dịp lễ không có trong danh sách")
+        return key
 
 
 class HolidayThemeAdminOut(BaseModel):

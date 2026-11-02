@@ -75,6 +75,7 @@ from app.crud import shop_video_fab as shop_video_fab_crud
 from app.schemas.shop_video_fab import ShopVideoFabPublicOut, ShopVideoFabAdminUpdate
 from app.crud import holiday_theme as holiday_theme_crud
 from app.schemas.holiday_theme import (
+    HolidayBannerGenerateIn,
     HolidayOccasionUpdate,
     HolidayPreviewGrantIn,
     HolidayPreviewGrantOut,
@@ -1426,6 +1427,74 @@ def admin_clear_holiday_preview(
 ):
     clear_admin_holiday_preview(db, current_admin)
     return {"ok": True}
+
+
+@router.post("/holiday-theme/banners", status_code=202)
+def admin_generate_holiday_banners(
+    data: HolidayBannerGenerateIn,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("holiday_theme")),
+):
+    """Tạo banner GPT cho một dịp hoặc cả danh sách. Ảnh không ghi ngày tháng."""
+    from app.models.marketing_banner import MarketingBannerAsset
+    from app.services import marketing_banner as banner_svc
+    from app.services.holiday_schedule import CATALOG
+
+    if data.code:
+        key = banner_svc.campaign_key("holiday", 0, 0, 0, occasion_code=data.code)
+        generating = (
+            db.query(MarketingBannerAsset.id)
+            .filter(
+                MarketingBannerAsset.kind == "holiday",
+                MarketingBannerAsset.campaign_key == key,
+                MarketingBannerAsset.status == "generating",
+            )
+            .first()
+        )
+        if generating:
+            raise HTTPException(status_code=409, detail="Banner dịp này đang được tạo.")
+
+        def _one(code: str = data.code, force: bool = data.force) -> None:
+            from app.db.session import SessionLocal
+
+            session = SessionLocal()
+            try:
+                banner_svc.generate_banner(
+                    session,
+                    kind="holiday",
+                    occasion_code=code,
+                    force=force,
+                    notify_admin=False,
+                )
+            finally:
+                session.close()
+
+        background_tasks.add_task(_one)
+        return {
+            "accepted": True,
+            "message": f"Đã bắt đầu tạo banner {CATALOG[data.code].name}.",
+        }
+
+    generating = (
+        db.query(MarketingBannerAsset.id)
+        .filter(
+            MarketingBannerAsset.kind == "holiday",
+            MarketingBannerAsset.status == "generating",
+        )
+        .first()
+    )
+    if generating:
+        raise HTTPException(status_code=409, detail="Đang tạo banner ngày lễ. Đợi xong rồi bấm lại.")
+    background_tasks.add_task(banner_svc.generate_all_holiday_banners_job, force=data.force)
+    return {
+        "accepted": True,
+        "message": (
+            "Đang tạo lại toàn bộ banner dịp lễ bằng GPT."
+            if data.force
+            else "Đang tạo đủ banner mọi dịp lễ bằng GPT. Ảnh sẵn sẽ giữ lại."
+        ),
+    }
 
 
 # ========== Bunny CDN — đăng ảnh lên Storage Zone ==========

@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from app.crud.holiday_theme import describe_holiday_program, normalize_theme
 from app.schemas.holiday_theme import HolidayOccasionUpdate, HolidayThemeAdminUpdate
 from app.services import sale_calendar as sale_calendar_svc
-from app.services.holiday_schedule import CATALOG, resolve_visible_holiday
+from app.services.holiday_schedule import BANNER_HEADLINES, CATALOG, banner_headline, resolve_visible_holiday
 
 
 def test_holiday_theme_update_accepts_tet_and_off():
@@ -186,3 +186,11 @@ def test_inner_festival_day_interrupts_outer_then_returns():
     assert back is not None and back.code == "tet" and back.mode == "teaser"
     tet_day = resolve_visible_holiday(rules, date(2027, 2, 6))
     assert tet_day is not None and tet_day.code == "tet" and tet_day.mode == "active"
+
+
+def test_banner_headlines_cover_catalog_without_dates():
+    assert set(BANNER_HEADLINES) == set(CATALOG)
+    for code, headline in BANNER_HEADLINES.items():
+        assert banner_headline(code) == headline
+        assert not any(ch.isdigit() for ch in headline)
+        assert headline.startswith("SALE ")
