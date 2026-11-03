@@ -166,11 +166,14 @@ def uncollected_goods_vnd(merchandise_vnd: Decimal, deposit_paid: Any) -> Decima
     return gap if gap > 0 else Decimal("0")
 
 
-def recognized_goods_vnd(merchandise_vnd: Decimal, deposit_paid: Any, *, returned: bool) -> Decimal:
-    """Đơn thường giữ nguyên giá hàng. Đơn hoàn chỉ giữ phần đã cọc."""
+def recognized_goods_vnd(merchandise_vnd: Decimal, _deposit_paid: Any, *, returned: bool) -> Decimal:
+    """Đơn thường giữ nguyên giá hàng. Đơn hoàn không còn doanh thu.
+
+    Tiền cọc đã hoàn và phần hàng chưa thu đều ra khỏi lợi nhuận. Giá vốn vẫn trừ riêng.
+    """
     if not returned:
         return merchandise_vnd
-    return merchandise_vnd - uncollected_goods_vnd(merchandise_vnd, deposit_paid)
+    return Decimal("0")
 
 
 def _order_status(order: Order) -> str:
@@ -516,7 +519,7 @@ def load_profit_sheet(db: Session, date_from: str, date_to: str) -> dict:
         )
         returned = _order_status(order) == OrderStatus.RETURNED.value
         uncollected = uncollected_goods_vnd(merchandise, order.deposit_paid) if returned else Decimal("0")
-        revenue = merchandise - uncollected
+        revenue = recognized_goods_vnd(merchandise, order.deposit_paid, returned=returned)
         revenue_total += revenue
         order_lines = lines_by_order.get(order.id) or []
         stored = summarize_stored_import(

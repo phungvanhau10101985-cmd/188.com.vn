@@ -172,10 +172,10 @@ function returnRateLines(loading: boolean, summary: AdSpendProfitSummary | null)
   if (loading || !summary) return undefined;
   if (summary.orderCount <= 0) return ['Chưa có đơn đã cọc'];
   if (summary.returnedCount <= 0) return [`0/${formatCount(summary.orderCount)} đơn đã cọc`];
-  return [
-    `${formatCount(summary.returnedCount)}/${formatCount(summary.orderCount)} đơn đã cọc`,
-    `Trừ ${formatMoney(summary.uncollected, 'VND')} phần chưa thu`,
-  ];
+  const lines = [`${formatCount(summary.returnedCount)}/${formatCount(summary.orderCount)} đơn đã cọc`];
+  if (summary.refunded > 0) lines.push(`Trừ ${formatMoney(summary.refunded, 'VND')} đã hoàn`);
+  if (summary.uncollected > 0) lines.push(`Trừ ${formatMoney(summary.uncollected, 'VND')} chưa thu`);
+  return lines;
 }
 
 function sourceLabel(source: string): string {
@@ -244,6 +244,7 @@ function sameSummary(prev: AdSpendProfitSummary, next: AdSpendProfitSummary): bo
     prev.revenueCny === next.revenueCny &&
     prev.returnedCount === next.returnedCount &&
     prev.uncollected === next.uncollected &&
+    prev.refunded === next.refunded &&
     prev.cost === next.cost &&
     prev.missing === next.missing &&
     prev.gross === next.gross &&

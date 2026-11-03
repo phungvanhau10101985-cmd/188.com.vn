@@ -19,6 +19,7 @@ export type AdSpendProfitSummary = {
   revenueCny: number | null;
   returnedCount: number;
   uncollected: number;
+  refunded: number;
   cost: number | null;
   missing: number;
   gross: number | null;
@@ -295,6 +296,10 @@ export function AdSpendProfitSection({
     const revenue = rows.reduce((sum, row) => sum + row.revenueVnd, 0);
     const returnedCount = rows.reduce((sum, row) => sum + (row.returned ? 1 : 0), 0);
     const uncollected = rows.reduce((sum, row) => sum + (row.returned ? row.uncollectedVnd : 0), 0);
+    const refunded = rows.reduce(
+      (sum, row) => sum + (row.returned ? Math.max(0, row.merchandiseVnd - row.uncollectedVnd) : 0),
+      0,
+    );
     let goodsSum = 0;
     let goodsMissing = 0;
     for (const row of rows) {
@@ -313,7 +318,17 @@ export function AdSpendProfitSection({
     const costReady = missing === 0;
     const gross = costReady ? revenue - cost : null;
     const profit = costReady && adSpendState === 'ready' && adSpend != null ? revenue - cost - adSpend : null;
-    return { revenue, revenueCny, returnedCount, uncollected, cost: costReady ? cost : null, missing, gross, profit };
+    return {
+      revenue,
+      revenueCny,
+      returnedCount,
+      uncollected,
+      refunded,
+      cost: costReady ? cost : null,
+      missing,
+      gross,
+      profit,
+    };
   }, [rows, rateNumber, adSpend, adSpendState]);
 
   useEffect(() => {
@@ -326,6 +341,7 @@ export function AdSpendProfitSection({
       revenueCny: summary.revenueCny,
       returnedCount: summary.returnedCount,
       uncollected: summary.uncollected,
+      refunded: summary.refunded,
       cost: summary.cost,
       missing: summary.missing,
       gross: summary.gross,
@@ -409,7 +425,8 @@ export function AdSpendProfitSection({
         <p className="mt-1 text-xs text-slate-500">
           Chỉ đơn đã cọc trong khoảng đang chọn. Giá thu là tiền hàng sau các chương trình sale, không gồm phí ship khách
           trả. Giá vốn hàng Trung Quốc lấy giá gốc tệ × tỷ giá. Hàng Việt Nam lấy giá nhập đồng; hàng sale thanh lý kho
-          là 0đ và không cộng ship Trung Quốc. Lợi nhuận = giá thu − giá vốn − ship − quảng cáo.
+          là 0đ và không cộng ship Trung Quốc. Lợi nhuận = giá thu − tiền gốc − ship − quảng cáo. Đơn hoàn
+          không tính giá thu: trừ tiền đã hoàn và phần chưa thu. Giá vốn đơn hoàn vẫn trừ.
         </p>
       </div>
 
@@ -528,14 +545,15 @@ export function AdSpendProfitSection({
                           className="px-3 py-2 whitespace-nowrap"
                           title={
                             row.returned
-                              ? 'Đơn hoàn: giữ tiền cọc, trừ phần hàng khách chưa trả'
+                              ? 'Đơn hoàn: trừ tiền đã hoàn và phần chưa thu. Giá vốn vẫn tính.'
                               : 'Tiền hàng sau sale, không gồm phí ship khách trả'
                           }
                         >
                           {formatVnd(row.revenueVnd)}
                           {row.returned ? (
                             <p className="mt-0.5 text-[11px] font-normal text-amber-700">
-                              Hoàn · trừ {formatVnd(row.uncollectedVnd)} chưa cọc
+                              Hoàn · trừ {formatVnd(Math.max(0, row.merchandiseVnd - row.uncollectedVnd))} đã hoàn
+                              {row.uncollectedVnd > 0 ? ` · ${formatVnd(row.uncollectedVnd)} chưa thu` : ''}
                             </p>
                           ) : null}
                         </td>
