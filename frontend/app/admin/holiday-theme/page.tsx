@@ -27,6 +27,16 @@ type Draft = {
   sale_days: string;
 };
 
+function dateFieldClass(calendar: HolidayOccasionAdmin['calendar']) {
+  return calendar === 'lunar'
+    ? 'mt-1 w-full rounded-lg border border-emerald-400 bg-emerald-50 px-2 py-1.5 text-sm text-emerald-900'
+    : 'mt-1 w-full rounded-lg border border-red-400 bg-red-50 px-2 py-1.5 text-sm text-red-900';
+}
+
+function dateLabelClass(calendar: HolidayOccasionAdmin['calendar']) {
+  return calendar === 'lunar' ? 'text-xs font-medium text-emerald-700' : 'text-xs font-medium text-red-700';
+}
+
 function draftFrom(row: HolidayOccasionAdmin): Draft {
   return {
     start_day: String(row.start_day),
@@ -306,7 +316,11 @@ export default function AdminHolidayThemePage() {
                       ) : null}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {row.calendar_label} · {row.summary}
+                      <span className={row.calendar === 'lunar' ? 'font-medium text-emerald-700' : 'font-medium text-red-700'}>
+                        {row.calendar_label}
+                      </span>
+                      {' · '}
+                      {row.summary}
                     </p>
                     <p className="mt-1 text-xs text-gray-600">
                       {row.solar_label}. Năm nay bật {row.window_on_label || '—'}, tắt{' '}
@@ -341,31 +355,36 @@ export default function AdminHolidayThemePage() {
                 {draft ? (
                   <div className="mt-4 space-y-4">
                     <div>
-                      <p className="text-xs font-medium text-gray-700">Ngày lễ và giao diện</p>
+                      <p className="text-xs font-medium text-gray-700">
+                        Ngày lễ và giao diện
+                        <span className={`ml-2 ${row.calendar === 'lunar' ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {row.calendar === 'lunar' ? 'ô xanh = ngày âm' : 'ô đỏ = ngày dương'}
+                        </span>
+                      </p>
                       <div className="mt-2 grid gap-3 sm:grid-cols-3">
-                    <label className="text-xs text-gray-600">
-                      Ngày bắt đầu
-                      <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.start_day} onChange={(e) => patchDraft(row.code, { start_day: e.target.value })} />
+                    <label className={dateLabelClass(row.calendar)}>
+                      Ngày bắt đầu {row.calendar === 'lunar' ? '(âm)' : '(dương)'}
+                      <input className={dateFieldClass(row.calendar)} value={draft.start_day} onChange={(e) => patchDraft(row.code, { start_day: e.target.value })} />
+                    </label>
+                    <label className={dateLabelClass(row.calendar)}>
+                      Tháng bắt đầu {row.calendar === 'lunar' ? '(âm)' : '(dương)'}
+                      <input className={dateFieldClass(row.calendar)} value={draft.start_month} onChange={(e) => patchDraft(row.code, { start_month: e.target.value })} />
                     </label>
                     <label className="text-xs text-gray-600">
-                      Tháng bắt đầu
-                      <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.start_month} onChange={(e) => patchDraft(row.code, { start_month: e.target.value })} />
+                      Năm (dương)
+                      <input className="mt-1 w-full rounded-lg border border-red-200 bg-red-50/60 px-2 py-1.5 text-sm text-red-800" value={row.start_year ?? ''} readOnly aria-readonly="true" />
+                    </label>
+                    <label className={dateLabelClass(row.calendar)}>
+                      Ngày kết thúc {row.calendar === 'lunar' ? '(âm)' : '(dương)'}
+                      <input className={dateFieldClass(row.calendar)} value={draft.end_day} onChange={(e) => patchDraft(row.code, { end_day: e.target.value })} />
+                    </label>
+                    <label className={dateLabelClass(row.calendar)}>
+                      Tháng kết thúc {row.calendar === 'lunar' ? '(âm)' : '(dương)'}
+                      <input className={dateFieldClass(row.calendar)} value={draft.end_month} onChange={(e) => patchDraft(row.code, { end_month: e.target.value })} />
                     </label>
                     <label className="text-xs text-gray-600">
-                      Năm
-                      <input className="mt-1 w-full rounded-lg border bg-gray-50 px-2 py-1.5 text-sm text-gray-700" value={row.start_year ?? ''} readOnly aria-readonly="true" />
-                    </label>
-                    <label className="text-xs text-gray-600">
-                      Ngày kết thúc
-                      <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.end_day} onChange={(e) => patchDraft(row.code, { end_day: e.target.value })} />
-                    </label>
-                    <label className="text-xs text-gray-600">
-                      Tháng kết thúc
-                      <input className="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm" value={draft.end_month} onChange={(e) => patchDraft(row.code, { end_month: e.target.value })} />
-                    </label>
-                    <label className="text-xs text-gray-600">
-                      Năm
-                      <input className="mt-1 w-full rounded-lg border bg-gray-50 px-2 py-1.5 text-sm text-gray-700" value={row.end_year ?? ''} readOnly aria-readonly="true" />
+                      Năm (dương)
+                      <input className="mt-1 w-full rounded-lg border border-red-200 bg-red-50/60 px-2 py-1.5 text-sm text-red-800" value={row.end_year ?? ''} readOnly aria-readonly="true" />
                     </label>
                     <label className="text-xs text-gray-600">
                       Số ngày bật trước
