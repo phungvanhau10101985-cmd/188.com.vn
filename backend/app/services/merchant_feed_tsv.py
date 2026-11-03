@@ -304,6 +304,31 @@ def _product_type_breadcrumb(product: Product) -> str:
     return breadcrumb
 
 
+# Nhóm campaign trên feed GMC. Ads: Danh mục hoặc Loại sản phẩm → tick một dòng "Golf".
+# Không dùng taxonomy lá (túi/gậy/áo khác ID) vì quảng cáo cần cả đồ golf trong một ô.
+GOLF_FEED_GROUP = "Golf"
+_GOLF_WORD_RE = re.compile(r"golf", re.IGNORECASE)
+# group_rating: bóng 88, găng 91, gậy 92, túi gậy 93. Bỏ 89 (cỏ nhân tạo) — nhóm đó không chỉ sân golf.
+_GOLF_RATING_GROUP_IDS = frozenset({88, 91, 92, 93})
+
+
+def is_golf_merchant_product(product: Product) -> bool:
+    """SP liên quan golf: chữ golf trên tên/danh mục/slug, hoặc nhóm đánh giá golf."""
+    try:
+        if int(getattr(product, "group_rating", 0) or 0) in _GOLF_RATING_GROUP_IDS:
+            return True
+    except (TypeError, ValueError):
+        pass
+    parts: list[str] = []
+    for attr in ("name", "category", "subcategory", "sub_subcategory", "slug", "code"):
+        v = getattr(product, attr, None)
+        if not _is_blankish(v):
+            parts.append(str(v))
+    if not parts:
+        return False
+    return _GOLF_WORD_RE.search(" ".join(parts)) is not None
+
+
 def _sizes_string(product: Product) -> str:
     s = getattr(product, "sizes", None)
     if _is_blankish(s):
@@ -737,7 +762,9 @@ def merchant_row_values(
     mpn = _tsv_cell(getattr(product, "code", None) or "")
     identifier = "yes" if (gtin or mpn) else "no"
     gdefault = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
-    gcat = resolved_google_product_category(product, gdefault)
+    golf_group = is_golf_merchant_product(product)
+    gcat = GOLF_FEED_GROUP if golf_group else resolved_google_product_category(product, gdefault)
+    product_type = GOLF_FEED_GROUP if golf_group else _product_type_breadcrumb(product)
     sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
     c0 = _custom_label_0_value(product)
     if sale_state is not None:
@@ -777,7 +804,7 @@ def merchant_row_values(
         gtin,
         mpn,
         gcat,
-        _product_type_breadcrumb(product),
+        product_type,
         gender,
         age_grp,
         _tsv_cell(getattr(product, "color", None)),
