@@ -2,11 +2,20 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { adminBankAPI } from '@/lib/admin-api';
-import { DEPOSIT_MIN_VND, DEPOSIT_PERCENT, HIGH_UNIT_PRICE_VND } from '@/lib/business-info';
+import {
+  DEPOSIT_MIN_VND,
+  DEPOSIT_PERCENT,
+  HIGH_UNIT_MIN_PERCENT,
+  HIGH_UNIT_PRICE_VND,
+} from '@/lib/business-info';
 import { formatDepositMinVnd } from '@/lib/order-deposit';
+
+const inputClass =
+  'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200';
 
 export default function DepositPercentPanel() {
   const [percent, setPercent] = useState(String(DEPOSIT_PERCENT));
+  const [highPercent, setHighPercent] = useState(String(HIGH_UNIT_MIN_PERCENT));
   const [minAmount, setMinAmount] = useState(String(DEPOSIT_MIN_VND));
   const [highOrderAmount, setHighOrderAmount] = useState(String(HIGH_UNIT_PRICE_VND));
   const [loading, setLoading] = useState(true);
@@ -20,6 +29,7 @@ export default function DepositPercentPanel() {
     try {
       const out = await adminBankAPI.getDepositPercent();
       setPercent(String(out.partial_percent));
+      setHighPercent(String(out.high_order_percent ?? HIGH_UNIT_MIN_PERCENT));
       setMinAmount(String(out.min_amount ?? DEPOSIT_MIN_VND));
       setHighOrderAmount(String(out.high_order_amount ?? HIGH_UNIT_PRICE_VND));
     } catch (e) {
@@ -35,11 +45,16 @@ export default function DepositPercentPanel() {
 
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const n = Number(percent);
+    const low = Number(percent);
+    const highPct = Number(highPercent);
     const floor = Number(minAmount);
-    const high = Number(highOrderAmount);
-    if (!Number.isInteger(n) || n < 1 || n > 99) {
-      setBanner({ variant: 'error', text: 'Nhập phần trăm là số nguyên từ 1 đến 99.' });
+    const threshold = Number(highOrderAmount);
+    if (!Number.isInteger(low) || low < 1 || low > 99) {
+      setBanner({ variant: 'error', text: 'Cọc đơn dưới mốc phải là số nguyên từ 1 đến 99.' });
+      return;
+    }
+    if (!Number.isInteger(highPct) || highPct < 1 || highPct > 99) {
+      setBanner({ variant: 'error', text: 'Cọc đơn từ mốc trở lên phải là số nguyên từ 1 đến 99.' });
       return;
     }
     if (!Number.isInteger(floor) || floor < DEPOSIT_MIN_VND) {
@@ -49,23 +64,24 @@ export default function DepositPercentPanel() {
       });
       return;
     }
-    if (!Number.isInteger(high) || high < DEPOSIT_MIN_VND) {
+    if (!Number.isInteger(threshold) || threshold < DEPOSIT_MIN_VND) {
       setBanner({
         variant: 'error',
-        text: `Mốc đơn cọc 30% không được thấp hơn ${formatDepositMinVnd(DEPOSIT_MIN_VND)}.`,
+        text: `Mốc giá trị hàng không được thấp hơn ${formatDepositMinVnd(DEPOSIT_MIN_VND)}.`,
       });
       return;
     }
     setSaving(true);
     setBanner(null);
     try {
-      const out = await adminBankAPI.saveDepositPercent(n, floor, high);
+      const out = await adminBankAPI.saveDepositPercent(low, floor, threshold, highPct);
       setPercent(String(out.partial_percent));
+      setHighPercent(String(out.high_order_percent));
       setMinAmount(String(out.min_amount));
       setHighOrderAmount(String(out.high_order_amount));
       setBanner({
         variant: 'ok',
-        text: `Đã lưu mức cọc ${out.partial_percent}%, tối thiểu ${formatDepositMinVnd(out.min_amount)}. Đơn từ ${formatDepositMinVnd(out.high_order_amount)} cọc tối thiểu 30%. Đơn mới và lần đổi mức cọc sau sẽ dùng số này.`,
+        text: `Đã lưu: đơn dưới ${formatDepositMinVnd(out.high_order_amount)} cọc ${out.partial_percent}%, từ mốc đó cọc ${out.high_order_percent}%, tối thiểu ${formatDepositMinVnd(out.min_amount)}. Đơn mới và lần đổi mức cọc sau sẽ dùng số này.`,
       });
     } catch (err) {
       setBanner({ variant: 'error', text: (err as Error)?.message || 'Không lưu được mức cọc' });
@@ -80,10 +96,11 @@ export default function DepositPercentPanel() {
         Mức cọc
       </h2>
       <p className="mt-1 max-w-3xl text-sm text-gray-600">
-        Phần trăm khách chuyển trước trên giá trị hàng (không gồm phí giao hàng). Nếu số tiền theo % thấp hơn mức tối thiểu,
-        đơn mới lấy mức tối thiểu, nhưng không vượt giá trị hàng. Ô «Đơn từ (đ) cọc 30%» là mốc giá trị hàng: từ mốc đó
-        đơn luôn cọc tối thiểu 30%, kể cả khi phần trăm cọc trước đang thấp hơn. Khách vẫn có thể chọn cọc 100% khi
-        thanh toán; mức này gồm cả phí giao hàng. Đơn đang chờ cọc giữ số đã chốt cho đến khi khách đổi lại.
+        Điền mốc giá trị hàng, rồi điền % cọc cho đơn dưới mốc và % cọc cho đơn từ mốc trở lên. Ví dụ mốc
+        3.000.000đ, dưới mốc cọc 10%, từ mốc cọc 30%. Tiền cọc tính trên giá trị hàng, không gồm phí giao hàng.
+        Nếu số tiền theo % thấp hơn cọc tối thiểu thì lấy cọc tối thiểu, nhưng không vượt giá trị hàng. Khách vẫn
+        chọn được cọc 100% khi thanh toán; mức 100% gồm cả phí giao hàng. Đơn đang chờ cọc giữ số đã chốt cho đến
+        khi khách đổi lại.
       </p>
 
       {error ? (
@@ -110,50 +127,67 @@ export default function DepositPercentPanel() {
       {loading ? (
         <p className="mt-4 text-sm text-gray-500">Đang tải mức cọc…</p>
       ) : (
-        <form onSubmit={onSave} className="mt-4 flex flex-wrap items-end gap-3">
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-800">Cọc trước (%)</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={99}
-              step={1}
-              required
-              value={percent}
-              onChange={(ev) => setPercent(ev.target.value)}
-              className="w-28 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
-              aria-describedby="deposit-percent-hint"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-800">Cọc tối thiểu (đ)</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={DEPOSIT_MIN_VND}
-              step={1000}
-              required
-              value={minAmount}
-              onChange={(ev) => setMinAmount(ev.target.value)}
-              className="w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
-              aria-describedby="deposit-percent-hint"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-gray-800">Đơn từ (đ) cọc 30%</span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={DEPOSIT_MIN_VND}
-              step={100000}
-              required
-              value={highOrderAmount}
-              onChange={(ev) => setHighOrderAmount(ev.target.value)}
-              className="w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
-              aria-describedby="deposit-percent-hint"
-            />
-          </label>
+        <form onSubmit={onSave} className="mt-4 space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-800">Mốc giá trị hàng (đ)</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={DEPOSIT_MIN_VND}
+                step={100000}
+                required
+                value={highOrderAmount}
+                onChange={(ev) => setHighOrderAmount(ev.target.value)}
+                className={inputClass}
+                aria-describedby="deposit-percent-hint"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-800">Cọc đơn dưới mốc (%)</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={99}
+                step={1}
+                required
+                value={percent}
+                onChange={(ev) => setPercent(ev.target.value)}
+                className={inputClass}
+                aria-describedby="deposit-percent-hint"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-800">Cọc đơn từ mốc (%)</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={99}
+                step={1}
+                required
+                value={highPercent}
+                onChange={(ev) => setHighPercent(ev.target.value)}
+                className={inputClass}
+                aria-describedby="deposit-percent-hint"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-800">Cọc tối thiểu (đ)</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={DEPOSIT_MIN_VND}
+                step={1000}
+                required
+                value={minAmount}
+                onChange={(ev) => setMinAmount(ev.target.value)}
+                className={inputClass}
+                aria-describedby="deposit-percent-hint"
+              />
+            </label>
+          </div>
           <button
             type="submit"
             disabled={saving}
@@ -161,8 +195,9 @@ export default function DepositPercentPanel() {
           >
             {saving ? 'Đang lưu…' : 'Lưu mức cọc'}
           </button>
-          <p id="deposit-percent-hint" className="w-full text-xs text-gray-500">
-            Phần trăm từ 1 đến 99. Cọc tối thiểu và mốc đơn cọc 30% không thấp hơn {formatDepositMinVnd(DEPOSIT_MIN_VND)}.
+          <p id="deposit-percent-hint" className="text-xs text-gray-500">
+            Hai mức cọc từ 1 đến 99. Mốc giá trị hàng và cọc tối thiểu không thấp hơn {formatDepositMinVnd(DEPOSIT_MIN_VND)}.
+            Đơn nhỏ hơn mốc dùng «Cọc đơn dưới mốc». Đơn bằng hoặc lớn hơn mốc dùng «Cọc đơn từ mốc».
           </p>
         </form>
       )}

@@ -1318,11 +1318,14 @@ class ApiClient {
     partial_percent: number;
     min_amount: number;
     high_order_amount?: number;
+    high_order_percent?: number;
   }> {
-    return this.fetch<{ partial_percent: number; min_amount: number; high_order_amount?: number }>(
-      '/bank-accounts/deposit-percent',
-      { quiet: true },
-    );
+    return this.fetch<{
+      partial_percent: number;
+      min_amount: number;
+      high_order_amount?: number;
+      high_order_percent?: number;
+    }>('/bank-accounts/deposit-percent', { quiet: true });
   }
 
   async getDepositPercent(): Promise<number> {

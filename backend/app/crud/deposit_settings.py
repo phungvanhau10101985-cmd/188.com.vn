@@ -10,14 +10,14 @@ DEFAULT_PARTIAL_PERCENT = 30
 DEFAULT_MIN_AMOUNT = 100_000
 MIN_AMOUNT_FLOOR = 100_000
 MIN_AMOUNT_CEILING = 50_000_000
-# Giá trị hàng của đơn (sau giảm giá, không gồm ship) từ mốc này: cọc một phần không thấp hơn HIGH_UNIT_MIN_PERCENT.
+# Giá trị hàng của đơn (sau giảm giá, không gồm ship) từ mốc này dùng HIGH_UNIT_MIN_PERCENT.
 HIGH_ORDER_VALUE_VND = 3_000_000
 HIGH_UNIT_PRICE_VND = HIGH_ORDER_VALUE_VND
 HIGH_UNIT_MIN_PERCENT = 30
 HIGH_ORDER_AMOUNT_FLOOR = 100_000
 HIGH_ORDER_AMOUNT_CEILING = 500_000_000
 _SINGLETON_ID = 1
-_CACHE_KEY = "deposit_settings:rule:v2"
+_CACHE_KEY = "deposit_settings:rule:v3"
 _CACHE_TTL_SECONDS = 60
 
 
@@ -52,7 +52,7 @@ def _as_decimal(raw: object) -> Decimal:
 
 
 def clamp_high_order_amount(raw: object, default: int = HIGH_ORDER_VALUE_VND) -> int:
-    """Mốc giá trị hàng (VND) từ đó đơn cọc tối thiểu 30%. 0/NULL là cột mới, dùng 3.000.000đ."""
+    """Mốc giá trị hàng (VND) để đổi sang % cọc đơn lớn. 0/NULL là cột mới, dùng 3.000.000đ."""
     if raw is None:
         return default
     try:
@@ -69,12 +69,12 @@ def clamp_high_order_amount(raw: object, default: int = HIGH_ORDER_VALUE_VND) ->
 
 
 def line_hits_high_unit_price(unit_price: object, threshold: object = HIGH_ORDER_VALUE_VND) -> bool:
-    """Đơn giá >= mốc cọc 30%: một mình dòng đó đã đủ điều kiện."""
+    """Đơn giá >= mốc đơn lớn: một mình dòng đó đã đủ điều kiện."""
     return _as_decimal(unit_price) >= Decimal(clamp_high_order_amount(threshold))
 
 
 def order_hits_high_value(goods: object, threshold: object = HIGH_ORDER_VALUE_VND) -> bool:
-    """Giá trị hàng của đơn >= mốc thì cọc một phần không thấp hơn 30%."""
+    """Giá trị hàng của đơn >= mốc thì dùng % cọc của đơn lớn."""
     return _as_decimal(goods) >= Decimal(clamp_high_order_amount(threshold))
 
 
@@ -112,17 +112,27 @@ def partial_percent_for_goods(
     configured: int,
     goods: object,
     threshold: object = HIGH_ORDER_VALUE_VND,
+    high_percent: int = HIGH_UNIT_MIN_PERCENT,
 ) -> int:
-    """% cọc một phần. Giá trị hàng >= mốc thì không thấp hơn 30%."""
-    pct = clamp_partial_percent(configured)
+    """% cọc một phần. Dưới mốc dùng % đơn nhỏ; từ mốc trở lên dùng % đơn lớn."""
     if order_hits_high_value(goods, threshold):
-        return max(pct, HIGH_UNIT_MIN_PERCENT)
-    return pct
+        return clamp_partial_percent(high_percent, default=HIGH_UNIT_MIN_PERCENT)
+    return clamp_partial_percent(configured)
 
 
-def partial_percent_for_lines(configured: int, rows: list) -> int:
+def partial_percent_for_lines(
+    configured: int,
+    rows: list,
+    threshold: object = HIGH_ORDER_VALUE_VND,
+    high_percent: int = HIGH_UNIT_MIN_PERCENT,
+) -> int:
     """% cọc một phần theo tổng thành tiền các dòng (chưa trừ giảm giá đơn)."""
-    return partial_percent_for_goods(configured, group_goods_value(rows))
+    return partial_percent_for_goods(
+        configured,
+        group_goods_value(rows),
+        threshold,
+        high_percent,
+    )
 
 
 def line_requires_deposit(
@@ -155,14 +165,24 @@ def get_or_create_singleton(db: Session) -> DepositSettings:
     DepositSettings.__table__.create(bind=db.get_bind(), checkfirst=True)
     row = db.query(DepositSettings).filter(DepositSettings.id == _SINGLETON_ID).first()
     if row:
-        row.partial_percent = clamp_partial_percent(row.partial_percent)
-        clamped_min = clamp_min_amount(getattr(row, "min_amount", None))
-        clamped_high = clamp_high_order_amount(getattr(row, "high_order_amount", None))
-        dirty = int(getattr(row, "min_amount", 0) or 0) != clamped_min or int(
-            getattr(row, "high_order_amount", 0) or 0
-        ) != clamped_high
+        raw_partial = getattr(row, "partial_percent", None)
+        raw_min = getattr(row, "min_amount", None)
+        raw_high = getattr(row, "high_order_amount", None)
+        raw_high_pct = getattr(row, "high_order_percent", None)
+        clamped_partial = clamp_partial_percent(raw_partial)
+        clamped_min = clamp_min_amount(raw_min)
+        clamped_high = clamp_high_order_amount(raw_high)
+        clamped_high_pct = clamp_partial_percent(raw_high_pct, default=HIGH_UNIT_MIN_PERCENT)
+        dirty = (
+            raw_partial != clamped_partial
+            or raw_min != clamped_min
+            or raw_high != clamped_high
+            or raw_high_pct != clamped_high_pct
+        )
+        row.partial_percent = clamped_partial
         row.min_amount = clamped_min
         row.high_order_amount = clamped_high
+        row.high_order_percent = clamped_high_pct
         if dirty:
             db.add(row)
             db.commit()
@@ -173,6 +193,7 @@ def get_or_create_singleton(db: Session) -> DepositSettings:
         partial_percent=DEFAULT_PARTIAL_PERCENT,
         min_amount=DEFAULT_MIN_AMOUNT,
         high_order_amount=HIGH_ORDER_VALUE_VND,
+        high_order_percent=HIGH_UNIT_MIN_PERCENT,
     )
     db.add(row)
     db.commit()
@@ -180,28 +201,42 @@ def get_or_create_singleton(db: Session) -> DepositSettings:
     return row
 
 
-def get_rule(db: Session) -> tuple[int, int, int]:
-    """Đọc (%, sàn VND, mốc đơn cọc 30%), không commit — an toàn giữa transaction checkout."""
+def get_rule(db: Session) -> tuple[int, int, int, int]:
+    """Đọc (% đơn nhỏ, sàn VND, mốc đơn lớn, % đơn lớn). Không commit — an toàn giữa checkout."""
 
-    def fetch() -> tuple[int, int, int]:
+    def fetch() -> tuple[int, int, int, int]:
         try:
             with db.begin_nested():
                 row = db.query(DepositSettings).filter(DepositSettings.id == _SINGLETON_ID).first()
                 raw_pct = getattr(row, "partial_percent", None) if row is not None else None
                 raw_min = getattr(row, "min_amount", None) if row is not None else None
                 raw_high = getattr(row, "high_order_amount", None) if row is not None else None
-            if raw_pct is None and raw_min is None and raw_high is None:
-                return DEFAULT_PARTIAL_PERCENT, DEFAULT_MIN_AMOUNT, HIGH_ORDER_VALUE_VND
+                raw_high_pct = getattr(row, "high_order_percent", None) if row is not None else None
+            if raw_pct is None and raw_min is None and raw_high is None and raw_high_pct is None:
+                return (
+                    DEFAULT_PARTIAL_PERCENT,
+                    DEFAULT_MIN_AMOUNT,
+                    HIGH_ORDER_VALUE_VND,
+                    HIGH_UNIT_MIN_PERCENT,
+                )
             return (
                 clamp_partial_percent(raw_pct),
                 clamp_min_amount(raw_min),
                 clamp_high_order_amount(raw_high),
+                clamp_partial_percent(raw_high_pct, default=HIGH_UNIT_MIN_PERCENT),
             )
         except Exception:
-            return DEFAULT_PARTIAL_PERCENT, DEFAULT_MIN_AMOUNT, HIGH_ORDER_VALUE_VND
+            return (
+                DEFAULT_PARTIAL_PERCENT,
+                DEFAULT_MIN_AMOUNT,
+                HIGH_ORDER_VALUE_VND,
+                HIGH_UNIT_MIN_PERCENT,
+            )
 
-    percent, minimum, high_order = ttl_cache.get_or_fetch(_CACHE_KEY, _CACHE_TTL_SECONDS, fetch)
-    return int(percent), int(minimum), int(high_order)
+    percent, minimum, high_order, high_percent = ttl_cache.get_or_fetch(
+        _CACHE_KEY, _CACHE_TTL_SECONDS, fetch
+    )
+    return int(percent), int(minimum), int(high_order), int(high_percent)
 
 
 def get_partial_percent(db: Session) -> int:
@@ -217,6 +252,10 @@ def to_out(row: DepositSettings) -> DepositPercentOut:
         partial_percent=clamp_partial_percent(row.partial_percent),
         min_amount=clamp_min_amount(getattr(row, "min_amount", None)),
         high_order_amount=clamp_high_order_amount(getattr(row, "high_order_amount", None)),
+        high_order_percent=clamp_partial_percent(
+            getattr(row, "high_order_percent", None),
+            default=HIGH_UNIT_MIN_PERCENT,
+        ),
     )
 
 
@@ -224,7 +263,13 @@ def update_partial_percent(db: Session, data: DepositPercentUpdate) -> DepositPe
     row = get_or_create_singleton(db)
     row.partial_percent = clamp_partial_percent(data.partial_percent)
     row.min_amount = clamp_min_amount(data.min_amount)
-    row.high_order_amount = clamp_high_order_amount(data.high_order_amount)
+    if data.high_order_amount is not None:
+        row.high_order_amount = clamp_high_order_amount(data.high_order_amount)
+    if data.high_order_percent is not None:
+        row.high_order_percent = clamp_partial_percent(
+            data.high_order_percent,
+            default=HIGH_UNIT_MIN_PERCENT,
+        )
     db.add(row)
     db.commit()
     db.refresh(row)

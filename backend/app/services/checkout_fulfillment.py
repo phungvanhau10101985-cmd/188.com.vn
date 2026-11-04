@@ -118,6 +118,7 @@ def build_group_financial_plan(
     partial_percent: int = 30,
     min_amount: int = 100_000,
     high_order_amount: int = 3_000_000,
+    high_order_percent: int = 30,
 ) -> dict[str, Any]:
     subtotal = sum((_dec(row["total_price"]) for row in rows), Decimal("0"))
     discounted_subtotal = max(Decimal("0"), subtotal - discount)
@@ -140,7 +141,12 @@ def build_group_financial_plan(
             deposit = total
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
-            percentage = partial_percent_for_goods(partial_percent, discounted_subtotal, high_order_amount)
+            percentage = partial_percent_for_goods(
+                partial_percent,
+                discounted_subtotal,
+                high_order_amount,
+                high_order_percent,
+            )
             deposit = apply_partial_deposit(discounted_subtotal, percentage, min_amount)
     return {
         "subtotal": subtotal,
@@ -200,7 +206,7 @@ def _create_checkout_fulfillment(
             )
             cart_lines_by_key[key] = cart_item
 
-    partial_percent, min_amount, high_order_amount = get_rule(db)
+    partial_percent, min_amount, high_order_amount, high_order_percent = get_rule(db)
     items: list[dict[str, Any]] = []
     regular_subtotal = Decimal("0")
     regular_list_subtotal = Decimal("0")
@@ -382,6 +388,7 @@ def _create_checkout_fulfillment(
             partial_percent=partial_percent,
             min_amount=min_amount,
             high_order_amount=high_order_amount,
+            high_order_percent=high_order_percent,
         )
         subtotal = plan["subtotal"]
         total = plan["total"]

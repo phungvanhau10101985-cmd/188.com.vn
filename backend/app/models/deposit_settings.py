@@ -12,8 +12,10 @@ class DepositSettings(Base):
     partial_percent = Column(Integer, nullable=False, default=30)
     # Sàn tiền cọc một phần (VND). Không thấp hơn 100.000.
     min_amount = Column(Integer, nullable=False, default=100_000)
-    # Giá trị hàng từ mốc này thì cọc một phần không thấp hơn 30%.
+    # Giá trị hàng từ mốc này dùng high_order_percent thay cho partial_percent.
     high_order_amount = Column(Integer, nullable=False, default=3_000_000)
+    # % cọc khi giá trị hàng >= high_order_amount.
+    high_order_percent = Column(Integer, nullable=False, default=30)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     def __repr__(self) -> str:

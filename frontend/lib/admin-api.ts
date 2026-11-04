@@ -221,7 +221,17 @@ function formatFastApiDetail(detail: unknown): string {
     return detail
       .map((item) =>
         typeof item === 'object' && item !== null && 'msg' in item
-          ? String((item as { msg?: unknown }).msg ?? '')
+          ? (() => {
+              const row = item as { msg?: unknown; loc?: unknown };
+              const loc = Array.isArray(row.loc)
+                ? row.loc
+                    .filter((part) => part !== 'body')
+                    .map((part) => String(part))
+                    .join('.')
+                : '';
+              const msg = String(row.msg ?? '');
+              return loc ? `${loc}: ${msg}` : msg;
+            })()
           : typeof item === 'string'
             ? item
             : JSON.stringify(item),
@@ -319,8 +329,10 @@ async function fetchAdmin<T>(
       const err = await res.json().catch(() => ({ detail: res.statusText }));
       const msg = formatFastApiDetail((err as { detail?: unknown }).detail) || `Lỗi ${res.status}`;
       const statusHint =
-        res.status === 422
+        res.status === 422 && endpoint.includes('/import-1688/')
           ? '[422] Body JSON cần dạng: {"url":"https://..." , "download_images":true}. '
+          : res.status === 422
+            ? '[422] '
           : res.status === 504 || res.status === 502
             ? `[${res.status}] Hết giờ chờ proxy (gateway timeout) — request lâu hơn giới hạn nginx/Cloudflare. Cấu hình proxy_read_timeout ≥ 10 phút cho route API ${
                 /import-export\/(sync\/google-sheet|cron\/sync-google-sheet)/.test(endpoint)
@@ -3938,14 +3950,25 @@ export interface DepositPercentSetting {
   partial_percent: number;
   min_amount: number;
   high_order_amount: number;
+  high_order_percent: number;
 }
 
 export const adminBankAPI = {
   getDepositPercent: () => fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent'),
-  saveDepositPercent: (partial_percent: number, min_amount: number, high_order_amount: number) =>
+  saveDepositPercent: (
+    partial_percent: number,
+    min_amount: number,
+    high_order_amount: number,
+    high_order_percent: number,
+  ) =>
     fetchAdmin<DepositPercentSetting>('/admin/bank-accounts/deposit-percent', {
       method: 'PUT',
-      body: JSON.stringify({ partial_percent, min_amount, high_order_amount }),
+      body: JSON.stringify({
+        partial_percent,
+        min_amount,
+        high_order_amount,
+        high_order_percent,
+      }),
     }),
   getSepayHmacSecret: () => fetchAdmin<AdminSepayHmacSecretStatus>('/admin/sepay-hmac-secret'),
   saveSepayHmacSecret: (secret_key: string) =>

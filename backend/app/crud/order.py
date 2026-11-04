@@ -208,8 +208,8 @@ def update_order_deposit_type(
         order.deposit_amount = total
         order.remaining_amount = Decimal("0.00")
     else:
-        partial, minimum, high_order = get_rule(db)
-        partial = partial_percent_for_goods(partial, deposit_base, high_order)
+        partial, minimum, high_order, high_percent = get_rule(db)
+        partial = partial_percent_for_goods(partial, deposit_base, high_order, high_percent)
         order.deposit_percentage = partial
         order.deposit_amount = apply_partial_deposit(deposit_base, partial, minimum)
         order.remaining_amount = (total - order.deposit_amount).quantize(Decimal('0.01'))

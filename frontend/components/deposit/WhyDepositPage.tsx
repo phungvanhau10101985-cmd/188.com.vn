@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ToastProvider';
 import { depositPolicyFromApi, type DepositPolicy } from '@/lib/deposit-policy';
-import { formatDepositMinVnd, partialPercentForLines } from '@/lib/order-deposit';
+import { formatDepositMinVnd } from '@/lib/order-deposit';
 import { apiClient } from '@/lib/api-client';
 import { trackEvent } from '@/lib/analytics';
 
@@ -25,8 +25,7 @@ function zaloMessage(orderCode: string): string {
 export default function WhyDepositPage({ orderId, orderCode, zaloUrl, deposit }: Props) {
   const { pushToast } = useToast();
   const [policy, setPolicy] = useState(deposit);
-  const { percent, minAmount, highOrderAmount } = policy;
-  const highOrderPercent = partialPercentForLines(percent, true);
+  const { percent, minAmount, highOrderAmount, highOrderPercent } = policy;
 
   useEffect(() => {
     let cancelled = false;
@@ -135,7 +134,7 @@ export default function WhyDepositPage({ orderId, orderCode, zaloUrl, deposit }:
                 Muốn trả hết thì chọn <strong>cọc 100%</strong> trên trang QR. Khoản đó gồm cả phí ship, không còn số phải trả lúc nhận.
               </p>
               <p className="mt-1">
-                Đơn từ <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cọc tối thiểu{' '}
+                Đơn từ <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cọc{' '}
                 <strong>{highOrderPercent}%</strong>, vì cước và các loại phí của đơn càng lớn.
               </p>
             </section>

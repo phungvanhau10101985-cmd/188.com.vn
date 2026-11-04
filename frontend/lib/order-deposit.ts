@@ -7,13 +7,13 @@ import {
 
 export { HIGH_UNIT_MIN_PERCENT, HIGH_UNIT_PRICE_VND };
 
-/** Đơn giá >= mốc cọc 30%: một mình dòng đó đã đủ điều kiện. */
+/** Đơn giá >= mốc đơn lớn: một mình dòng đó đã đủ điều kiện. */
 export function lineHitsHighUnitPrice(unitPrice: number, threshold: number = HIGH_UNIT_PRICE_VND): boolean {
   const price = Math.round(Number(unitPrice) || 0);
   return price >= normalizeHighOrderAmount(threshold);
 }
 
-/** Giá trị hàng của đơn >= mốc thì cọc một phần không thấp hơn 30%. */
+/** Giá trị hàng của đơn >= mốc thì dùng % cọc của đơn lớn. */
 export function orderHitsHighValue(goods: number, threshold: number = HIGH_UNIT_PRICE_VND): boolean {
   const amount = Math.round(Number(goods) || 0);
   return amount >= normalizeHighOrderAmount(threshold);
@@ -36,20 +36,26 @@ export function cartLineUnitPrice(item: {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** % cọc một phần. Giá trị hàng của đơn >= 3.000.000đ thì không thấp hơn 30%. */
-export function partialPercentForLines(configured: number, highOrderValue: boolean): number {
+/** % cọc một phần. Dưới mốc dùng % đơn nhỏ; từ mốc trở lên dùng % đơn lớn. */
+export function partialPercentForLines(
+  configured: number,
+  highOrderValue: boolean,
+  highPercent: number = HIGH_UNIT_MIN_PERCENT,
+): number {
   const pct = Math.round(Number(configured));
   const applied = pct >= 1 && pct <= 99 ? pct : DEPOSIT_PERCENT;
-  if (highOrderValue) return Math.max(applied, HIGH_UNIT_MIN_PERCENT);
-  return applied;
+  if (!highOrderValue) return applied;
+  const high = Math.round(Number(highPercent));
+  return high >= 1 && high <= 99 ? high : HIGH_UNIT_MIN_PERCENT;
 }
 
 export function partialPercentForGoods(
   configured: number,
   goods: number,
   threshold: number = HIGH_UNIT_PRICE_VND,
+  highPercent: number = HIGH_UNIT_MIN_PERCENT,
 ): number {
-  return partialPercentForLines(configured, orderHitsHighValue(goods, threshold));
+  return partialPercentForLines(configured, orderHitsHighValue(goods, threshold), highPercent);
 }
 
 /** Cọc một phần: % giá trị hàng, không thấp hơn sàn, không vượt giá trị hàng. */

@@ -37,6 +37,7 @@ import {
 import OrderGoogleCustomerReviews from '@/components/OrderGoogleCustomerReviews';
 import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews';
 import { useGoogleCustomerReviewsMerchantId } from '@/lib/use-google-customer-reviews-merchant-id';
+import { partialPercentForGoods } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
@@ -160,7 +161,11 @@ export default function OrderDepositPage() {
     account_number?: string | null;
   } | null>(null);
   const { pushToast } = useToast();
-  const { percent: configuredDepositPercent } = useDepositPolicy();
+  const {
+    percent: configuredDepositPercent,
+    highOrderAmount,
+    highOrderPercent,
+  } = useDepositPolicy();
   const gcrMerchantId = useGoogleCustomerReviewsMerchantId();
   const prevStatusRef = useRef<string | null>(null);
   /** Tách ref: lần render `order` null vẫn bắn PageView; không được chặn ViewDepositPayment khi đơn load xong. */
@@ -803,7 +808,12 @@ export default function OrderDepositPage() {
                       Cọc{' '}
                       {order.deposit_percentage && order.deposit_percentage > 0 && order.deposit_percentage < 100
                         ? order.deposit_percentage
-                        : configuredDepositPercent}
+                        : partialPercentForGoods(
+                            configuredDepositPercent,
+                            Math.max(0, Number(order.subtotal || 0) - Number(order.discount_amount || 0)),
+                            highOrderAmount,
+                            highOrderPercent,
+                          )}
                       %
                     </span>
                   </label>

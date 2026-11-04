@@ -287,7 +287,7 @@ def test_high_unit_price_threshold_is_inclusive():
     assert deposit["deposit_amount"] == Decimal("900000.00")
 
 
-def test_high_unit_price_keeps_higher_configured_percent():
+def test_high_order_uses_its_own_percent():
     deposit = build_group_financial_plan(
         [{
             "fulfillment_source": "vietnam",
@@ -299,9 +299,10 @@ def test_high_unit_price_keeps_higher_configured_percent():
         shipping_fee=Decimal("30000"),
         requested_deposit_type=None,
         partial_percent=40,
+        high_order_percent=25,
     )
-    assert deposit["deposit_percentage"] == 40
-    assert deposit["deposit_amount"] == Decimal("1200000.00")
+    assert deposit["deposit_percentage"] == 25
+    assert deposit["deposit_amount"] == Decimal("750000.00")
 
 
 def test_three_products_of_one_million_force_30_percent_deposit():

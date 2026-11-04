@@ -1,6 +1,6 @@
 'use client';
 
-import { formatDepositMinVnd, partialPercentForLines } from '@/lib/order-deposit';
+import { formatDepositMinVnd } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 
 /** Mốc «đơn từ X» đang lưu ở quản trị. */
@@ -9,10 +9,10 @@ export function DepositHighOrderInline() {
   return <strong className="text-zinc-800">{formatDepositMinVnd(highOrderAmount)}</strong>;
 }
 
-/** % thực tế của đơn từ mốc đó: không thấp hơn 30%, và không thấp hơn % cọc trước. */
+/** % cọc của đơn từ mốc giá trị hàng. */
 export function DepositHighOrderPercentInline() {
-  const { percent } = useDepositPolicy();
-  return <strong className="text-zinc-800">{partialPercentForLines(percent, true)}%</strong>;
+  const { highOrderPercent } = useDepositPolicy();
+  return <strong className="text-zinc-800">{highOrderPercent}%</strong>;
 }
 
 /** «X% giá trị hàng, tối thiểu …» — lấy từ cài đặt mức cọc trên quản trị. */

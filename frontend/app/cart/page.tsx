@@ -136,7 +136,12 @@ export default function CartPage() {
   const { state: globalSiteSale, reload: reloadSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
-  const { percent: depositPercent, minAmount: depositMinAmount, highOrderAmount } = useDepositPolicy();
+  const {
+    percent: depositPercent,
+    minAmount: depositMinAmount,
+    highOrderAmount,
+    highOrderPercent,
+  } = useDepositPolicy();
   const [pageReady, setPageReady] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
@@ -591,7 +596,11 @@ export default function CartPage() {
       (item) =>
         item.requires_deposit === true || item.product_data?.deposit_require === true
     );
-  const checkoutDepositPercent = partialPercentForLines(depositPercent, highOrderValueSelected);
+  const checkoutDepositPercent = partialPercentForLines(
+    depositPercent,
+    highOrderValueSelected,
+    highOrderPercent,
+  );
   const paymentMethodLabel = depositRequiredForSelected
     ? `Chuyển khoản cọc ${checkoutDepositPercent}%, tối thiểu ${formatDepositMinVnd(depositMinAmount)}`
     : 'Thanh toán khi nhận hàng (COD)';
@@ -1700,7 +1709,7 @@ export default function CartPage() {
                   {highOrderValueSelected ? (
                     <>
                       Đơn từ{' '}
-                      <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cần đặt cọc tối thiểu{' '}
+                      <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cần đặt cọc{' '}
                       <strong>{checkoutDepositPercent}%</strong> giá trị hàng
                     </>
                   ) : (
