@@ -12,7 +12,7 @@ from app.schemas.site_embed_code import (
 )
 from app.services.site_embed_templates import collect_expanded_fragments
 
-_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v5:public"
+_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v6:public"
 
 
 def invalidate_public_embeds_cache() -> None:
@@ -150,6 +150,14 @@ _DEFAULT_ROWS: tuple = (
     ("tiktok", "pixel", "TikTok — Pixel Web (Remarketing động / catalogue)", "head", "Chỉ nhập TikTok Pixel ID (Events Manager) — không cần dán base code đầy đủ.", 88),
     ("tiktok", "capi_token", "TikTok — Events API — Access Token (server)", "head", "Token gửi sự kiện server-side TikTok Events API (không hiện HTML). Ghép Pixel + Events API mạnh hơn cho remarketing.", 87),
     ("zalo", "chat", "Zalo — Chat / Widget Official Account", "body_close", "Chỉ nhập OA ID (chuỗi số của Official Account).", 90),
+    (
+        "zalo",
+        "personal",
+        "Zalo cá nhân — nút nhắn shop",
+        "body_close",
+        "Số điện thoại Zalo cá nhân hoặc link zalo.me. Nút «Nhắn Zalo cho shop» trên trang giải thích cọc mở link này. Không nhúng widget.",
+        91,
+    ),
     ("zalo", "other", "Zalo — mã khác (ZNS,...)", "body_close", "Dán full HTML nếu cần khung tùy biến.", 100),
     ("other", "custom", "Mã tùy chỉnh — trong head (thẻ HTML head)", "head", "Bất kỳ script/link/meta không thuộc mục trên.", 200),
     ("other", "custom", "Mã tùy chỉnh — đầu thân trang (body)", "body_open", "Ngay sau khi mở thẻ body.", 210),
@@ -418,6 +426,49 @@ def get_google_ads_web_conversions(db: Session) -> GoogleAdsWebConversions:
         deposit_page=_get_active_conversion_send_to_for_category(db, "ads_conversion_deposit_page"),
         purchase=_get_active_conversion_send_to_for_category(db, "ads_conversion_purchase"),
     )
+
+
+def normalize_zalo_personal_url(raw: str) -> Optional[str]:
+    """Số điện thoại hoặc https://zalo.me/… → link chat. None nếu không phải Zalo cá nhân/OA số."""
+    text = (raw or "").strip()
+    if not text or any(ch in text for ch in "<>\"'"):
+        return None
+    match = re.search(r"(?:https?://)?(?:www\.)?zalo\.me/([0-9]{9,20})/?", text, re.IGNORECASE)
+    if match:
+        digits = match.group(1)
+    else:
+        compact = re.sub(r"[\s.\-()]", "", text)
+        if compact.startswith("+"):
+            compact = compact[1:]
+        if not compact.isdigit():
+            return None
+        digits = compact
+    if digits.startswith("84") and len(digits) in (11, 12):
+        digits = "0" + digits[2:]
+    if not digits.isdigit() or not (9 <= len(digits) <= 20):
+        return None
+    if len(digits) <= 11 and not digits.startswith("0"):
+        digits = "0" + digits
+        if len(digits) > 11:
+            return None
+    return f"https://zalo.me/{digits}"
+
+
+def get_zalo_personal_chat_url(db: Session) -> Optional[str]:
+    """Link Zalo cá nhân đang bật (zalo/personal). Rỗng hoặc sai định dạng thì None."""
+    row = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "zalo",
+            SiteEmbedCode.category == "personal",
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .first()
+    )
+    if not row:
+        return None
+    return normalize_zalo_personal_url(row.content or "")
 
 
 def get_google_customer_reviews_merchant_id(db: Session) -> Optional[int]:

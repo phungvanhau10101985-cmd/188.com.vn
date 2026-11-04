@@ -20,7 +20,7 @@ router = APIRouter()
 # Cache mã nhúng public (60s) — Next SSR layout gọi mỗi request → khi pool DB chật,
 # request xếp hàng và bùng QueuePool TimeoutError. Admin sửa embed: chờ ≤ 60s là thấy.
 _PUBLIC_EMBEDS_TTL = 60.0
-_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v5:public"
+_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v6:public"
 
 
 def _fetch_public_embeds() -> PublicSiteEmbedsResponse:
@@ -31,6 +31,7 @@ def _fetch_public_embeds() -> PublicSiteEmbedsResponse:
         google_ads_aw_ids = embed_crud.get_active_google_ads_aw_ids(db)
         google_ads_web_conversions = embed_crud.get_google_ads_web_conversions(db)
         gcr_merchant_id = embed_crud.get_google_customer_reviews_merchant_id(db)
+        zalo_personal_url = embed_crud.get_zalo_personal_chat_url(db)
     finally:
         db.close()
     return PublicSiteEmbedsResponse(
@@ -40,6 +41,7 @@ def _fetch_public_embeds() -> PublicSiteEmbedsResponse:
         google_ads_aw_ids=google_ads_aw_ids,
         google_ads_web_conversions=google_ads_web_conversions,
         google_customer_reviews_merchant_id=gcr_merchant_id,
+        zalo_personal_url=zalo_personal_url,
     )
 
 

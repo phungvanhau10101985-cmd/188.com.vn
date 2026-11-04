@@ -323,6 +323,10 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
     plat = (row.platform or "").lower().strip()
     raw = (row.content or "").strip()
 
+    # Số Zalo cá nhân chỉ để nút chat mở zalo.me — không nhúng widget.
+    if plat == "zalo" and cat == "personal":
+        return []
+
     # GA4: nếu admin dán nguyên snippet <script>… gtag… nhưng category vẫn là ga4,
     # trích G-… để dựng lại snippet chuẩn (tránh lệch / thiếu thẻ so với token).
     if plat == "google" and cat == "ga4" and raw and looks_like_pasted_html(raw):

@@ -5,6 +5,7 @@ export const INFO_PAGES = [
   { slug: 'lien-he', title: 'Thông tin liên hệ' },
   { slug: 'thong-tin-don-vi', title: 'Thông tin đơn vị sở hữu website' },
   { slug: 'huong-dan-mua-hang', title: 'Hướng dẫn mua hàng - Điều kiện thanh toán' },
+  { slug: 'tai-sao-dat-coc', title: 'Tại sao phải đặt cọc?' },
   { slug: 'chinh-sach-giao-hang', title: 'Chính sách giao hàng' },
   { slug: 'doi-tra-hoan-tien', title: 'Đổi trả & Hoàn tiền' },
   { slug: 'chinh-sach-bao-mat', title: 'Chính sách bảo mật' },

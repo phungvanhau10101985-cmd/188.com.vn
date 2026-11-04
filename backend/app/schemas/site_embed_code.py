@@ -54,6 +54,8 @@ class PublicSiteEmbedsResponse(BaseModel):
     google_ads_web_conversions: GoogleAdsWebConversions = Field(default_factory=GoogleAdsWebConversions)
     #: Merchant Center ID — Đánh giá khách hàng qua Google (opt-in trang xác nhận đơn). None = tắt.
     google_customer_reviews_merchant_id: Optional[int] = None
+    #: Link https://zalo.me/… khi admin bật Zalo cá nhân. None = site dùng link dự phòng trong code.
+    zalo_personal_url: Optional[str] = None
 
 
 class SiteEmbedCodeAdminItem(BaseModel):

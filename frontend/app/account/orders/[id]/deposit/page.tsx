@@ -970,6 +970,13 @@ export default function OrderDepositPage() {
               ) : (
                 <p className="text-sm text-gray-500 text-center py-8">Chọn tài khoản để hiển thị mã QR.</p>
               )}
+              <Link
+                href={`/info/tai-sao-dat-coc?order=${order.id}&code=${encodeURIComponent(order.order_code)}`}
+                onClick={() => trackEvent('deposit_why_open', { order_id: order.id })}
+                className="mt-3 inline-flex w-full max-w-[280px] items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
+              >
+                Hỏi tại sao phải cọc?
+              </Link>
             </div>
           </div>
 

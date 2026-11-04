@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
+import { normalizeZaloPersonalUrl } from '@/lib/zalo-personal-url';
 
 const NANO_PRESET = {
   platform: 'nanoai',
@@ -22,6 +23,15 @@ const ZALO_PRESET = {
   hint: 'Chỉ nhập OA ID (chuỗi số của Official Account).',
 };
 
+const ZALO_PERSONAL_PRESET = {
+  platform: 'zalo',
+  category: 'personal',
+  title: 'Zalo cá nhân — nút nhắn shop',
+  placement: 'body_close' as const,
+  sort_order: 91,
+  hint: 'Số điện thoại Zalo cá nhân hoặc link zalo.me. Nút «Nhắn Zalo cho shop» mở link này.',
+};
+
 const FB_CHAT_PRESET = {
   platform: 'facebook',
   category: 'chat',
@@ -38,10 +48,13 @@ function pickRows(list: SiteEmbedCodeAdmin[]) {
   const zalo = list.find(
     (r) => r.platform?.toLowerCase() === 'zalo' && r.category?.toLowerCase() === 'chat',
   );
+  const zaloPersonal = list.find(
+    (r) => r.platform?.toLowerCase() === 'zalo' && r.category?.toLowerCase() === 'personal',
+  );
   const fbChat = list.find(
     (r) => r.platform?.toLowerCase() === 'facebook' && r.category?.toLowerCase() === 'chat',
   );
-  return { nano, zalo, fbChat };
+  return { nano, zalo, zaloPersonal, fbChat };
 }
 
 export default function AdminChatEmbedsPage() {
@@ -55,6 +68,10 @@ export default function AdminChatEmbedsPage() {
   const [zaloId, setZaloId] = useState<number | null>(null);
   const [zaloOaid, setZaloOaid] = useState('');
   const [zaloActive, setZaloActive] = useState(true);
+
+  const [zaloPersonalId, setZaloPersonalId] = useState<number | null>(null);
+  const [zaloPersonal, setZaloPersonal] = useState('');
+  const [zaloPersonalActive, setZaloPersonalActive] = useState(true);
 
   const [fbId, setFbId] = useState<number | null>(null);
   const [fbPageId, setFbPageId] = useState('');
@@ -71,13 +88,16 @@ export default function AdminChatEmbedsPage() {
     setLoading(true);
     try {
       const list = await adminSiteEmbedAPI.getAll();
-      const { nano, zalo, fbChat } = pickRows(list);
+      const { nano, zalo, zaloPersonal, fbChat } = pickRows(list);
       setNanoId(nano?.id ?? null);
       setNanoContent(nano?.content ?? '');
       setNanoActive(nano?.is_active ?? true);
       setZaloId(zalo?.id ?? null);
       setZaloOaid(zalo?.content ?? '');
       setZaloActive(zalo?.is_active ?? true);
+      setZaloPersonalId(zaloPersonal?.id ?? null);
+      setZaloPersonal(zaloPersonal?.content ?? '');
+      setZaloPersonalActive(zaloPersonal?.is_active ?? true);
       setFbId(fbChat?.id ?? null);
       setFbPageId(fbChat?.content ?? '');
       setFbActive(fbChat?.is_active ?? true);
@@ -145,6 +165,40 @@ export default function AdminChatEmbedsPage() {
         setZaloId(row.id);
       }
       showToast('ok', 'Đã lưu cấu hình Zalo');
+      await load();
+    } catch (err) {
+      showToast('err', (err as Error)?.message || 'Lỗi lưu');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const saveZaloPersonal = async () => {
+    const raw = (zaloPersonal || '').trim();
+    const url = raw ? normalizeZaloPersonalUrl(raw) : null;
+    if (raw && !url) {
+      showToast('err', 'Nhập số điện thoại Zalo hoặc link https://zalo.me/…');
+      return;
+    }
+    setSaving('zalo-personal');
+    try {
+      const content = url || '';
+      if (zaloPersonalId != null) {
+        await adminSiteEmbedAPI.update(zaloPersonalId, {
+          content,
+          is_active: zaloPersonalActive,
+          placement: 'body_close',
+        });
+      } else {
+        const row = await adminSiteEmbedAPI.create({
+          ...ZALO_PERSONAL_PRESET,
+          content,
+          is_active: zaloPersonalActive,
+        });
+        setZaloPersonalId(row.id);
+      }
+      if (url) setZaloPersonal(url);
+      showToast('ok', url ? 'Đã lưu Zalo cá nhân' : 'Đã lưu. Nút nhắn Zalo dùng link dự phòng.');
       await load();
     } catch (err) {
       showToast('err', (err as Error)?.message || 'Lỗi lưu');
@@ -262,9 +316,40 @@ export default function AdminChatEmbedsPage() {
             </section>
 
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold text-gray-900 mb-1">Zalo cá nhân — nút nhắn shop</h2>
+              <p className="text-xs text-gray-500 mb-3">
+                Nhập số điện thoại Zalo cá nhân hoặc link zalo.me. Khách bấm «Nhắn Zalo cho shop» trên trang giải thích cọc sẽ mở đúng số này. Để trống thì nút mở link Zalo dự phòng trong mã nguồn.
+              </p>
+              <input
+                type="text"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono mb-3"
+                placeholder="Ví dụ: 0968659836 hoặc https://zalo.me/0968659836"
+                value={zaloPersonal}
+                onChange={(e) => setZaloPersonal(e.target.value)}
+                aria-label="Zalo cá nhân"
+              />
+              <label className="flex items-center gap-2 text-sm mb-3">
+                <input
+                  type="checkbox"
+                  checked={zaloPersonalActive}
+                  onChange={(e) => setZaloPersonalActive(e.target.checked)}
+                />
+                Dùng số này cho nút nhắn Zalo
+              </label>
+              <button
+                type="button"
+                onClick={() => void saveZaloPersonal()}
+                disabled={saving === 'zalo-personal'}
+                className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+              >
+                {saving === 'zalo-personal' ? 'Đang lưu...' : 'Lưu Zalo cá nhân'}
+              </button>
+            </section>
+
+            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 mb-1">Mã nhúng Zalo (OA Chat)</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Chỉ nhập OA ID (Official Account ID — chuỗi số). Để dán full HTML tùy biến, dùng trang mã nhúng đầy đủ.
+                Chỉ nhập OA ID cho widget chat Official Account nổi trên site. Ô này không đổi nút «Nhắn Zalo cho shop».
               </p>
               <input
                 type="text"

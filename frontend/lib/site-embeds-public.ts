@@ -23,6 +23,8 @@ export type PublicSiteEmbeds = {
   googleAdsWebConversionsLegacyPdpOnly?: boolean;
   /** Merchant Center ID — Google Customer Reviews opt-in; null/undefined = tắt. */
   googleCustomerReviewsMerchantId?: number | null;
+  /** Link Zalo cá nhân do quản trị bật. Không có thì trang cọc dùng link dự phòng. */
+  zaloPersonalUrl?: string | null;
 };
 
 const empty: PublicSiteEmbeds = { head: [], body_open: [], body_close: [] };
@@ -91,6 +93,9 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
       const googleCustomerReviewsMerchantId =
         Number.isFinite(gcrParsed) && gcrParsed > 0 ? gcrParsed : null;
 
+      const zaloRaw = String(data.zalo_personal_url ?? '').trim();
+      const zaloPersonalUrl = /^https:\/\/zalo\.me\/[0-9]{9,20}$/.test(zaloRaw) ? zaloRaw : null;
+
       const value: PublicSiteEmbeds = {
         head: Array.isArray(data.head) ? data.head.filter(Boolean) : [],
         body_open: Array.isArray(data.body_open) ? data.body_open.filter(Boolean) : [],
@@ -99,6 +104,7 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
         ...(googleAdsWebConversions !== undefined ? { googleAdsWebConversions } : {}),
         ...(googleAdsWebConversionsLegacyPdpOnly ? { googleAdsWebConversionsLegacyPdpOnly: true } : {}),
         ...(googleCustomerReviewsMerchantId != null ? { googleCustomerReviewsMerchantId } : {}),
+        ...(zaloPersonalUrl ? { zaloPersonalUrl } : {}),
       };
       publicEmbedsMemCache = {
         expiresAt: Date.now() + PUBLIC_EMBEDS_MEM_TTL_MS,
