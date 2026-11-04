@@ -43,6 +43,33 @@ def test_saved_personal_number_replaces_oa_widget():
     assert "zalo-chat-widget" not in html
 
 
+def test_float_off_hides_personal_button_and_keeps_oa_widget_off():
+    rows = [
+        _row(
+            content="https://zalo.me/0968659836",
+            hint="zalo_open:personal\nzalo_float:off",
+        ),
+        _row(category="chat", content="1714121106420519241"),
+    ]
+    _head, _open, body_close = collect_expanded_fragments(rows)
+    html = "\n".join(body_close)
+    assert "Nhắn Zalo" not in html
+    assert "zalo-chat-widget" not in html
+
+
+def test_float_on_shows_personal_button():
+    rows = [
+        _row(
+            content="https://zalo.me/0968659836",
+            hint="zalo_open:personal\nzalo_float:on",
+        ),
+    ]
+    _head, _open, body_close = collect_expanded_fragments(rows)
+    html = "\n".join(body_close)
+    assert 'data-zalo-open="personal"' in html
+    assert "Nhắn Zalo" in html
+
+
 def test_oa_mode_keeps_official_widget():
     rows = [
         _row(content="https://zalo.me/0968659836", hint="zalo_open:oa"),

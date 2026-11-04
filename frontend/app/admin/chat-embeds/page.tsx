@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 import {
   normalizeZaloPersonalUrl,
+  readZaloFloatEnabled,
   readZaloOpenMode,
   stripZaloOpenMode,
-  withZaloOpenMode,
+  withZaloChatHint,
   type ZaloOpenMode,
 } from '@/lib/zalo-personal-url';
 
@@ -79,6 +80,7 @@ export default function AdminChatEmbedsPage() {
   const [zaloPersonal, setZaloPersonal] = useState('');
   const [zaloPersonalActive, setZaloPersonalActive] = useState(true);
   const [zaloOpen, setZaloOpen] = useState<ZaloOpenMode>('personal');
+  const [zaloFloat, setZaloFloat] = useState(true);
   const [zaloPersonalHint, setZaloPersonalHint] = useState('');
 
   const [fbId, setFbId] = useState<number | null>(null);
@@ -107,6 +109,7 @@ export default function AdminChatEmbedsPage() {
       setZaloPersonal(zaloPersonal?.content ?? '');
       setZaloPersonalActive(zaloPersonal?.is_active ?? true);
       setZaloOpen(readZaloOpenMode(zaloPersonal?.hint) ?? 'personal');
+      setZaloFloat(readZaloFloatEnabled(zaloPersonal?.hint));
       setZaloPersonalHint(stripZaloOpenMode(zaloPersonal?.hint || ''));
       setFbId(fbChat?.id ?? null);
       setFbPageId(fbChat?.content ?? '');
@@ -198,14 +201,14 @@ export default function AdminChatEmbedsPage() {
           content,
           is_active: zaloPersonalActive,
           placement: 'body_close',
-          hint: withZaloOpenMode(zaloPersonalHint, zaloOpen),
+          hint: withZaloChatHint(zaloPersonalHint, zaloOpen, zaloFloat),
         });
       } else {
         const row = await adminSiteEmbedAPI.create({
           ...ZALO_PERSONAL_PRESET,
           content,
           is_active: zaloPersonalActive,
-          hint: withZaloOpenMode(ZALO_PERSONAL_PRESET.hint, zaloOpen),
+          hint: withZaloChatHint(ZALO_PERSONAL_PRESET.hint, zaloOpen, zaloFloat),
         });
         setZaloPersonalId(row.id);
       }
@@ -349,13 +352,41 @@ export default function AdminChatEmbedsPage() {
                 <option value="personal">Zalo cá nhân — số hoặc link ở trên</option>
                 <option value="oa">Zalo Official Account — widget OA</option>
               </select>
+              <p className="text-xs text-gray-500 -mt-2 mb-3">
+                {zaloOpen === 'personal'
+                  ? 'Nút xanh và «Nhắn Zalo cho shop» mở số cá nhân. Widget OA tắt.'
+                  : 'Nút nổi là widget Official Account ở mục bên dưới. Số cá nhân không mở khi khách bấm.'}
+              </p>
+              <div className="mb-3 flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Nút «Nhắn Zalo» nổi trên web</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Nút xanh góc phải trên mọi trang. Tắt thì nút biến mất; trang đặt cọc vẫn mở đúng số Zalo.
+                  </p>
+                </div>
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className="text-sm font-medium text-gray-700">{zaloFloat ? 'Bật' : 'Tắt'}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={zaloFloat}
+                    aria-label={zaloFloat ? 'Tắt nút Nhắn Zalo nổi' : 'Bật nút Nhắn Zalo nổi'}
+                    onClick={() => setZaloFloat((on) => !on)}
+                    className={`relative h-7 w-12 rounded-full ${zaloFloat ? 'bg-[#0068FF]' : 'bg-gray-300'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow ${zaloFloat ? 'left-5' : 'left-0.5'}`}
+                    />
+                  </button>
+                </span>
+              </div>
               <label className="flex items-center gap-2 text-sm mb-3">
                 <input
                   type="checkbox"
                   checked={zaloPersonalActive}
                   onChange={(e) => setZaloPersonalActive(e.target.checked)}
                 />
-                Dùng số này cho nút nhắn Zalo
+                Dùng số này làm Zalo của shop
               </label>
               <button
                 type="button"

@@ -300,11 +300,20 @@ def expand_tiktok_pixel(pixel_id: str) -> List[PlacementHtml]:
 
 
 _ZALO_OPEN_RE = re.compile(r"(?:^|\n)zalo_open:(personal|oa)\b")
+_ZALO_FLOAT_RE = re.compile(r"(?:^|\n)zalo_float:(on|off)\b")
 
 
 def read_zalo_open_mode(hint: str | None) -> str | None:
     match = _ZALO_OPEN_RE.search(hint or "")
     return match.group(1) if match else None
+
+
+def zalo_float_button_enabled(hint: str | None) -> bool:
+    """Nút «Nhắn Zalo» cố định góc phải. Thiếu cờ thì bật, để site đang chạy không mất nút."""
+    match = _ZALO_FLOAT_RE.search(hint or "")
+    if not match:
+        return True
+    return match.group(1) == "on"
 
 
 def zalo_personal_opens_chat(row: SiteEmbedCode) -> bool:
@@ -364,6 +373,8 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
 
         url = normalize_zalo_personal_url(raw)
         if not url:
+            return []
+        if not zalo_float_button_enabled(row.hint):
             return []
         return expand_zalo_personal_button(url)
 

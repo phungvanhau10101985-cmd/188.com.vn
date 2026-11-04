@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
 import {
   normalizeZaloPersonalUrl,
+  readZaloFloatEnabled,
   readZaloOpenMode,
   stripZaloOpenMode,
-  withZaloOpenMode,
+  withZaloChatHint,
   type ZaloOpenMode,
 } from '@/lib/zalo-personal-url';
 import { getAdminEmbedHeadPreview } from '@/lib/admin-embed-head-preview';
@@ -94,6 +95,8 @@ type FormState = {
   useFullHtml?: boolean;
   /** Nút Zalo trên site mở số cá nhân hay Official Account. */
   zaloOpen: ZaloOpenMode;
+  /** Nút xanh «Nhắn Zalo» cố định góc phải. */
+  zaloFloat: boolean;
 };
 
 function emptyForm(): FormState {
@@ -108,6 +111,7 @@ function emptyForm(): FormState {
     sort_order: 500,
     useFullHtml: false,
     zaloOpen: 'personal',
+    zaloFloat: true,
   };
 }
 
@@ -229,6 +233,7 @@ export default function AdminEmbedCodesPage() {
       is_active: row.is_active,
       sort_order: row.sort_order,
       zaloOpen: readZaloOpenMode(row.hint) ?? 'personal',
+      zaloFloat: readZaloFloatEnabled(row.hint),
       useFullHtml:
         ufh || (row.category || '').toLowerCase() === 'other' || (row.platform || '').toLowerCase() === 'other',
     });
@@ -278,7 +283,7 @@ export default function AdminEmbedCodesPage() {
       is_active: form.is_active,
       sort_order: form.sort_order,
       hint: isZaloPersonal
-        ? withZaloOpenMode(form.hint, form.zaloOpen)
+        ? withZaloChatHint(form.hint, form.zaloOpen, form.zaloFloat)
         : form.hint.trim() || undefined,
     };
 
@@ -412,9 +417,20 @@ export default function AdminEmbedCodesPage() {
                               <span className="text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-600">{row.category}</span>
                             )}
                             {ck === 'id' && (row.platform || '').toLowerCase() === 'zalo' && (row.category || '').toLowerCase() === 'personal' ? (
-                              <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">
-                                {readZaloOpenMode(row.hint) === 'oa' ? 'Mở OA' : 'Mở cá nhân'}
-                              </span>
+                              <>
+                                <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">
+                                  {readZaloOpenMode(row.hint) === 'oa' ? 'Mở OA' : 'Mở cá nhân'}
+                                </span>
+                                <span
+                                  className={`text-xs px-2 py-0.5 rounded ${
+                                    readZaloFloatEnabled(row.hint)
+                                      ? 'bg-blue-50 text-blue-800'
+                                      : 'bg-gray-100 text-gray-600'
+                                  }`}
+                                >
+                                  {readZaloFloatEnabled(row.hint) ? 'Nút nổi bật' : 'Nút nổi tắt'}
+                                </span>
+                              </>
                             ) : ck === 'id' ? (
                               <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">Chỉ mã</span>
                             ) : ck === 'capi' ? (
@@ -634,9 +650,32 @@ export default function AdminEmbedCodesPage() {
                   </select>
                   <p className="mt-1 text-xs text-slate-600">
                     {form.zaloOpen === 'personal'
-                      ? 'Nút nổi và «Nhắn Zalo cho shop» mở số cá nhân. Widget OA tắt.'
-                      : 'Nút nổi là chat Official Account. Số cá nhân không được mở khi khách bấm.'}
+                      ? '«Nhắn Zalo cho shop» mở số cá nhân. Widget OA tắt.'
+                      : 'Chat nổi là widget Official Account. Số cá nhân không được mở khi khách bấm.'}
                   </p>
+                  <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">Nút «Nhắn Zalo» nổi trên web</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Nút xanh góc phải. Tắt thì nút biến mất; link Zalo trên trang đặt cọc vẫn giữ.
+                      </p>
+                    </div>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="text-sm font-medium text-gray-700">{form.zaloFloat ? 'Bật' : 'Tắt'}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={form.zaloFloat}
+                        aria-label={form.zaloFloat ? 'Tắt nút Nhắn Zalo nổi' : 'Bật nút Nhắn Zalo nổi'}
+                        onClick={() => setForm((f) => ({ ...f, zaloFloat: !f.zaloFloat }))}
+                        className={`relative h-7 w-12 rounded-full ${form.zaloFloat ? 'bg-[#0068FF]' : 'bg-gray-300'}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-6 w-6 rounded-full bg-white shadow ${form.zaloFloat ? 'left-5' : 'left-0.5'}`}
+                        />
+                      </button>
+                    </span>
+                  </div>
                 </div>
               )}
 
