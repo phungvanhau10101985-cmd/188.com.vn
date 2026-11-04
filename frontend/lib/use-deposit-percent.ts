@@ -2,33 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
-import { DEPOSIT_MIN_VND, DEPOSIT_PERCENT } from '@/lib/business-info';
+import {
+  DEPOSIT_POLICY_FALLBACK,
+  depositPolicyFromApi,
+  type DepositPolicy,
+} from '@/lib/deposit-policy';
 
 const CACHE_MS = 60_000;
 
-export type DepositPolicy = {
-  percent: number;
-  minAmount: number;
-};
+export type { DepositPolicy };
 
-const FALLBACK: DepositPolicy = { percent: DEPOSIT_PERCENT, minAmount: DEPOSIT_MIN_VND };
+const FALLBACK = DEPOSIT_POLICY_FALLBACK;
 
 let cached: { value: DepositPolicy; at: number } | null = null;
 let inflight: Promise<DepositPolicy> | null = null;
-
-function normalizePercent(raw: unknown): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return null;
-  const rounded = Math.round(n);
-  if (rounded < 1 || rounded > 99) return null;
-  return rounded;
-}
-
-function normalizeMinAmount(raw: unknown): number {
-  const n = Math.round(Number(raw));
-  if (!Number.isFinite(n) || n < DEPOSIT_MIN_VND) return DEPOSIT_MIN_VND;
-  return n;
-}
 
 export function loadDepositPolicy(): Promise<DepositPolicy> {
   if (cached && Date.now() - cached.at < CACHE_MS) {
@@ -38,10 +25,7 @@ export function loadDepositPolicy(): Promise<DepositPolicy> {
     inflight = apiClient
       .getDepositPolicy()
       .then((data) => {
-        const value: DepositPolicy = {
-          percent: normalizePercent(data?.partial_percent) ?? DEPOSIT_PERCENT,
-          minAmount: normalizeMinAmount(data?.min_amount),
-        };
+        const value = depositPolicyFromApi(data);
         cached = { value, at: Date.now() };
         return value;
       })

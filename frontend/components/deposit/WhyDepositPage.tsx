@@ -1,16 +1,18 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ToastProvider';
-import { HIGH_UNIT_MIN_PERCENT, HIGH_UNIT_PRICE_VND } from '@/lib/business-info';
-import { formatDepositMinVnd } from '@/lib/order-deposit';
-import { useDepositPolicy } from '@/lib/use-deposit-percent';
+import { depositPolicyFromApi, type DepositPolicy } from '@/lib/deposit-policy';
+import { formatDepositMinVnd, partialPercentForLines } from '@/lib/order-deposit';
+import { apiClient } from '@/lib/api-client';
 import { trackEvent } from '@/lib/analytics';
 
 type Props = {
   orderId: number | null;
   orderCode: string;
   zaloUrl: string;
+  deposit: DepositPolicy;
 };
 
 function zaloMessage(orderCode: string): string {
@@ -20,9 +22,24 @@ function zaloMessage(orderCode: string): string {
   return 'Em cần hỏi về chính sách đặt cọc trên 188.com.vn.';
 }
 
-export default function WhyDepositPage({ orderId, orderCode, zaloUrl }: Props) {
+export default function WhyDepositPage({ orderId, orderCode, zaloUrl, deposit }: Props) {
   const { pushToast } = useToast();
-  const { percent, minAmount } = useDepositPolicy();
+  const [policy, setPolicy] = useState(deposit);
+  const { percent, minAmount, highOrderAmount } = policy;
+  const highOrderPercent = partialPercentForLines(percent, true);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getDepositPolicy()
+      .then((data) => {
+        if (!cancelled) setPolicy(depositPolicyFromApi(data));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const backHref = orderId ? `/account/orders/${orderId}/deposit` : '/account/orders';
   const backLabel = orderId ? 'Quay lại thanh toán cọc' : 'Xem đơn hàng của tôi';
 
@@ -108,8 +125,8 @@ export default function WhyDepositPage({ orderId, orderCode, zaloUrl }: Props) {
                 Muốn trả hết thì chọn <strong>cọc 100%</strong> trên trang QR. Khoản đó gồm cả phí ship, không còn số phải trả lúc nhận.
               </p>
               <p className="mt-1">
-                Đơn từ <strong>{formatDepositMinVnd(HIGH_UNIT_PRICE_VND)}</strong> cọc tối thiểu{' '}
-                <strong>{HIGH_UNIT_MIN_PERCENT}%</strong>, vì tiền mua và phí vận chuyển quốc tế của đơn lớn càng cao.
+                Đơn từ <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cọc tối thiểu{' '}
+                <strong>{highOrderPercent}%</strong>, vì tiền mua và phí vận chuyển quốc tế của đơn lớn càng cao.
               </p>
             </section>
 

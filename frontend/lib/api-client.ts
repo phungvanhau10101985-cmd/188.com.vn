@@ -1314,10 +1314,15 @@ class ApiClient {
   }
 
   // BANK ACCOUNTS (public - cho trang đặt cọc)
-  async getDepositPolicy(): Promise<{ partial_percent: number; min_amount: number }> {
-    return this.fetch<{ partial_percent: number; min_amount: number }>('/bank-accounts/deposit-percent', {
-      quiet: true,
-    });
+  async getDepositPolicy(): Promise<{
+    partial_percent: number;
+    min_amount: number;
+    high_order_amount?: number;
+  }> {
+    return this.fetch<{ partial_percent: number; min_amount: number; high_order_amount?: number }>(
+      '/bank-accounts/deposit-percent',
+      { quiet: true },
+    );
   }
 
   async getDepositPercent(): Promise<number> {

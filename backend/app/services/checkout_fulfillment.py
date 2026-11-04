@@ -117,11 +117,12 @@ def build_group_financial_plan(
     requested_deposit_type: Optional[str],
     partial_percent: int = 30,
     min_amount: int = 100_000,
+    high_order_amount: int = 3_000_000,
 ) -> dict[str, Any]:
     subtotal = sum((_dec(row["total_price"]) for row in rows), Decimal("0"))
     discounted_subtotal = max(Decimal("0"), subtotal - discount)
     total = discounted_subtotal + shipping_fee
-    high_order = order_hits_high_value(discounted_subtotal)
+    high_order = order_hits_high_value(discounted_subtotal, high_order_amount)
     requires_deposit = any(bool(row.get("requires_deposit")) for row in rows) or high_order
     deposit_type = requested_deposit_type
     if high_order and (not deposit_type or deposit_type == schemas.DepositType.NONE.value):
@@ -139,7 +140,7 @@ def build_group_financial_plan(
             deposit = total
         else:
             deposit_type = schemas.DepositType.PERCENT_30.value
-            percentage = partial_percent_for_goods(partial_percent, discounted_subtotal)
+            percentage = partial_percent_for_goods(partial_percent, discounted_subtotal, high_order_amount)
             deposit = apply_partial_deposit(discounted_subtotal, percentage, min_amount)
     return {
         "subtotal": subtotal,
@@ -199,6 +200,7 @@ def _create_checkout_fulfillment(
             )
             cart_lines_by_key[key] = cart_item
 
+    partial_percent, min_amount, high_order_amount = get_rule(db)
     items: list[dict[str, Any]] = []
     regular_subtotal = Decimal("0")
     regular_list_subtotal = Decimal("0")
@@ -287,10 +289,12 @@ def _create_checkout_fulfillment(
                 "selected_size": requested.selected_size,
                 "selected_color": requested.selected_color,
                 "selected_color_name": _checkout_color_name(product, requested, cart_line),
-                "requires_deposit": line_requires_deposit(product.deposit_require, unit_price),
+                "requires_deposit": line_requires_deposit(
+                    product.deposit_require, unit_price, high_order_amount
+                ),
                 "deposit_amount": (
                     unit_price * Decimal("0.3")
-                    if line_requires_deposit(product.deposit_require, unit_price)
+                    if line_requires_deposit(product.deposit_require, unit_price, high_order_amount)
                     else Decimal("0")
                 ),
                 "fulfillment_source": fulfillment_source,
@@ -363,7 +367,6 @@ def _create_checkout_fulfillment(
 
     created_orders: list[models.Order] = []
     pre_wallet_totals: dict[str, Decimal] = {}
-    partial_percent, min_amount = get_rule(db)
     for split_index, source in enumerate(sources, start=1):
         rows = grouped[source]
         discount = discounts[source]
@@ -378,6 +381,7 @@ def _create_checkout_fulfillment(
             requested_deposit_type=requested_deposit_type,
             partial_percent=partial_percent,
             min_amount=min_amount,
+            high_order_amount=high_order_amount,
         )
         subtotal = plan["subtotal"]
         total = plan["total"]

@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { adminBankAPI } from '@/lib/admin-api';
-import { DEPOSIT_MIN_VND, DEPOSIT_PERCENT } from '@/lib/business-info';
+import { DEPOSIT_MIN_VND, DEPOSIT_PERCENT, HIGH_UNIT_PRICE_VND } from '@/lib/business-info';
 import { formatDepositMinVnd } from '@/lib/order-deposit';
 
 export default function DepositPercentPanel() {
   const [percent, setPercent] = useState(String(DEPOSIT_PERCENT));
   const [minAmount, setMinAmount] = useState(String(DEPOSIT_MIN_VND));
+  const [highOrderAmount, setHighOrderAmount] = useState(String(HIGH_UNIT_PRICE_VND));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +21,7 @@ export default function DepositPercentPanel() {
       const out = await adminBankAPI.getDepositPercent();
       setPercent(String(out.partial_percent));
       setMinAmount(String(out.min_amount ?? DEPOSIT_MIN_VND));
+      setHighOrderAmount(String(out.high_order_amount ?? HIGH_UNIT_PRICE_VND));
     } catch (e) {
       setError((e as Error)?.message || 'Không tải được mức cọc');
     } finally {
@@ -35,6 +37,7 @@ export default function DepositPercentPanel() {
     e.preventDefault();
     const n = Number(percent);
     const floor = Number(minAmount);
+    const high = Number(highOrderAmount);
     if (!Number.isInteger(n) || n < 1 || n > 99) {
       setBanner({ variant: 'error', text: 'Nhập phần trăm là số nguyên từ 1 đến 99.' });
       return;
@@ -46,15 +49,23 @@ export default function DepositPercentPanel() {
       });
       return;
     }
+    if (!Number.isInteger(high) || high < DEPOSIT_MIN_VND) {
+      setBanner({
+        variant: 'error',
+        text: `Mốc đơn cọc 30% không được thấp hơn ${formatDepositMinVnd(DEPOSIT_MIN_VND)}.`,
+      });
+      return;
+    }
     setSaving(true);
     setBanner(null);
     try {
-      const out = await adminBankAPI.saveDepositPercent(n, floor);
+      const out = await adminBankAPI.saveDepositPercent(n, floor, high);
       setPercent(String(out.partial_percent));
       setMinAmount(String(out.min_amount));
+      setHighOrderAmount(String(out.high_order_amount));
       setBanner({
         variant: 'ok',
-        text: `Đã lưu mức cọc ${out.partial_percent}%, tối thiểu ${formatDepositMinVnd(out.min_amount)}. Đơn mới và lần đổi mức cọc sau sẽ dùng số này.`,
+        text: `Đã lưu mức cọc ${out.partial_percent}%, tối thiểu ${formatDepositMinVnd(out.min_amount)}. Đơn từ ${formatDepositMinVnd(out.high_order_amount)} cọc tối thiểu 30%. Đơn mới và lần đổi mức cọc sau sẽ dùng số này.`,
       });
     } catch (err) {
       setBanner({ variant: 'error', text: (err as Error)?.message || 'Không lưu được mức cọc' });
@@ -70,8 +81,8 @@ export default function DepositPercentPanel() {
       </h2>
       <p className="mt-1 max-w-3xl text-sm text-gray-600">
         Phần trăm khách chuyển trước trên giá trị hàng (không gồm phí giao hàng). Nếu số tiền theo % thấp hơn mức tối thiểu,
-        đơn mới lấy mức tối thiểu, nhưng không vượt giá trị hàng. Đơn từ 3.000.000đ trở lên luôn cọc tối thiểu 30% giá
-        trị hàng, kể cả khi từng sản phẩm dưới mức đó và phần trăm ở đây thấp hơn. Khách vẫn có thể chọn cọc 100% khi
+        đơn mới lấy mức tối thiểu, nhưng không vượt giá trị hàng. Ô «Đơn từ (đ) cọc 30%» là mốc giá trị hàng: từ mốc đó
+        đơn luôn cọc tối thiểu 30%, kể cả khi phần trăm cọc trước đang thấp hơn. Khách vẫn có thể chọn cọc 100% khi
         thanh toán; mức này gồm cả phí giao hàng. Đơn đang chờ cọc giữ số đã chốt cho đến khi khách đổi lại.
       </p>
 
@@ -129,6 +140,20 @@ export default function DepositPercentPanel() {
               aria-describedby="deposit-percent-hint"
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-gray-800">Đơn từ (đ) cọc 30%</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={DEPOSIT_MIN_VND}
+              step={100000}
+              required
+              value={highOrderAmount}
+              onChange={(ev) => setHighOrderAmount(ev.target.value)}
+              className="w-44 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-200"
+              aria-describedby="deposit-percent-hint"
+            />
+          </label>
           <button
             type="submit"
             disabled={saving}
@@ -137,7 +162,7 @@ export default function DepositPercentPanel() {
             {saving ? 'Đang lưu…' : 'Lưu mức cọc'}
           </button>
           <p id="deposit-percent-hint" className="w-full text-xs text-gray-500">
-            Phần trăm từ 1 đến 99. Cọc tối thiểu không thấp hơn {formatDepositMinVnd(DEPOSIT_MIN_VND)}.
+            Phần trăm từ 1 đến 99. Cọc tối thiểu và mốc đơn cọc 30% không thấp hơn {formatDepositMinVnd(DEPOSIT_MIN_VND)}.
           </p>
         </form>
       )}

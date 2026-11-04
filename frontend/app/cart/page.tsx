@@ -88,7 +88,6 @@ import {
 } from '@/lib/business-info';
 import {
   formatDepositMinVnd,
-  HIGH_UNIT_PRICE_VND,
   orderHitsHighValue,
   partialPercentForLines,
 } from '@/lib/order-deposit';
@@ -137,7 +136,7 @@ export default function CartPage() {
   const { state: globalSiteSale, reload: reloadSiteSale } = useSiteSale();
   const router = useRouter();
   const { pushToast } = useToast();
-  const { percent: depositPercent, minAmount: depositMinAmount } = useDepositPolicy();
+  const { percent: depositPercent, minAmount: depositMinAmount, highOrderAmount } = useDepositPolicy();
   const [pageReady, setPageReady] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
@@ -584,7 +583,7 @@ export default function CartPage() {
     return Math.max(0, regular - share) + warehouse;
   };
   const highOrderValueSelected = (['vietnam', 'china'] as const).some((source) =>
-    orderHitsHighValue(goodsForSource(source)),
+    orderHitsHighValue(goodsForSource(source), highOrderAmount),
   );
   const depositRequiredForSelected =
     highOrderValueSelected ||
@@ -1701,7 +1700,7 @@ export default function CartPage() {
                   {highOrderValueSelected ? (
                     <>
                       Đơn từ{' '}
-                      <strong>{formatDepositMinVnd(HIGH_UNIT_PRICE_VND)}</strong> cần đặt cọc tối thiểu{' '}
+                      <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cần đặt cọc tối thiểu{' '}
                       <strong>{checkoutDepositPercent}%</strong> giá trị hàng
                     </>
                   ) : (

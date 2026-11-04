@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
+import { normalizeZaloPersonalUrl } from '@/lib/zalo-personal-url';
 import { getAdminEmbedHeadPreview } from '@/lib/admin-embed-head-preview';
 import { LiveHomepageHeadTags } from '@/components/admin/LiveHomepageHeadTags';
 
@@ -60,6 +61,8 @@ const ID_HINT: Record<string, Record<string, string>> = {
   },
   zalo: {
     chat: 'Chỉ nhập OA ID (Official Account ID, thường là chữ số dài).',
+    personal:
+      'Số điện thoại Zalo cá nhân hoặc link https://zalo.me/…. Không dán script. Nút «Nhắn Zalo cho shop» mở đúng số này.',
     other: 'Nếu cần iframe/script tùy biến, bật dán full HTML bên dưới.',
   },
   nanoai: {
@@ -129,7 +132,7 @@ function classifyField(platform: string, category: string, contentSnap: string, 
     ],
     facebook: ['pixel', 'domain', 'chat'],
     tiktok: ['pixel'],
-    zalo: ['chat'],
+    zalo: ['chat', 'personal'],
   };
   const row = idMatrix[p];
   if (row && row.includes(c)) return 'id';
@@ -235,8 +238,25 @@ export default function AdminEmbedCodesPage() {
     const keepCapiSecret =
       editingId != null && isCapi && !!editingSnapshot?.secret_configured && emptyBody;
 
+    const isZaloPersonal =
+      (form.platform || '').toLowerCase() === 'zalo' && (form.category || '').toLowerCase() === 'personal';
+    let contentToSave = form.content;
+    if (isZaloPersonal && !emptyBody) {
+      const url = normalizeZaloPersonalUrl(form.content);
+      if (!url) {
+        showToast('err', 'Nhập số điện thoại Zalo hoặc link https://zalo.me/…');
+        return;
+      }
+      contentToSave = url;
+    }
+
     if (form.is_active && emptyBody && !keepCapiSecret) {
-      showToast('err', 'Mục đang bật: nhập mã / ID / HTML hoặc tắt mục.');
+      showToast(
+        'err',
+        isZaloPersonal
+          ? 'Mục đang bật: nhập số điện thoại Zalo hoặc link zalo.me, hoặc tắt mục.'
+          : 'Mục đang bật: nhập mã / ID / HTML hoặc tắt mục.',
+      );
       return;
     }
 
@@ -256,13 +276,13 @@ export default function AdminEmbedCodesPage() {
           ...common,
         };
         if (!keepCapiSecret) {
-          patch.content = form.content;
+          patch.content = contentToSave;
         }
         await adminSiteEmbedAPI.update(editingId, patch);
       } else {
         await adminSiteEmbedAPI.create({
           ...common,
-          content: form.content,
+          content: contentToSave,
         });
       }
       showToast('ok', 'Đã lưu');
@@ -284,7 +304,14 @@ export default function AdminEmbedCodesPage() {
     }
   };
 
-  const fk = classifyField(form.platform, form.category, form.content, !!form.useFullHtml);
+  const isZaloPersonalForm =
+    (form.platform || '').toLowerCase() === 'zalo' && (form.category || '').toLowerCase() === 'personal';
+  const fk = classifyField(
+    form.platform,
+    form.category,
+    form.content,
+    isZaloPersonalForm ? false : !!form.useFullHtml,
+  );
   const hint = hintLine(form.platform, form.category);
 
   return (
@@ -372,7 +399,9 @@ export default function AdminEmbedCodesPage() {
                             {row.category && row.category !== 'custom' && (
                               <span className="text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-600">{row.category}</span>
                             )}
-                            {ck === 'id' ? (
+                            {ck === 'id' && (row.platform || '').toLowerCase() === 'zalo' && (row.category || '').toLowerCase() === 'personal' ? (
+                              <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">Số Zalo</span>
+                            ) : ck === 'id' ? (
                               <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">Chỉ mã</span>
                             ) : ck === 'capi' ? (
                               <span className="text-xs px-2 py-0.5 rounded bg-purple-50 text-purple-800">Máy chủ</span>
@@ -383,7 +412,9 @@ export default function AdminEmbedCodesPage() {
                               ? 'Token Conversion API đã lưu (không hiển thị)'
                               : (row.content || '').trim()
                                 ? `${(row.content || '').trim().slice(0, 140)}${(row.content || '').trim().length > 140 ? '…' : ''}`
-                                : ck === 'id'
+                                : ck === 'id' && (row.platform || '').toLowerCase() === 'zalo' && (row.category || '').toLowerCase() === 'personal'
+                                  ? 'Chưa nhập — nhấn «Sửa» để nhập số điện thoại hoặc link zalo.me.'
+                                  : ck === 'id'
                                   ? 'Chưa nhập — nhấn «Sửa» để nhập mã một dòng (G-/AW-/GTM-…).'
                                   : 'Chưa nhập — không hiển thị / không gửi CAPI'}
                           </p>
@@ -512,7 +543,7 @@ export default function AdminEmbedCodesPage() {
                 </select>
               </div>
 
-              {fk !== 'html' && (
+              {fk !== 'html' && !isZaloPersonalForm && (
                 <label className="flex items-start gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
@@ -532,9 +563,11 @@ export default function AdminEmbedCodesPage() {
                 <label className="block text-sm font-medium text-gray-800 mb-1">
                   {fk === 'capi'
                     ? 'Access Token Conversion API *'
-                    : fk === 'html' || form.useFullHtml
-                      ? 'Mã HTML / JavaScript đầy đủ'
-                      : 'Chỉ nhập mã / ID (một dòng)'}
+                    : isZaloPersonalForm
+                      ? 'Số điện thoại hoặc link Zalo'
+                      : fk === 'html' || form.useFullHtml
+                        ? 'Mã HTML / JavaScript đầy đủ'
+                        : 'Chỉ nhập mã / ID (một dòng)'}
                 </label>
                 {fk === 'capi' ? (
                   <input
@@ -560,9 +593,11 @@ export default function AdminEmbedCodesPage() {
                   <input
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
                     placeholder={
-                      classifyField(form.platform, form.category, '') === 'id'
-                        ? 'Ví dụ: GTM-XXX, G-XXX, Pixel ID …'
-                        : ''
+                      isZaloPersonalForm
+                        ? '0968659836 hoặc https://zalo.me/0968659836'
+                        : classifyField(form.platform, form.category, '') === 'id'
+                          ? 'Ví dụ: GTM-XXX, G-XXX, Pixel ID …'
+                          : ''
                     }
                     value={form.content}
                     onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}

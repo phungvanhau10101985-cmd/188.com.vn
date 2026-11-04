@@ -25,8 +25,12 @@ def list_bank_accounts(
 @router.get("/deposit-percent", response_model=DepositPercentOut)
 def public_deposit_percent(db: Session = Depends(get_db)):
     """Mức cọc một phần và sàn tiền đang bật — giỏ hàng, trang SP, trang thanh toán cọc."""
-    percent, minimum = deposit_settings_crud.get_rule(db)
-    return DepositPercentOut(partial_percent=percent, min_amount=minimum)
+    percent, minimum, high_order = deposit_settings_crud.get_rule(db)
+    return DepositPercentOut(
+        partial_percent=percent,
+        min_amount=minimum,
+        high_order_amount=high_order,
+    )
 
 
 @router.get("/admin/all", response_model=List[schemas.BankAccountResponse])

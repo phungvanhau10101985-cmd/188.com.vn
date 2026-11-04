@@ -21,7 +21,6 @@ import { useBirthdayDiscount } from '@/lib/use-birthday-discount';
 import {
   formatDepositMinVnd,
   HIGH_UNIT_MIN_PERCENT,
-  HIGH_UNIT_PRICE_VND,
   orderHitsHighValue,
   partialPercentForGoods,
 } from '@/lib/order-deposit';
@@ -102,7 +101,11 @@ export default function ProductInfo({
   const [stickyPortalReady, setStickyPortalReady] = useState(false);
   const [isDesktopViewport, setIsDesktopViewport] = useState(false);
   const { isAuthenticated } = useAuth();
-  const { percent: depositPercent, minAmount: depositMinAmount } = useDepositPolicy();
+  const {
+    percent: depositPercent,
+    minAmount: depositMinAmount,
+    highOrderAmount,
+  } = useDepositPolicy();
   const { openTryOnForProduct } = useNanoAiMessaging();
   const [loyaltyStatus, setLoyaltyStatus] = useState<any>(null);
 
@@ -162,8 +165,8 @@ export default function ProductInfo({
   const isClearancePdp = product.is_warehouse_clearance === true;
   const displayPrice = pricing.displayPrice;
   const lineGoods = Math.round(displayPrice * Math.max(1, quantity));
-  const highOrderDeposit = orderHitsHighValue(lineGoods);
-  const shownDepositPercent = partialPercentForGoods(depositPercent, lineGoods);
+  const highOrderDeposit = orderHitsHighValue(lineGoods, highOrderAmount);
+  const shownDepositPercent = partialPercentForGoods(depositPercent, lineGoods, highOrderAmount);
   const birthdayOnPdp = !googleDiscount && !isClearancePdp && birthdayDiscount.active;
   const birthdaySavingsAmount = birthdayOnPdp ? pricing.birthdaySavingsAmount : 0;
 
@@ -691,8 +694,8 @@ export default function ProductInfo({
           🚚 Giao hàng toàn quốc – Miễn phí đơn từ 500k (phí ship 30k nếu dưới 500k). 🔁 Đổi trả trong 7 ngày nếu sản phẩm lỗi hoặc không đúng mô tả.{' '}
           💳{' '}
           {highOrderDeposit
-            ? `Đơn hàng từ ${formatDepositMinVnd(HIGH_UNIT_PRICE_VND)} đặt cọc tối thiểu ${shownDepositPercent}% giá trị hàng`
-            : `Một số sản phẩm yêu cầu đặt cọc ${depositPercent}% giá trị hàng, tối thiểu ${formatDepositMinVnd(depositMinAmount)}. Đơn từ ${formatDepositMinVnd(HIGH_UNIT_PRICE_VND)} đặt cọc tối thiểu ${HIGH_UNIT_MIN_PERCENT}%`}{' '}
+            ? `Đơn hàng từ ${formatDepositMinVnd(highOrderAmount)} đặt cọc tối thiểu ${shownDepositPercent}% giá trị hàng`
+            : `Một số sản phẩm yêu cầu đặt cọc ${depositPercent}% giá trị hàng, tối thiểu ${formatDepositMinVnd(depositMinAmount)}. Đơn từ ${formatDepositMinVnd(highOrderAmount)} đặt cọc tối thiểu ${HIGH_UNIT_MIN_PERCENT}%`}{' '}
           —{' '}
           <Link href="/info/huong-dan-mua-hang" className="text-[#ea580c] hover:underline font-medium">
             xem hướng dẫn

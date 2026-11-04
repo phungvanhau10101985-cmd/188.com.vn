@@ -7,16 +7,23 @@ import {
 
 export { HIGH_UNIT_MIN_PERCENT, HIGH_UNIT_PRICE_VND };
 
-/** Đơn giá >= 3.000.000đ: một mình dòng đó đã đủ mốc cọc tối thiểu 30%. */
-export function lineHitsHighUnitPrice(unitPrice: number): boolean {
+/** Đơn giá >= mốc cọc 30%: một mình dòng đó đã đủ điều kiện. */
+export function lineHitsHighUnitPrice(unitPrice: number, threshold: number = HIGH_UNIT_PRICE_VND): boolean {
   const price = Math.round(Number(unitPrice) || 0);
-  return price >= HIGH_UNIT_PRICE_VND;
+  return price >= normalizeHighOrderAmount(threshold);
 }
 
-/** Giá trị hàng của đơn >= 3.000.000đ thì cọc một phần không thấp hơn 30%. */
-export function orderHitsHighValue(goods: number): boolean {
+/** Giá trị hàng của đơn >= mốc thì cọc một phần không thấp hơn 30%. */
+export function orderHitsHighValue(goods: number, threshold: number = HIGH_UNIT_PRICE_VND): boolean {
   const amount = Math.round(Number(goods) || 0);
-  return amount >= HIGH_UNIT_PRICE_VND;
+  return amount >= normalizeHighOrderAmount(threshold);
+}
+
+export function normalizeHighOrderAmount(raw: number): number {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n) || n < 100_000) return HIGH_UNIT_PRICE_VND;
+  if (n > 500_000_000) return 500_000_000;
+  return n;
 }
 
 export function cartLineUnitPrice(item: {
@@ -37,8 +44,12 @@ export function partialPercentForLines(configured: number, highOrderValue: boole
   return applied;
 }
 
-export function partialPercentForGoods(configured: number, goods: number): number {
-  return partialPercentForLines(configured, orderHitsHighValue(goods));
+export function partialPercentForGoods(
+  configured: number,
+  goods: number,
+  threshold: number = HIGH_UNIT_PRICE_VND,
+): number {
+  return partialPercentForLines(configured, orderHitsHighValue(goods, threshold));
 }
 
 /** Cọc một phần: % giá trị hàng, không thấp hơn sàn, không vượt giá trị hàng. */
