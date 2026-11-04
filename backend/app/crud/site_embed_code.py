@@ -12,7 +12,7 @@ from app.schemas.site_embed_code import (
 )
 from app.services.site_embed_templates import collect_expanded_fragments
 
-_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v6:public"
+_PUBLIC_EMBEDS_CACHE_KEY = "embed_codes_v7:public"
 
 
 def invalidate_public_embeds_cache() -> None:
@@ -452,6 +452,48 @@ def normalize_zalo_personal_url(raw: str) -> Optional[str]:
         if len(digits) > 11:
             return None
     return f"https://zalo.me/{digits}"
+
+
+def get_zalo_oa_chat_url(db: Session) -> Optional[str]:
+    """https://zalo.me/<OA ID> khi mục Zalo chat đang bật."""
+    row = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "zalo",
+            SiteEmbedCode.category == "chat",
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .first()
+    )
+    if not row:
+        return None
+    digits = re.sub(r"\D", "", row.content or "")
+    if not digits.isdigit() or not (6 <= len(digits) <= 20):
+        return None
+    return f"https://zalo.me/{digits}"
+
+
+def get_zalo_click_target(db: Session) -> tuple[str, Optional[str], Optional[str]]:
+    """(chế độ personal|oa, link cá nhân, link nút sẽ mở)."""
+    from app.services.site_embed_templates import zalo_personal_opens_chat
+
+    personal_row = (
+        db.query(SiteEmbedCode)
+        .filter(
+            SiteEmbedCode.is_active.is_(True),
+            SiteEmbedCode.platform == "zalo",
+            SiteEmbedCode.category == "personal",
+        )
+        .order_by(SiteEmbedCode.sort_order.asc(), SiteEmbedCode.id.asc())
+        .first()
+    )
+    personal_url = normalize_zalo_personal_url(personal_row.content or "") if personal_row else None
+    opens_personal = bool(personal_row and personal_url and zalo_personal_opens_chat(personal_row))
+    oa_url = get_zalo_oa_chat_url(db)
+    if opens_personal:
+        return "personal", personal_url, personal_url
+    return "oa", personal_url, oa_url
 
 
 def get_zalo_personal_chat_url(db: Session) -> Optional[str]:

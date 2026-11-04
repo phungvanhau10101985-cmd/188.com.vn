@@ -12,7 +12,7 @@ import { getSiteOrigin } from "@/lib/site-origin";
 
 const SITE_NAME = "188.COM.VN";
 
-export function buildOrganizationJsonLd(origin: string = getSiteOrigin()): object {
+export function buildOrganizationJsonLd(origin: string = getSiteOrigin(), zaloUrl: string = BUSINESS_ZALO): object {
   return {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -36,7 +36,7 @@ export function buildOrganizationJsonLd(origin: string = getSiteOrigin()): objec
       availableLanguage: ["Vietnamese"],
       hoursAvailable: BUSINESS_HOURS,
     },
-    sameAs: [BUSINESS_FACEBOOK, BUSINESS_ZALO],
+    sameAs: [BUSINESS_FACEBOOK, zaloUrl || BUSINESS_ZALO],
   };
 }
 

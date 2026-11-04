@@ -2,7 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
-import { normalizeZaloPersonalUrl } from '@/lib/zalo-personal-url';
+import {
+  normalizeZaloPersonalUrl,
+  readZaloOpenMode,
+  stripZaloOpenMode,
+  withZaloOpenMode,
+  type ZaloOpenMode,
+} from '@/lib/zalo-personal-url';
 import { getAdminEmbedHeadPreview } from '@/lib/admin-embed-head-preview';
 import { LiveHomepageHeadTags } from '@/components/admin/LiveHomepageHeadTags';
 
@@ -86,6 +92,8 @@ type FormState = {
   sort_order: number;
   /** Dán đầy đủ HTML (chỉ dùng cho mục mở rộng) */
   useFullHtml?: boolean;
+  /** Nút Zalo trên site mở số cá nhân hay Official Account. */
+  zaloOpen: ZaloOpenMode;
 };
 
 function emptyForm(): FormState {
@@ -99,6 +107,7 @@ function emptyForm(): FormState {
     is_active: true,
     sort_order: 500,
     useFullHtml: false,
+    zaloOpen: 'personal',
   };
 }
 
@@ -216,9 +225,10 @@ export default function AdminEmbedCodesPage() {
       title: row.title,
       placement: row.placement || 'head',
       content: row.content || '',
-      hint: row.hint || '',
+      hint: stripZaloOpenMode(row.hint || ''),
       is_active: row.is_active,
       sort_order: row.sort_order,
+      zaloOpen: readZaloOpenMode(row.hint) ?? 'personal',
       useFullHtml:
         ufh || (row.category || '').toLowerCase() === 'other' || (row.platform || '').toLowerCase() === 'other',
     });
@@ -267,7 +277,9 @@ export default function AdminEmbedCodesPage() {
       placement: form.placement,
       is_active: form.is_active,
       sort_order: form.sort_order,
-      hint: form.hint.trim() || undefined,
+      hint: isZaloPersonal
+        ? withZaloOpenMode(form.hint, form.zaloOpen)
+        : form.hint.trim() || undefined,
     };
 
     try {
@@ -400,7 +412,9 @@ export default function AdminEmbedCodesPage() {
                               <span className="text-xs px-2 py-0.5 rounded bg-gray-50 text-gray-600">{row.category}</span>
                             )}
                             {ck === 'id' && (row.platform || '').toLowerCase() === 'zalo' && (row.category || '').toLowerCase() === 'personal' ? (
-                              <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">Số Zalo</span>
+                              <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">
+                                {readZaloOpenMode(row.hint) === 'oa' ? 'Mở OA' : 'Mở cá nhân'}
+                              </span>
                             ) : ck === 'id' ? (
                               <span className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-800">Chỉ mã</span>
                             ) : ck === 'capi' ? (
@@ -604,6 +618,27 @@ export default function AdminEmbedCodesPage() {
                   />
                 )}
               </div>
+
+              {isZaloPersonalForm && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-800 mb-1">Bấm nút Zalo thì mở</label>
+                  <select
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                    value={form.zaloOpen}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, zaloOpen: e.target.value === 'oa' ? 'oa' : 'personal' }))
+                    }
+                  >
+                    <option value="personal">Zalo cá nhân — số hoặc link ở trên</option>
+                    <option value="oa">Zalo Official Account — widget OA</option>
+                  </select>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {form.zaloOpen === 'personal'
+                      ? 'Nút nổi và «Nhắn Zalo cho shop» mở số cá nhân. Widget OA tắt.'
+                      : 'Nút nổi là chat Official Account. Số cá nhân không được mở khi khách bấm.'}
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-800 mb-1">Gợi ý (chỉ admin)</label>

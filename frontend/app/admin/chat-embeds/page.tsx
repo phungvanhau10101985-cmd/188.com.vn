@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { adminSiteEmbedAPI, type SiteEmbedCodeAdmin } from '@/lib/admin-api';
-import { normalizeZaloPersonalUrl } from '@/lib/zalo-personal-url';
+import {
+  normalizeZaloPersonalUrl,
+  readZaloOpenMode,
+  stripZaloOpenMode,
+  withZaloOpenMode,
+  type ZaloOpenMode,
+} from '@/lib/zalo-personal-url';
 
 const NANO_PRESET = {
   platform: 'nanoai',
@@ -72,6 +78,8 @@ export default function AdminChatEmbedsPage() {
   const [zaloPersonalId, setZaloPersonalId] = useState<number | null>(null);
   const [zaloPersonal, setZaloPersonal] = useState('');
   const [zaloPersonalActive, setZaloPersonalActive] = useState(true);
+  const [zaloOpen, setZaloOpen] = useState<ZaloOpenMode>('personal');
+  const [zaloPersonalHint, setZaloPersonalHint] = useState('');
 
   const [fbId, setFbId] = useState<number | null>(null);
   const [fbPageId, setFbPageId] = useState('');
@@ -98,6 +106,8 @@ export default function AdminChatEmbedsPage() {
       setZaloPersonalId(zaloPersonal?.id ?? null);
       setZaloPersonal(zaloPersonal?.content ?? '');
       setZaloPersonalActive(zaloPersonal?.is_active ?? true);
+      setZaloOpen(readZaloOpenMode(zaloPersonal?.hint) ?? 'personal');
+      setZaloPersonalHint(stripZaloOpenMode(zaloPersonal?.hint || ''));
       setFbId(fbChat?.id ?? null);
       setFbPageId(fbChat?.content ?? '');
       setFbActive(fbChat?.is_active ?? true);
@@ -188,12 +198,14 @@ export default function AdminChatEmbedsPage() {
           content,
           is_active: zaloPersonalActive,
           placement: 'body_close',
+          hint: withZaloOpenMode(zaloPersonalHint, zaloOpen),
         });
       } else {
         const row = await adminSiteEmbedAPI.create({
           ...ZALO_PERSONAL_PRESET,
           content,
           is_active: zaloPersonalActive,
+          hint: withZaloOpenMode(ZALO_PERSONAL_PRESET.hint, zaloOpen),
         });
         setZaloPersonalId(row.id);
       }
@@ -318,7 +330,7 @@ export default function AdminChatEmbedsPage() {
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 mb-1">Zalo cá nhân — nút nhắn shop</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Nhập số điện thoại Zalo cá nhân hoặc link zalo.me. Khách bấm «Nhắn Zalo cho shop» trên trang giải thích cọc sẽ mở đúng số này. Để trống thì nút mở link Zalo dự phòng trong mã nguồn.
+                Nhập số điện thoại hoặc link zalo.me, rồi chọn nút trên site mở số này hay mở Official Account.
               </p>
               <input
                 type="text"
@@ -328,6 +340,15 @@ export default function AdminChatEmbedsPage() {
                 onChange={(e) => setZaloPersonal(e.target.value)}
                 aria-label="Zalo cá nhân"
               />
+              <label className="block text-sm font-medium text-gray-800 mb-1">Bấm nút Zalo thì mở</label>
+              <select
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm mb-3"
+                value={zaloOpen}
+                onChange={(e) => setZaloOpen(e.target.value === 'oa' ? 'oa' : 'personal')}
+              >
+                <option value="personal">Zalo cá nhân — số hoặc link ở trên</option>
+                <option value="oa">Zalo Official Account — widget OA</option>
+              </select>
               <label className="flex items-center gap-2 text-sm mb-3">
                 <input
                   type="checkbox"
@@ -349,7 +370,7 @@ export default function AdminChatEmbedsPage() {
             <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold text-gray-900 mb-1">Mã nhúng Zalo (OA Chat)</h2>
               <p className="text-xs text-gray-500 mb-3">
-                Chỉ nhập OA ID cho widget chat Official Account nổi trên site. Ô này không đổi nút «Nhắn Zalo cho shop».
+                Chỉ nhập OA ID. Widget này hiện khi ô trên chọn «Zalo Official Account». Chọn «Zalo cá nhân» thì widget tắt và nút mở số cá nhân.
               </p>
               <input
                 type="text"

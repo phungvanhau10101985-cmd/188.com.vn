@@ -1,17 +1,16 @@
 import WhyDepositPage from '@/components/deposit/WhyDepositPage';
 import { getApiBaseUrl } from '@/lib/api-base';
-import { BUSINESS_ZALO } from '@/lib/business-info';
 import {
   DEPOSIT_POLICY_FALLBACK,
   depositPolicyFromApi,
   type DepositPolicy,
 } from '@/lib/deposit-policy';
-import { fetchPublicSiteEmbeds } from '@/lib/site-embeds-public';
+import { fetchPublicSiteEmbeds, resolveZaloClickUrl } from '@/lib/site-embeds-public';
 
 export const metadata = {
   title: 'Tại sao phải đặt cọc?',
   description:
-    'Vì sao đơn hàng gửi từ nước ngoài cần đặt cọc: phí mua hàng, vận chuyển quốc tế và rủi ro nếu hủy đơn. Quý khách chỉ cọc một phần, phần còn lại trả khi nhận.',
+    '188 có kho hàng ở nước ngoài, không mua hộ từ shop khác. Hàng vẫn cần đặt cọc vì đưa về Việt Nam tốn nhiều loại phí và để tránh hủy đơn giữa chừng.',
 };
 
 function oneParam(value: string | string[] | undefined): string {
@@ -50,7 +49,7 @@ export default async function TaiSaoDatCocPage({
 }) {
   const sp = await searchParams;
   const [embeds, deposit] = await Promise.all([fetchPublicSiteEmbeds(), loadDepositPolicy()]);
-  const zaloUrl = embeds.zaloPersonalUrl || BUSINESS_ZALO;
+  const zaloUrl = resolveZaloClickUrl(embeds);
   return (
     <WhyDepositPage
       orderId={safeOrderId(oneParam(sp.order))}

@@ -299,6 +299,39 @@ def expand_tiktok_pixel(pixel_id: str) -> List[PlacementHtml]:
     return [("head", snippet)]
 
 
+_ZALO_OPEN_RE = re.compile(r"(?:^|\n)zalo_open:(personal|oa)\b")
+
+
+def read_zalo_open_mode(hint: str | None) -> str | None:
+    match = _ZALO_OPEN_RE.search(hint or "")
+    return match.group(1) if match else None
+
+
+def zalo_personal_opens_chat(row: SiteEmbedCode) -> bool:
+    """True khi nút Zalo phải mở số cá nhân, không mở widget OA."""
+    explicit = read_zalo_open_mode(row.hint)
+    if explicit == "oa":
+        return False
+    if explicit == "personal":
+        return True
+    from app.crud.site_embed_code import normalize_zalo_personal_url
+
+    return bool(normalize_zalo_personal_url(row.content or ""))
+
+
+def expand_zalo_personal_button(url: str) -> List[PlacementHtml]:
+    esc = html.escape(url, quote=True)
+    snippet = (
+        f'<a href="{esc}" target="_blank" rel="noopener noreferrer" data-zalo-open="personal" '
+        'aria-label="Nhắn Zalo cho shop" '
+        'style="position:fixed;right:16px;bottom:16px;z-index:2147483000;display:inline-flex;'
+        'align-items:center;background:#0068FF;color:#fff;font:600 14px/1 system-ui,sans-serif;'
+        'padding:12px 16px;border-radius:999px;box-shadow:0 8px 24px rgba(0,104,255,.35);'
+        'text-decoration:none">Nhắn Zalo</a>'
+    )
+    return [("body_close", snippet)]
+
+
 def expand_zalo_widget(oaid: str) -> List[PlacementHtml]:
     oid = re.sub(r"[^\d]", "", (oaid or "").strip())
     if not oid:
@@ -323,9 +356,16 @@ def expand_row(row: SiteEmbedCode) -> List[PlacementHtml]:
     plat = (row.platform or "").lower().strip()
     raw = (row.content or "").strip()
 
-    # Số Zalo cá nhân chỉ để nút chat mở zalo.me — không nhúng widget.
+    # Zalo cá nhân: nút mở zalo.me khi chế độ là cá nhân. Không nhúng widget OA.
     if plat == "zalo" and cat == "personal":
-        return []
+        if not zalo_personal_opens_chat(row):
+            return []
+        from app.crud.site_embed_code import normalize_zalo_personal_url
+
+        url = normalize_zalo_personal_url(raw)
+        if not url:
+            return []
+        return expand_zalo_personal_button(url)
 
     # GA4: nếu admin dán nguyên snippet <script>… gtag… nhưng category vẫn là ga4,
     # trích G-… để dựng lại snippet chuẩn (tránh lệch / thiếu thẻ so với token).
@@ -416,11 +456,22 @@ def collect_expanded_fragments(rows: Sequence[SiteEmbedCode]) -> Tuple[List[str]
         else:
             body_close.append(f)
 
+    personal_click = any(
+        (row.platform or "").lower().strip() == "zalo"
+        and (row.category or "").strip().lower() == "personal"
+        and row.is_active
+        and zalo_personal_opens_chat(row)
+        for row in rows
+    )
+
     for row in rows:
         if not row.is_active:
             continue
         cat = (row.category or "").strip().lower()
         if cat in INTERNAL_ONLY_CATEGORIES:
+            continue
+        plat = (row.platform or "").lower().strip()
+        if personal_click and plat == "zalo" and cat == "chat":
             continue
         for pla, fragment in expand_row(row):
             push(pla, fragment)

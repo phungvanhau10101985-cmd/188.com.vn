@@ -1,6 +1,8 @@
 /** Dữ liệu mã nhúng public từ API (SSR layout). */
 
 import { getApiBaseUrl } from '@/lib/api-base';
+import { BUSINESS_ZALO } from '@/lib/business-info';
+import type { ZaloOpenMode } from '@/lib/zalo-personal-url';
 
 /** Khớp backend `GoogleAdsWebConversions` — send_to AW-xxxx/label từ admin. */
 export type GoogleAdsWebConversionsPublic = {
@@ -25,7 +27,22 @@ export type PublicSiteEmbeds = {
   googleCustomerReviewsMerchantId?: number | null;
   /** Link Zalo cá nhân do quản trị bật. Không có thì trang cọc dùng link dự phòng. */
   zaloPersonalUrl?: string | null;
+  /** personal = mở số cá nhân. oa = mở Official Account. */
+  zaloOpen?: ZaloOpenMode;
+  /** Link nút Zalo phải mở, theo chế độ đã chọn. */
+  zaloClickUrl?: string | null;
 };
+
+const ZALO_ME = /^https:\/\/zalo\.me\/[0-9]{9,20}$/;
+
+/** Link khách bấm. Cá nhân khi admin chọn cá nhân; không thì OA đã lưu, rồi link OA dự phòng. */
+export function resolveZaloClickUrl(embeds: PublicSiteEmbeds): string {
+  const click = (embeds.zaloClickUrl || '').trim();
+  if (ZALO_ME.test(click)) return click;
+  if (embeds.zaloOpen === 'oa') return BUSINESS_ZALO;
+  if (embeds.zaloPersonalUrl && ZALO_ME.test(embeds.zaloPersonalUrl)) return embeds.zaloPersonalUrl;
+  return BUSINESS_ZALO;
+}
 
 const empty: PublicSiteEmbeds = { head: [], body_open: [], body_close: [] };
 const PUBLIC_EMBEDS_MEM_TTL_MS = 60_000;
@@ -94,7 +111,11 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
         Number.isFinite(gcrParsed) && gcrParsed > 0 ? gcrParsed : null;
 
       const zaloRaw = String(data.zalo_personal_url ?? '').trim();
-      const zaloPersonalUrl = /^https:\/\/zalo\.me\/[0-9]{9,20}$/.test(zaloRaw) ? zaloRaw : null;
+      const zaloPersonalUrl = ZALO_ME.test(zaloRaw) ? zaloRaw : null;
+      const openRaw = String(data.zalo_open ?? '').trim();
+      const zaloOpen: ZaloOpenMode | undefined = openRaw === 'personal' || openRaw === 'oa' ? openRaw : undefined;
+      const clickRaw = String(data.zalo_click_url ?? '').trim();
+      const zaloClickUrl = ZALO_ME.test(clickRaw) ? clickRaw : null;
 
       const value: PublicSiteEmbeds = {
         head: Array.isArray(data.head) ? data.head.filter(Boolean) : [],
@@ -105,6 +126,8 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
         ...(googleAdsWebConversionsLegacyPdpOnly ? { googleAdsWebConversionsLegacyPdpOnly: true } : {}),
         ...(googleCustomerReviewsMerchantId != null ? { googleCustomerReviewsMerchantId } : {}),
         ...(zaloPersonalUrl ? { zaloPersonalUrl } : {}),
+        ...(zaloOpen ? { zaloOpen } : {}),
+        ...(zaloClickUrl ? { zaloClickUrl } : {}),
       };
       publicEmbedsMemCache = {
         expiresAt: Date.now() + PUBLIC_EMBEDS_MEM_TTL_MS,

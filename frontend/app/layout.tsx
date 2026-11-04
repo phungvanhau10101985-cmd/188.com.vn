@@ -17,7 +17,6 @@ import {
 import GoogleAutomatedDiscountCapture from "@/components/GoogleAutomatedDiscountCapture";
 import AnalyticsTracker from "@/components/AnalyticsTracker";
 import SiteErrorReporter from "@/components/SiteErrorReporter";
-import { fetchPublicSiteEmbeds } from "@/lib/site-embeds-public";
 import { GoogleCustomerReviewsMerchantProvider } from "@/components/GoogleCustomerReviewsMerchantProvider";
 import { partitionHeadEmbedsForSsr } from "@/lib/site-embed-head-ssr";
 import { ToastProvider } from "@/components/ToastProvider";
@@ -28,6 +27,7 @@ import { APP_WEB_ICON_URL, fetchCurrentAppWebIcon } from "@/lib/app-web-icon";
 import { getCdnPublicBase } from "@/lib/site-config";
 import { serializeJsonLdForScript } from "@/lib/json-ld-script";
 import { getSiteOrigin } from "@/lib/site-origin";
+import { fetchPublicSiteEmbeds, resolveZaloClickUrl } from "@/lib/site-embeds-public";
 import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/site-json-ld";
 import { getInitialSiteSaleCalendar } from "@/lib/site-sale-public";
 import { fetchPublicHolidayTheme } from "@/lib/holiday-theme";
@@ -183,7 +183,7 @@ export default async function RootLayout({
   ]);
   const { ssrScripts, headClientRemainders } = partitionHeadEmbedsForSsr(siteEmbeds.head);
   const siteOrigin = getSiteOrigin();
-  const organizationJsonLd = buildOrganizationJsonLd(siteOrigin);
+  const organizationJsonLd = buildOrganizationJsonLd(siteOrigin, resolveZaloClickUrl(siteEmbeds));
   const webSiteJsonLd = buildWebSiteJsonLd(siteOrigin);
   return (
     <html

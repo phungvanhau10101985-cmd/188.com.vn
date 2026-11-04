@@ -56,6 +56,10 @@ class PublicSiteEmbedsResponse(BaseModel):
     google_customer_reviews_merchant_id: Optional[int] = None
     #: Link https://zalo.me/… khi admin bật Zalo cá nhân. None = site dùng link dự phòng trong code.
     zalo_personal_url: Optional[str] = None
+    #: personal = nút mở số cá nhân và tắt widget OA. oa = nút và widget mở Official Account.
+    zalo_open: str = "oa"
+    #: Link đúng với chế độ đang chọn. None = frontend dùng link OA dự phòng.
+    zalo_click_url: Optional[str] = None
 
 
 class SiteEmbedCodeAdminItem(BaseModel):

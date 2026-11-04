@@ -1,4 +1,5 @@
 import InfoPageLayout from '@/components/info/InfoPageLayout';
+import ZaloShopLink from '@/components/info/ZaloShopLink';
 import Link from 'next/link';
 
 export const metadata = {
@@ -96,14 +97,7 @@ export default function LienHePage() {
               </a>
             </li>
             <li>
-              <strong className="text-zinc-800">Zalo Official Account:</strong>{' '}
-              <a
-                href="https://zalo.me/1714121106420519241"
-                className="text-orange-600 underline hover:text-orange-700 break-all"
-                rel="noopener noreferrer"
-              >
-                https://zalo.me/1714121106420519241
-              </a>
+              <ZaloShopLink className="text-orange-600 underline hover:text-orange-700 break-all" />
             </li>
             <li>
               <strong className="text-zinc-800">Email CSKH:</strong>{' '}

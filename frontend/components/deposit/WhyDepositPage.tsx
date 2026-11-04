@@ -90,28 +90,38 @@ export default function WhyDepositPage({ orderId, orderCode, zaloUrl, deposit }:
             <h1 className="text-lg font-bold leading-tight md:text-xl">Tại sao phải đặt cọc?</h1>
             <p className="mt-1 text-sm text-orange-50">
               {orderCode ? `Đơn #${orderCode}. ` : null}
-              Hàng gửi từ nước ngoài về tốn nhiều phí và có rủi ro. Cọc để shop lên đơn. Quý khách chưa cần trả hết.
+              188 có kho ở nước ngoài. Hàng xuất từ kho của shop, không mua hộ chỗ khác. Đưa về Việt Nam tốn nhiều loại phí nên cần cọc trước.
             </p>
           </header>
 
           <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-gray-700 md:px-6 md:py-5">
             <section>
-              <h2 className="font-semibold text-gray-900">Shop phải ứng phí trước khi hàng về</h2>
+              <h2 className="font-semibold text-gray-900">Hàng lấy từ kho của shop ở nước ngoài</h2>
               <p className="mt-1">
-                Mẫu này shop đặt và gửi từ nước ngoài, không lấy sẵn trong kho để giao ngay. Trước khi hàng tới tay quý khách, shop đã phải chi tiền mua hàng, phí vận chuyển quốc tế, phí thông quan và phí chuyển về Việt Nam.
+                188 nhập và giữ hàng tại kho riêng ở nước ngoài. Khi quý khách đặt, shop xuất đúng mẫu, đúng size từ kho của mình rồi chuyển về Việt Nam. Đơn không bị chuyển sang một shop khác để mua hộ.
               </p>
               <p className="mt-1">
-                Những khoản đó phát sinh ngay khi lên đơn. Có cọc, shop mới đặt mua đúng mẫu, đúng size cho quý khách.
+                Kho ở nước ngoài nên hàng chưa nằm sẵn tại Việt Nam để giao trong ngày. Shop chủ động nguồn hàng, quý khách vẫn nhận được mẫu shop đang bán.
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-gray-900">Đặt rồi không lấy, phí không thu lại</h2>
+              <h2 className="font-semibold text-gray-900">Đưa về Việt Nam tốn nhiều loại phí</h2>
               <p className="mt-1">
-                Đơn đặt rồi hủy, không nghe máy hoặc đổi ý sau khi hàng đã mua ở nước ngoài: phí ship quốc tế và tiền hàng không lấy lại được. Hàng đúng size, đúng mẫu cũng khó bán lại cho người khác.
+                Từ kho đến tay quý khách còn cước vận chuyển quốc tế, phí thông quan, thuế và phí chuyển tiếp trong nước. Mỗi loại phí đều lớn, và shop phải chi trước khi hàng về tới Việt Nam.
               </p>
               <p className="mt-1">
-                Cọc là phần quý khách xác nhận giữ đơn. Shop chỉ chi phí cho đơn đã có chuyển khoản, nên đơn được xử lý thật.
+                Cọc là phần quý khách cùng chịu chi phí đường về. Phần còn lại trả khi nhận hàng, sau khi đã kiểm tra được hàng.
+              </p>
+            </section>
+
+            <section>
+              <h2 className="font-semibold text-gray-900">Cọc để giữ đơn, tránh hủy ngang</h2>
+              <p className="mt-1">
+                Hàng đã xuất kho và lên chuyến thì cước quốc tế cùng các loại phí không thu lại được. Mẫu đã tách theo size cũng khó bán lại cho người khác.
+              </p>
+              <p className="mt-1">
+                Cọc xác nhận quý khách giữ đơn. Shop chỉ chi phí vận chuyển cho đơn đã có chuyển khoản, nên đơn được xử lý thật, không bị hủy giữa chừng.
               </p>
             </section>
 
@@ -119,28 +129,28 @@ export default function WhyDepositPage({ orderId, orderCode, zaloUrl, deposit }:
               <h2 className="font-semibold text-gray-900">Quý khách chỉ cọc một phần</h2>
               <p className="mt-1">
                 Mức mặc định là <strong>{percent}% giá trị hàng</strong>, tối thiểu{' '}
-                <strong>{formatDepositMinVnd(minAmount)}</strong>. Phần còn lại và phí giao hàng trong nước, nếu có, trả khi nhận hàng — lúc đó quý khách kiểm tra được hàng rồi mới trả nốt.
+                <strong>{formatDepositMinVnd(minAmount)}</strong>. Phần còn lại và phí giao hàng trong nước, nếu có, trả khi nhận hàng.
               </p>
               <p className="mt-1">
                 Muốn trả hết thì chọn <strong>cọc 100%</strong> trên trang QR. Khoản đó gồm cả phí ship, không còn số phải trả lúc nhận.
               </p>
               <p className="mt-1">
                 Đơn từ <strong>{formatDepositMinVnd(highOrderAmount)}</strong> cọc tối thiểu{' '}
-                <strong>{highOrderPercent}%</strong>, vì tiền mua và phí vận chuyển quốc tế của đơn lớn càng cao.
+                <strong>{highOrderPercent}%</strong>, vì cước và các loại phí của đơn càng lớn.
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-gray-900">Cọc vẫn được bảo vệ</h2>
+              <h2 className="font-semibold text-gray-900">Cọc vẫn được giữ đúng</h2>
               <p className="mt-1">
-                Hàng giao không đúng mô tả hoặc có lỗi sản xuất: shop gửi mẫu khác đúng mô tả hoặc hoàn tiền đặt cọc. Không vừa size: hỗ trợ đổi size 1 lần, không đổi mẫu.
+                Shop giao hàng có kiểm tra. Hàng không đúng mô tả hoặc lỗi sản xuất: gửi mẫu khác đúng mô tả hoặc hoàn tiền đặt cọc. Không vừa size: hỗ trợ đổi size 1 lần, không đổi mẫu.
               </p>
             </section>
 
             <section>
-              <h2 className="font-semibold text-gray-900">Cọc xong là shop lên đơn</h2>
+              <h2 className="font-semibold text-gray-900">Cọc xong shop xuất kho và chuyển về</h2>
               <p className="mt-1">
-                Quét mã QR và ghi đúng nội dung chuyển khoản. Đúng nội dung thì shop xác nhận cọc tự động, rồi đặt mua và gửi hàng từ nước ngoài về.
+                Quét mã QR và ghi đúng nội dung chuyển khoản. Đúng nội dung thì shop xác nhận cọc tự động, xuất hàng từ kho nước ngoài và chuyển về Việt Nam.
               </p>
             </section>
           </div>
