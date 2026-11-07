@@ -365,7 +365,7 @@ def gpt_generate_image_from_text(prompt: str) -> bytes:
 
     key = (getattr(settings, "OPENAI_API_KEY", "") or "").strip()
     if len(key) < 10:
-        raise RuntimeError("Thiếu OPENAI_API_KEY cho banner ngày lễ.")
+        raise RuntimeError("Thiếu OPENAI_API_KEY cho banner.")
     model = (
         getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
     ).strip() or "gpt-image-2"
@@ -405,35 +405,41 @@ def gpt_generate_image_from_text(prompt: str) -> bytes:
     return base64.b64decode(b64)
 
 
-def _render_banner_pixels(prompt: str, *, kind: str) -> tuple[bytes, str, str]:
-    """Sinh pixel banner. Ngày lễ ưu tiên GPT; lỗi thì Gemini 21:9."""
-    gemini_model = (
+def _gemini_image_model() -> str:
+    return (
         getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
         or "gemini-3-pro-image-preview"
-    ).strip()
-    if kind == "holiday":
-        gpt_model = (
-            getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
-        ).strip() or "gpt-image-2"
+    ).strip() or "gemini-3-pro-image-preview"
+
+
+def _gpt_image_model() -> str:
+    return (
+        getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
+    ).strip() or "gpt-image-2"
+
+
+def _render_with_gemini(prompt: str) -> tuple[bytes, str, str]:
+    model = _gemini_image_model()
+    raw = gemini_generate_image_from_text(
+        prompt,
+        image_model=model,
+        image_size="2K",
+        aspect_ratio=ASPECT_RATIO,
+    )
+    return raw, "gemini", model
+
+
+def _render_banner_pixels(prompt: str, *, kind: str) -> tuple[bytes, str, str]:
+    """Sinh pixel banner. Sinh nhật và ngày lễ ưu tiên GPT; lỗi thì Gemini 21:9."""
+    if kind in ("birthday", "holiday"):
+        gpt_model = _gpt_image_model()
         try:
             raw = gpt_generate_image_from_text(prompt)
             return crop_to_banner_aspect(raw), "openai", gpt_model
         except Exception as exc:
-            logger.warning("GPT banner lễ lỗi, dùng Gemini: %s", exc)
-            raw = gemini_generate_image_from_text(
-                prompt,
-                image_model=gemini_model,
-                image_size="2K",
-                aspect_ratio=ASPECT_RATIO,
-            )
-            return raw, "gemini", gemini_model
-    raw = gemini_generate_image_from_text(
-        prompt,
-        image_model=gemini_model,
-        image_size="2K",
-        aspect_ratio=ASPECT_RATIO,
-    )
-    return raw, "gemini", gemini_model
+            logger.warning("GPT banner %s lỗi, dùng Gemini: %s", kind, exc)
+            return _render_with_gemini(prompt)
+    return _render_with_gemini(prompt)
 
 
 def fit_banner_bytes(data: bytes) -> bytes:
@@ -1101,24 +1107,16 @@ def generate_banner(
         .first()
     )
     version = int(latest.version if latest else 0) + 1
-    if kind == "holiday":
-        model = (
-            getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"
-        ).strip() or "gpt-image-2"
+    if kind in ("birthday", "holiday"):
+        model = _gpt_image_model()
         provider = "openai"
-        date_key = HOLIDAY_DATE_KEY
+        date_key = HOLIDAY_DATE_KEY if kind == "holiday" else f"{month:02d}-{day:02d}"
     elif kind == "warehouse":
-        model = (
-            getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
-            or "gemini-3-pro-image-preview"
-        ).strip()
+        model = _gemini_image_model()
         provider = "gemini"
         date_key = WAREHOUSE_DATE_KEY
     else:
-        model = (
-            getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "")
-            or "gemini-3-pro-image-preview"
-        ).strip()
+        model = _gemini_image_model()
         provider = "gemini"
         date_key = f"{month:02d}-{day:02d}"
     # Nhả connection trước Gemini text — tránh idle-in-transaction timeout ~35s.

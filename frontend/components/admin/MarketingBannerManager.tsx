@@ -114,9 +114,9 @@ export default function MarketingBannerManager() {
       <div>
         <h2 className="text-lg font-bold text-gray-900">Banner AI sale, sinh nhật và kho</h2>
         <p className="mt-1 text-sm text-gray-600">
-          Nano Banana Pro tạo một ảnh banner 21:9. Slider trang chủ ưu tiên CMSN, rồi sale
-          ngày trùng tháng, rồi sale kho. Tạo lại thành công sẽ xóa ảnh cũ — mỗi ngày/% chỉ
-          giữ một ảnh đang dùng.
+          Sinh nhật và ngày lễ ưu tiên GPT Image; GPT lỗi thì Gemini vẽ ảnh 21:9. Sale ngày
+          và sale kho dùng Gemini. Slider trang chủ ưu tiên CMSN, rồi sale ngày trùng tháng,
+          rồi sale kho. Tạo lại thành công sẽ xóa ảnh cũ — mỗi ngày/% chỉ giữ một ảnh đang dùng.
         </p>
       </div>
 

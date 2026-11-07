@@ -14,6 +14,15 @@ def _allow_bunny_probe(monkeypatch):
     monkeypatch.setattr(svc, "_probe_bunny_before_image", lambda **kwargs: None)
 
 
+def _skip_gpt(monkeypatch):
+    """Banner sinh nhật thử GPT trước. Test giữ đường Gemini, không gọi OpenAI."""
+
+    def _no_gpt(_prompt):
+        raise RuntimeError("gpt skipped in test")
+
+    monkeypatch.setattr(svc, "gpt_generate_image_from_text", _no_gpt)
+
+
 def _png_bytes() -> bytes:
     stream = BytesIO()
     Image.new("RGB", (2100, 900), "#ea580c").save(stream, format="PNG")
@@ -164,6 +173,7 @@ def test_failed_force_keeps_previous_ready_image(monkeypatch):
     db = _session()
     raw = _png_bytes()
     _allow_bunny_probe(monkeypatch)
+    _skip_gpt(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -236,6 +246,7 @@ def test_ensure_daily_banners_creates_at_most_one_and_reports_pending(monkeypatc
     db.commit()
     raw = _png_bytes()
     _allow_bunny_probe(monkeypatch)
+    _skip_gpt(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", lambda *a, **k: raw)
     monkeypatch.setattr(
         svc,
@@ -401,6 +412,7 @@ def test_banner_stops_after_three_failures_and_emails_admin_once(monkeypatch):
         raise RuntimeError("gemini down")
 
     _allow_bunny_probe(monkeypatch)
+    _skip_gpt(monkeypatch)
     monkeypatch.setattr(svc, "gemini_generate_image_from_text", _boom)
     monkeypatch.setattr(
         svc,
@@ -569,6 +581,32 @@ def test_holiday_prompt_names_occasion_without_dates():
         assert "14/2" not in BANNER_HEADLINES[code]
         assert "8/3" not in BANNER_HEADLINES[code]
         assert "20/10" not in BANNER_HEADLINES[code]
+
+
+def test_birthday_banner_prefers_gpt_and_falls_back_to_gemini(monkeypatch):
+    raw = _png_bytes()
+    gemini_calls = {"n": 0}
+
+    def _gemini(*_a, **_k):
+        gemini_calls["n"] += 1
+        return raw
+
+    monkeypatch.setattr(svc, "gpt_generate_image_from_text", lambda _prompt: raw)
+    monkeypatch.setattr(svc, "gemini_generate_image_from_text", _gemini)
+
+    _data, provider, model = svc._render_banner_pixels("banner sinh nhật", kind="birthday")
+    assert provider == "openai"
+    assert model == svc._gpt_image_model()
+    assert gemini_calls["n"] == 0
+
+    def _no_gpt(_prompt):
+        raise RuntimeError("gpt down")
+
+    monkeypatch.setattr(svc, "gpt_generate_image_from_text", _no_gpt)
+    _data, provider, model = svc._render_banner_pixels("banner sinh nhật", kind="birthday")
+    assert provider == "gemini"
+    assert model == svc._gemini_image_model()
+    assert gemini_calls["n"] == 1
 
 
 def test_generate_holiday_banner_reuses_and_batch_skips_ready(monkeypatch):
