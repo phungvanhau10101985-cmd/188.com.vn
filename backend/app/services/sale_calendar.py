@@ -550,6 +550,7 @@ def feed_title_with_sale_prefix(title: str, state: SaleCalendarState) -> str:
 
 
 def feed_custom_label_for_teaser(state: SaleCalendarState) -> str:
+    """Nhãn sale cho feed. Ghi vào custom_label_2, không đè custom_label_0 (phân khúc giá)."""
     if state.is_teaser:
         return "sap_giam_gia"
     if state.is_active:

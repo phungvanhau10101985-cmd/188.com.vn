@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.product import Product
 from app.services.catalog_internal_labels import meta_internal_labels_for_product
 from app.services.merchant_feed_tsv import (
+    _apply_sale_status_custom_label,
     _custom_label_0_value,
     _custom_labels_1_to_4,
     _item_group_id_value,
@@ -136,11 +137,10 @@ def meta_row_values(
     fb = _tsv_cell(fb_product_category) or gcat
     sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
     c0 = _custom_label_0_value(product)
-    if sale_state is not None:
-        sale_label = sale_calendar_svc.feed_custom_label_for_teaser(sale_state)
-        if sale_label:
-            c0 = _tsv_cell(sale_label)
-    c1, c2, c3, c4 = _custom_labels_1_to_4(product)
+    c1, c2, c3, c4 = _apply_sale_status_custom_label(
+        _custom_labels_1_to_4(product),
+        sale_state,
+    )
 
     return [
         _tsv_cell(getattr(product, "product_id", "") or ""),

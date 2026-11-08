@@ -594,6 +594,27 @@ def _optional_custom_label(product: Product, n: int) -> Optional[str]:
     return None
 
 
+def _apply_sale_status_custom_label(
+    labels: tuple[str, str, str, str],
+    sale_state,
+) -> tuple[str, str, str, str]:
+    """Giữ custom_label_0 cho phân khúc giá. Trạng thái sale ghi vào custom_label_2.
+
+    custom_label_1 là style / thanh_ly_kho, custom_label_3 là mức bán,
+    custom_label_4 là danh mục con. custom_label_2 chỉ là occasion (trống phần lớn)
+    nên dùng cho `sap_giam_gia` / `dang_giam_gia`. Hết sale thì trả lại occasion.
+    """
+    if sale_state is None:
+        return labels
+    from app.services import sale_calendar as sale_calendar_svc
+
+    sale_label = sale_calendar_svc.feed_custom_label_for_teaser(sale_state)
+    if not sale_label:
+        return labels
+    c1, _c2, c3, c4 = labels
+    return (c1, _tsv_cell(sale_label), c3, c4)
+
+
 def _custom_labels_1_to_4(product: Product) -> tuple[str, str, str, str]:
     style = _tsv_cell(getattr(product, "style", None)) or ""
     occ = _tsv_cell(getattr(product, "occasion", None)) or ""
@@ -767,11 +788,10 @@ def merchant_row_values(
     product_type = GOLF_FEED_GROUP if golf_group else _product_type_breadcrumb(product)
     sale_price, sale_eff = _sale_price_and_effective(product, currency, sale_state=sale_state, db=db)
     c0 = _custom_label_0_value(product)
-    if sale_state is not None:
-        sale_label = sale_calendar_svc.feed_custom_label_for_teaser(sale_state)
-        if sale_label:
-            c0 = _tsv_cell(sale_label)
-    c1, c2, c3, c4 = _custom_labels_1_to_4(product)
+    c1, c2, c3, c4 = _apply_sale_status_custom_label(
+        _custom_labels_1_to_4(product),
+        sale_state,
+    )
     gender = _normalized_gender(product)
     age_grp = _normalized_age_group(product)
     ig = _item_group_id_value(product)
