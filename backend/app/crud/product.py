@@ -1,6 +1,6 @@
 # backend/app/crud/product.py - COMPLETE FIXED VERSION
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, cast, func as sql_func, literal, not_, or_, select, String, union_all
+from sqlalchemy import and_, case, cast, func as sql_func, literal, not_, or_, select, String, union_all
 from typing import List, Optional, Dict, Any, Set, Tuple
 from app.models.product import Product
 from app.models.product_deletion import ProductDeletion
@@ -5792,18 +5792,35 @@ def get_products_for_incremental_sync(
     limit: int,
 ) -> Tuple[int, List[Tuple[str, Any]]]:
     """
-    Trả thay đổi catalog gồm bản ghi còn sống và tombstone đã xóa.
+    Trả thay đổi catalog cho cổng NanoAI.
+
+    Chỉ sản phẩm ``image_localization_status == localized`` được upsert.
+    Sản phẩm đổi trong cửa sổ nhưng chưa bản địa hóa (pending/failed/skipped/trống)
+    trả về dạng ``excluded`` để đối tác xóa bản đã kéo trước đó.
+    Trạng thái ``processing`` bị bỏ qua: job đang chạy, chưa có kết quả cuối.
+    Tombstone hard-delete vẫn gửi đủ.
     `updated_since` được so sánh inclusive để client dùng mốc lần chạy thành công
     mà không làm mất thay đổi có cùng timestamp (client cần upsert idempotent).
     """
     changed_at = sql_func.coalesce(Product.updated_at, Product.created_at)
+    # processing = đang bản địa hóa, chưa chốt — không upsert, cũng không báo xóa.
+    sync_kind = case(
+        (Product.image_localization_status == "localized", literal("product")),
+        else_=literal("excluded"),
+    )
     events = union_all(
         select(
-            literal("product").label("event_type"),
+            sync_kind.label("event_type"),
             Product.id.label("row_id"),
             Product.product_id.label("product_id"),
             changed_at.label("changed_at"),
-        ).where(changed_at >= updated_since),
+        ).where(
+            changed_at >= updated_since,
+            or_(
+                Product.image_localization_status.is_(None),
+                Product.image_localization_status != "processing",
+            ),
+        ),
         select(
             literal("deleted").label("event_type"),
             ProductDeletion.id.label("row_id"),
@@ -5844,6 +5861,8 @@ def get_products_for_incremental_sync(
             items.append(("product", live_by_id[event.row_id]))
         elif event.event_type == "deleted" and event.row_id in deletion_by_id:
             items.append(("deleted", deletion_by_id[event.row_id]))
+        elif event.event_type == "excluded":
+            items.append(("excluded", event))
     return total, items
 
 

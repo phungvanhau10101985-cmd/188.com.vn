@@ -84,6 +84,9 @@ Nếu chưa sửa, sản phẩm hiển thị bên NanoAI sẽ bị lẫn mô t�
 - Có trong snapshot mới, chưa có trong kho NanoAI → thêm mới.
 - Item `is_deleted=true` → xoá toàn bộ bản ghi cùng `id`/`product_id` trong kho NanoAI.
 - Không map được `product_id`/`code` → bỏ qua, không đẩy lên.
+- Chỉ sản phẩm đã bản địa hóa (`image_localization_status=localized`) được thêm/cập nhật.
+  Sản phẩm chưa bản địa hóa đi kèm `is_deleted=true` để gỡ khỏi kho NanoAI. SP đang
+  `processing` chưa có trong feed cho đến khi job chốt.
 
 Rất mong đội kỹ thuật NanoAI chuyển cron sang API mới và xử lý tombstone `is_deleted=true` theo
 hướng dẫn trên. Có vấn đề gì cần trao đổi thêm, xin liên hệ lại.

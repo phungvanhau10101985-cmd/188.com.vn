@@ -13,7 +13,12 @@ GET https://188.com.vn/api/v1/products?updated_since=<ISO-8601-UTC>&page=1&limit
   `2026-08-04T10:00:00Z`; bắt buộc có timezone.
 - `page` bắt đầu từ 1; `limit` tối đa **500**.
 - Không được lọc/loại các item có `is_deleted=true`: NanoAI phải dùng các item này để xóa bản ghi
-  cũ đã bị hard-delete trên 188.
+  cũ đã bị hard-delete trên 188, **và** để gỡ sản phẩm chưa được bản địa hóa.
+- Chỉ sản phẩm `image_localization_status=localized` (đã bản địa hóa ảnh) được upsert
+  (`is_deleted=false`). Sản phẩm pending/failed/skipped/chưa chạy trong cùng cửa sổ thời gian
+  trả `is_deleted=true` — xóa khỏi kho NanoAI. Sản phẩm đang `processing` không xuất hiện cho
+  đến khi job chốt. Lần baseline `updated_since=1970-01-01T00:00:00Z` sau quy tắc này sẽ vừa
+  nạp SP đã bản địa hóa, vừa gỡ phần còn lại.
 - Response:
   ```json
   {

@@ -908,7 +908,13 @@ def _read_products_incremental_sync(
     limit: int,
 ) -> dict:
     """
-    Wire contract NanoAI: trả các thay đổi kể từ mốc UTC, gồm cả tombstone hard-delete.
+    Wire contract NanoAI: trả các thay đổi kể từ mốc UTC, gồm tombstone hard-delete.
+
+    Chỉ sản phẩm đã bản địa hóa (``image_localization_status=localized``) được upsert.
+    Sản phẩm chưa bản địa hóa trong cùng cửa sổ thời gian trả ``is_deleted=true`` để
+    nền tảng kia gỡ bản đã đồng bộ trước đó. SP đang ``processing`` không có trong trang
+    này cho đến khi job bản địa hóa chốt trạng thái.
+
     Endpoint này cố ý không dùng listing cache/enrich sale để response ổn định, nhẹ hơn và
     không lọc mất `is_active=false` hoặc `is_deleted=true`.
     """
@@ -932,14 +938,15 @@ def _read_products_incremental_sync(
     )
     data: List[dict] = []
     for event_type, item in events:
-        if event_type == "deleted":
-            deleted_at = item.deleted_at
+        if event_type in ("deleted", "excluded"):
+            # excluded: SP còn trong kho nhưng chưa «đã bản địa hóa» — đối tác phải gỡ.
+            stamp = item.deleted_at if event_type == "deleted" else item.changed_at
             data.append(
                 {
                     "id": item.product_id,
                     "product_id": item.product_id,
-                    "updated_at": deleted_at.isoformat() if deleted_at else None,
-                    "deleted_at": deleted_at.isoformat() if deleted_at else None,
+                    "updated_at": stamp.isoformat() if stamp else None,
+                    "deleted_at": stamp.isoformat() if stamp else None,
                     "is_deleted": True,
                 }
             )
@@ -1024,7 +1031,9 @@ def read_products(
         None,
         description=(
             "Bật chế độ đồng bộ gia tăng NanoAI. ISO-8601 UTC, ví dụ "
-            "2026-08-04T10:00:00Z. Khi có tham số này response dùng {success,pagination,data}."
+            "2026-08-04T10:00:00Z. Khi có tham số này response dùng {success,pagination,data}. "
+            "Chỉ sản phẩm image_localization_status=localized được upsert; "
+            "sản phẩm chưa bản địa hóa trả is_deleted=true."
         ),
     ),
     page: int = Query(1, ge=1, description="Trang 1-based của chế độ updated_since"),
