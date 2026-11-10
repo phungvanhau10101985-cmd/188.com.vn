@@ -1,8 +1,10 @@
 """
 Đọc/ghi cache JSON kết quả GET /products/?q=... (payload trả về client sau khi serialize SP).
 
-Mặc định cache vĩnh viễn (PRODUCT_SEARCH_CACHE_TTL_SECONDS=0) — làm mới JSON khi SP liên quan
-từ khóa được thêm/xóa (refresh_caches_for_product_states).
+Mặc định cache vĩnh viễn (PRODUCT_SEARCH_CACHE_TTL_SECONDS=0). Khi SP liên quan bị thêm/xóa,
+``refresh_caches_for_product_states`` chỉ hết hạn dòng khớp từ khóa (không nạp ``response_json``).
+Request tìm kiếm sau đó dựng lại đúng một dòng. Nạp cả bảng (~3GB) đã làm OOM API khi xóa
+hàng loạt sản phẩm hết hàng.
 """
 
 from __future__ import annotations
@@ -779,35 +781,81 @@ def _refresh_cache_rows_deduped(db: Session, rows: List[ProductSearchCache]) -> 
     return refreshed
 
 
-def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
-    """
-    Làm mới cache JSON khi SP thêm/xóa khớp từ khóa (cùng logic product_matches_search_keyword).
-    Chỉ các dòng cache liên quan — không đụng từ khóa khác.
-    """
+def select_matching_search_cache_keys(
+    rows: List[Tuple[str, Optional[str]]],
+    product_states: List[Any],
+) -> List[str]:
+    """Chọn cache_key có norm_q khớp SP — không đụng response_json."""
     from app.services.listing_facet_cache import product_matches_search_keyword
 
     states = [p for p in product_states if p is not None]
     if not states:
+        return []
+    keys: List[str] = []
+    seen: set[str] = set()
+    for cache_key, norm_q in rows:
+        keyword = (norm_q or "").strip()
+        key = (cache_key or "").strip()
+        if not keyword or not key or key in seen:
+            continue
+        if any(product_matches_search_keyword(state, keyword) for state in states):
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
+    """
+    Hết hạn cache tìm kiếm khớp SP vừa thêm/xóa.
+
+    Chỉ đọc ``cache_key`` + ``norm_q``. Không SELECT ``response_json`` (hàng chục KB–trăm KB/dòng,
+    cả bảng > 3GB) và không rebuild JSON trong process API — request sau tự ghi lại một dòng.
+    """
+    states = [p for p in product_states if p is not None]
+    if not states:
         return 0
 
-    rows = db.query(ProductSearchCache).all()
-    related_rows: List[ProductSearchCache] = []
-    for row in rows:
-        keyword = _norm_q_for_row(row)
-        if not keyword:
-            continue
-        if not any(product_matches_search_keyword(state, keyword) for state in states):
-            continue
-        related_rows.append(row)
+    rows = (
+        db.query(ProductSearchCache.cache_key, ProductSearchCache.norm_q)
+        .filter(ProductSearchCache.norm_q.isnot(None))
+        .all()
+    )
+    keys = select_matching_search_cache_keys(
+        [(str(cache_key or ""), norm_q) for cache_key, norm_q in rows],
+        states,
+    )
+    if not keys:
+        return 0
 
-    refreshed = _refresh_cache_rows_deduped(db, related_rows)
-
-    if refreshed:
-        logger.info(
-            "product_search_cache: refreshed %s row(s) after product add/delete",
-            refreshed,
+    now = datetime.now(timezone.utc)
+    step = 500
+    for i in range(0, len(keys), step):
+        chunk = keys[i : i + step]
+        db.query(ProductSearchCache).filter(ProductSearchCache.cache_key.in_(chunk)).update(
+            {ProductSearchCache.expires_at: now},
+            synchronize_session=False,
         )
-    return refreshed
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            redis_keys = [redis_cache.listing_cache_key(k) for k in keys]
+            for i in range(0, len(redis_keys), step):
+                redis_cache.delete(*redis_keys[i : i + step])
+    except Exception:
+        logger.warning("product_search_cache: xóa redis listing sau expire lỗi", exc_info=True)
+
+    logger.info(
+        "product_search_cache: expired %s row(s) after product add/delete (không nạp response_json)",
+        len(keys),
+    )
+    return len(keys)
 
 
 def refresh_all_caches(db: Session) -> int:

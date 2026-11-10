@@ -66,6 +66,110 @@ def product_matches_search_keyword(product: Any, keyword: str) -> bool:
     return all(w.lower() in blob for w in words)
 
 
+def mark_listing_facets_stale_for_product_states(db: Session, *product_states: Any) -> int:
+    """
+    Đánh facet listing stale theo danh mục / từ khóa của SP vừa xóa.
+
+    Không rebuild (mỗi rebuild quét catalog). Request sau thấy cache stale hoặc mất Redis
+    thì tính lại một phạm vi. Chỉ đọc khóa, không nạp JSON facet.
+    """
+    states = [p for p in product_states if p is not None]
+    if not states:
+        return 0
+
+    scope_pairs: set[Tuple[str, str]] = set()
+    for product in states:
+        for c1, c2, c3 in _category_paths_for_product_change(product):
+            scope = resolve_facet_scope(category=c1, subcategory=c2, sub_subcategory=c3)
+            if scope:
+                scope_pairs.add((scope[0], scope[1]))
+
+    category_ids = []
+    seen_cat: set[int] = set()
+    for product in states:
+        cid = getattr(product, "category_id", None)
+        try:
+            cid_int = int(cid)
+        except (TypeError, ValueError):
+            continue
+        if cid_int <= 0 or cid_int in seen_cat:
+            continue
+        seen_cat.add(cid_int)
+        category_ids.append(cid_int)
+    if category_ids:
+        cluster_rows = (
+            db.query(SeoCluster.slug)
+            .join(Category, Category.seo_cluster_id == SeoCluster.id)
+            .filter(Category.id.in_(category_ids))
+            .all()
+        )
+        for (slug,) in cluster_rows:
+            text = str(slug or "").strip().lower()
+            if text:
+                scope_pairs.add((SCOPE_SEO_CLUSTER, text))
+
+    search_rows = (
+        db.query(ListingFacetCache.scope_key, ListingFacetCache.display_label)
+        .filter(
+            ListingFacetCache.scope_type == SCOPE_SEARCH_Q,
+            ListingFacetCache.is_enabled.is_(True),
+        )
+        .all()
+    )
+    for scope_key, label in search_rows:
+        key = str(scope_key or "").strip()
+        if not key:
+            continue
+        keyword = label or key
+        if any(product_matches_search_keyword(state, str(keyword)) for state in states):
+            scope_pairs.add((SCOPE_SEARCH_Q, key))
+
+    if not scope_pairs:
+        return 0
+
+    pairs = list(scope_pairs)
+    step = 200
+    updated = 0
+    for i in range(0, len(pairs), step):
+        chunk = pairs[i : i + step]
+        types = {t for t, _k in chunk}
+        keys = {k for _t, k in chunk}
+        rows = (
+            db.query(ListingFacetCache.id, ListingFacetCache.scope_type, ListingFacetCache.scope_key)
+            .filter(
+                ListingFacetCache.scope_type.in_(types),
+                ListingFacetCache.scope_key.in_(keys),
+            )
+            .all()
+        )
+        wanted = set(chunk)
+        ids = [row_id for row_id, scope_type, scope_key in rows if (scope_type, scope_key) in wanted]
+        if not ids:
+            continue
+        updated += (
+            db.query(ListingFacetCache)
+            .filter(ListingFacetCache.id.in_(ids))
+            .update({ListingFacetCache.is_stale: True}, synchronize_session=False)
+            or 0
+        )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    try:
+        from app.core import redis_cache
+
+        if redis_cache.is_enabled():
+            redis_keys = [redis_cache.facet_cache_key(t, k) for t, k in pairs]
+            for i in range(0, len(redis_keys), step):
+                redis_cache.delete(*redis_keys[i : i + step])
+    except Exception:
+        logger.warning("Xóa redis facet sau bulk xóa SP lỗi", exc_info=True)
+    return int(updated)
+
+
 def iter_related_search_cache_rows(
     db: Session,
     *product_states: Any,

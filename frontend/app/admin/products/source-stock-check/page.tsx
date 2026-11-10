@@ -1206,7 +1206,11 @@ export default function AdminSourceStockCheckPage() {
       }
       const blocked = res.blocked_db_ids ?? [];
       if (blocked.length) {
-        msg += ` Bỏ qua ${blocked.length} sản (còn tồn kho thanh lý, chưa hết mới xóa được).`;
+        const sample = blocked
+          .slice(0, 2)
+          .map((b) => `#${b.db_id} (${b.reason})`)
+          .join('; ');
+        msg += ` Bỏ qua ${blocked.length} sản${sample ? `: ${sample}` : ''}.`;
       }
       showToast(res.deleted_count ? (blocked.length ? 'info' : 'ok') : 'info', msg);
       setReportOosDeleteConfirmIds(null);
@@ -2211,8 +2215,8 @@ export default function AdminSourceStockCheckPage() {
                 {reportOosDeleteSkipStepUp
                   ? ' (toàn bộ SP gắn cờ hết hàng trong cửa sổ báo cáo, không chỉ trang mẫu).'
                   : '.'}{' '}
-                Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout/502 sẽ tạm dừng ~12s rồi tự xóa tiếp —
-                không cần bấm lại.
+                Xóa DB trước, dọn Bunny CDN sau (nền). Gặp timeout, 502 hoặc 503 sẽ tạm dừng vài giây rồi tự
+                xóa tiếp — không cần bấm lại.
               </p>
               {!reportOosDeleting ? (
                 <ul className="mt-2 max-h-48 overflow-auto border border-gray-100 rounded-lg divide-y divide-gray-100 text-[13px]">
@@ -2269,7 +2273,7 @@ export default function AdminSourceStockCheckPage() {
                   {reportOosDeleteProgress.waitingRetrySec != null &&
                   reportOosDeleteProgress.waitingRetrySec > 0 ? (
                     <p className="text-xs text-amber-900/95 tabular-nums">
-                      Gặp timeout/502 — chờ{' '}
+                      Gặp timeout/502/503 — chờ{' '}
                       <strong>{reportOosDeleteProgress.waitingRetrySec}s</strong> rồi tự thử lại
                       {reportOosDeleteProgress.timeoutRetryAttempt
                         ? ` (lần ${reportOosDeleteProgress.timeoutRetryAttempt})`

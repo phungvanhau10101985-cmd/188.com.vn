@@ -333,7 +333,9 @@ async function fetchAdmin<T>(
           ? '[422] Body JSON cần dạng: {"url":"https://..." , "download_images":true}. '
           : res.status === 422
             ? '[422] '
-          : res.status === 504 || res.status === 502
+          : res.status === 503
+            ? '[503] '
+            : res.status === 504 || res.status === 502
             ? `[${res.status}] Hết giờ chờ proxy (gateway timeout) — request lâu hơn giới hạn nginx/Cloudflare. Cấu hình proxy_read_timeout ≥ 10 phút cho route API ${
                 /import-export\/(sync\/google-sheet|cron\/sync-google-sheet)/.test(endpoint)
                   ? '/import-export/sync/google-sheet-*'
@@ -1412,15 +1414,15 @@ async function deleteSourceStockBatchProductsByDbIdsImpl(
     return { ok: true, deleted_count: 0, deleted_db_ids: [], not_found_db_ids: [], blocked_db_ids: [] };
   }
   /**
-   * Backend đã tối ưu (ladipage 1 query/lô + Bunny nền) — lô 25 vẫn dưới Cloudflare ~100s.
-   * Gặp 502 thì giảm nửa; tối thiểu 1. Thành công liên tiếp thì từ từ tăng lại.
+   * Mỗi lô là một request ngắn. 502/503/504 (API restart, pool DB, Cloudflare) thì giảm lô
+   * và thử lại — không dừng cả danh sách.
    */
   const INITIAL_CHUNK = 25;
   const MIN_CHUNK = 1;
   const MAX_CHUNK = 40;
-  /** Chờ origin/request cũ nguội rồi tự tiếp tục — tránh bấm tay lại. */
-  const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 12_000;
-  const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 10;
+  /** Chờ API hồi (watchdog ~2 phút) rồi tự xóa tiếp. */
+  const TIMEOUT_RETRY_DELAY_MS = options?.timeoutRetryDelayMs ?? 5_000;
+  const MAX_CONSECUTIVE_TIMEOUT_RETRIES = options?.maxConsecutiveTimeoutRetries ?? 48;
   let chunkSize = INITIAL_CHUNK;
   const deleted_db_ids: number[] = [];
   const not_found_db_ids: number[] = [];
@@ -1431,7 +1433,17 @@ async function deleteSourceStockBatchProductsByDbIdsImpl(
 
   const isGatewayOrTimeout = (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
-    return /\[502\]|\[504\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout/i.test(msg);
+    if (/integrity|notnull|not null|foreign key|violates|duplicate key|unique constraint/i.test(msg)) {
+      return false;
+    }
+    return /\[502\]|\[503\]|\[504\]|\[500\]|Hết giờ chờ proxy|Hết thời gian chờ server|gateway timeout|Service Unavailable|Internal Server Error|Failed to fetch|NetworkError|ECONNREFUSED|ECONNRESET|Cơ sở dữ liệu tạm thời|Load failed|fetch failed/i.test(
+      msg,
+    );
+  };
+
+  const isAuthStop = (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    return /Phiên đăng nhập|\[401\]|\[403\]|\[428\]/.test(msg);
   };
 
   const emitProgress = (extra?: {
@@ -1493,9 +1505,23 @@ async function deleteSourceStockBatchProductsByDbIdsImpl(
       }
       emitProgress();
     } catch (err) {
-      if (isGatewayOrTimeout(err) && chunkSize > MIN_CHUNK) {
+      const base = err instanceof Error ? err.message : String(err);
+      if (isAuthStop(err)) {
+        const done = deleted_db_ids.length;
+        const left = unique.length - cursor;
+        throw new Error(
+          done > 0 ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). ${base}` : base,
+        );
+      }
+      if (chunkSize > MIN_CHUNK) {
         chunkSize = Math.max(MIN_CHUNK, Math.floor(chunkSize / 2));
         chunkIndex -= 1;
+        if (isGatewayOrTimeout(err)) {
+          consecutiveTimeoutRetries += 1;
+          if (consecutiveTimeoutRetries <= MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
+            await waitBeforeRetry(consecutiveTimeoutRetries);
+          }
+        }
         continue;
       }
       if (isGatewayOrTimeout(err) && consecutiveTimeoutRetries < MAX_CONSECUTIVE_TIMEOUT_RETRIES) {
@@ -1504,9 +1530,15 @@ async function deleteSourceStockBatchProductsByDbIdsImpl(
         await waitBeforeRetry(consecutiveTimeoutRetries);
         continue;
       }
+      if (!isGatewayOrTimeout(err)) {
+        blocked_db_ids.push({ db_id: chunk[0], reason: base.slice(0, 300) });
+        cursor += chunk.length;
+        consecutiveTimeoutRetries = 0;
+        emitProgress();
+        continue;
+      }
       const done = deleted_db_ids.length;
       const left = unique.length - cursor;
-      const base = err instanceof Error ? err.message : String(err);
       throw new Error(
         done > 0
           ? `Đã xóa ${done}/${unique.length} sản rồi dừng (còn ${left}). Đã tự thử lại ${consecutiveTimeoutRetries} lần sau mỗi ${Math.round(TIMEOUT_RETRY_DELAY_MS / 1000)}s vẫn lỗi. ${base}`
@@ -1792,14 +1824,14 @@ export const adminProductAPI = {
         chunkIndex: number;
         chunkTotal: number;
         chunkSize?: number;
-        /** Đang tạm dừng vì 502/timeout — giây còn lại trước khi tự xóa tiếp. */
+        /** Đang tạm dừng vì 502/503/timeout — giây còn lại trước khi tự xóa tiếp. */
         waitingRetrySec?: number;
         timeoutRetryAttempt?: number;
       }) => void;
       skipStepUp?: boolean;
-      /** Chờ giữa các lần retry khi đã giảm lô xuống 1 (mặc định 12s). */
+      /** Chờ giữa các lần retry khi gặp 502/503/timeout (mặc định 5s). */
       timeoutRetryDelayMs?: number;
-      /** Số lần retry liên tiếp tối đa khi lô = 1 vẫn 502 (mặc định 10). */
+      /** Số lần retry liên tiếp tối đa khi lô = 1 vẫn lỗi tạm (mặc định 48). */
       maxConsecutiveTimeoutRetries?: number;
     },
   ) => {

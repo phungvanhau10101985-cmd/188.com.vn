@@ -6026,31 +6026,104 @@ def _schedule_bunny_cleanup_for_deleted_products(products: List[Product]) -> Non
     _schedule_bunny_cleanup_for_urls(all_urls)
 
 
+_bulk_delete_cache_lock = threading.Lock()
+_bulk_delete_cache_snapshots: List[Any] = []
+_bulk_delete_cache_timer: Optional[threading.Timer] = None
+_bulk_delete_cache_running = False
+
+
+def _invalidate_caches_after_bulk_delete(snapshots: List[Any]) -> None:
+    """Hết hạn cache tìm kiếm + facet. Không nạp response_json và không rebuild catalog."""
+    from app.core import redis_cache
+    from app.crud import category_menu_cache as menu_cache_crud
+    from app.crud import product_search_cache as product_search_cache_crud
+    from app.db.session import SessionLocal
+    from app.services.listing_facet_cache import mark_listing_facets_stale_for_product_states
+
+    db_bg = SessionLocal()
+    try:
+        expired = product_search_cache_crud.refresh_caches_for_product_states(db_bg, *snapshots)
+        stale = mark_listing_facets_stale_for_product_states(db_bg, *snapshots)
+        logger.info(
+            "Bulk xóa SP: hết hạn %s cache tìm kiếm, stale %s facet, %s snapshot",
+            expired,
+            stale,
+            len(snapshots),
+        )
+    except Exception as exc:
+        logger.warning("Bulk xóa SP — hết hạn cache nền lỗi: %s", exc)
+    finally:
+        db_bg.close()
+
+    try:
+        menu_cache_crud.schedule_refresh_after_product_changes(snapshots)
+    except Exception as exc:
+        logger.warning("Bulk xóa SP — xếp làm mới menu danh mục lỗi: %s", exc)
+    try:
+        redis_cache.invalidate_pdp_cache(*(getattr(row, "slug", None) for row in snapshots))
+    except Exception:
+        pass
+
+
+def _bulk_delete_cache_worker() -> None:
+    global _bulk_delete_cache_running
+    try:
+        while True:
+            with _bulk_delete_cache_lock:
+                snapshots = list(_bulk_delete_cache_snapshots)
+                _bulk_delete_cache_snapshots.clear()
+            if not snapshots:
+                return
+            try:
+                _invalidate_caches_after_bulk_delete(snapshots)
+            except Exception as exc:
+                logger.warning("Bulk xóa SP — worker cache lỗi: %s", exc)
+    finally:
+        with _bulk_delete_cache_lock:
+            pending = bool(_bulk_delete_cache_snapshots)
+            _bulk_delete_cache_running = False
+            timer = _bulk_delete_cache_timer
+        if pending and timer is None:
+            _start_bulk_delete_cache_worker()
+
+
+def _start_bulk_delete_cache_worker() -> None:
+    global _bulk_delete_cache_running
+    with _bulk_delete_cache_lock:
+        if _bulk_delete_cache_running or not _bulk_delete_cache_snapshots:
+            return
+        _bulk_delete_cache_running = True
+    threading.Thread(
+        target=_bulk_delete_cache_worker,
+        name="bulk-facet-cache-refresh",
+        daemon=True,
+    ).start()
+
+
 def _schedule_facet_cache_refresh_after_bulk_delete(snapshots: List[Any]) -> None:
-    """Làm mới cache facet + invalidate cache tìm kiếm sau bulk xóa — nền tránh 504."""
+    """
+    Gộp các lô xóa rồi hết hạn cache một lần, sau khi request đã trả về.
+
+    Không rebuild JSON tìm kiếm trong lúc admin đang xóa: bảng product_search_cache ~3GB,
+    nạp cả bảng đã OOM process API (kernel kill) và nginx trả 503/timeout cho lô kế tiếp.
+    """
+    global _bulk_delete_cache_timer
     if not snapshots:
         return
-    snap_copy = list(snapshots)
+    with _bulk_delete_cache_lock:
+        _bulk_delete_cache_snapshots.extend(snapshots)
+        if _bulk_delete_cache_timer is not None:
+            _bulk_delete_cache_timer.cancel()
+        _bulk_delete_cache_timer = threading.Timer(2.0, _fire_bulk_delete_cache_timer)
+        _bulk_delete_cache_timer.daemon = True
+        _bulk_delete_cache_timer.start()
 
-    def _run() -> None:
-        from app.db.session import SessionLocal
-        from app.crud import product_search_cache as product_search_cache_crud
-        from app.services.listing_facet_cache import refresh_caches_after_products_change
 
-        db_bg = SessionLocal()
-        try:
-            product_search_cache_crud.refresh_caches_for_product_states(db_bg, *snap_copy)
-            refresh_caches_after_products_change(db_bg, snap_copy)
-            logger.info(
-                "Bulk xóa SP: đã làm mới cache facet + search JSON (nền), %s snapshot",
-                len(snap_copy),
-            )
-        except Exception as exc:
-            logger.warning("Bulk xóa SP — làm mới cache nền lỗi: %s", exc)
-        finally:
-            db_bg.close()
-
-    threading.Thread(target=_run, name="bulk-facet-cache-refresh", daemon=True).start()
+def _fire_bulk_delete_cache_timer() -> None:
+    global _bulk_delete_cache_timer
+    with _bulk_delete_cache_lock:
+        _bulk_delete_cache_timer = None
+    _start_bulk_delete_cache_worker()
 
 
 def bulk_delete_products_by_db_ids(
