@@ -1292,7 +1292,7 @@ async def admin_import_freight_settlement_excel(
     db: Session = Depends(get_db),
     current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
 ):
-    """Import file Doi soat cuoc — cột A mã vận chuyển EMS, cột L cước phí."""
+    """Import file cước shop — cột A mã đơn, cột B ngày gửi, cột L cước, cột W mã tham chiếu."""
     filename = (file.filename or "").lower()
     if not filename.endswith((".xls", ".xlsx", ".xlsm")):
         raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file Excel .xls / .xlsx")

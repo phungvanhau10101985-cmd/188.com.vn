@@ -92,17 +92,31 @@ def build_cod_settlement_sample_xlsx() -> tuple[bytes, str]:
 
 
 def build_freight_settlement_sample_xlsx() -> tuple[bytes, str]:
-    """Doi soat cuoc — A mã EMS, C Ngay_Phat_Hanh, L cước phí."""
+    """File cước shop — A mã đơn (Ma_E1), B ngày gửi, L cước, W mã tham chiếu."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Doi soat cuoc"
-    _bold_header_row(ws, 1, ["MA_E1"])
-    ws.cell(row=1, column=3, value="Ngay_Phat_Hanh")
-    ws.cell(row=1, column=12, value="CUOC_PHI")
-    ws.append(["EE123456789VN", None, "01/06/2026", None, None, None, None, None, None, None, None, 45000])
-    ws.append(["EE987654321VN", None, "02/06/2026", None, None, None, None, None, None, None, None, 62000])
+    ws.title = "Cuoc"
+    ws.cell(row=1, column=1, value="BANG TONG HOP NO CHI TIET")
+    for col, val in (
+        (1, "Ma_E1"),
+        (2, "Ngay_Phat_Hanh"),
+        (12, "Cuoc_Chinh"),
+        (23, "So_Tham_Chieu"),
+    ):
+        cell = ws.cell(row=2, column=col, value=val)
+        cell.font = Font(bold=True)
+    ws.cell(row=3, column=1, value="EG040722845VN")
+    ws.cell(row=3, column=2, value="02/11/2026")
+    ws.cell(row=3, column=12, value=33453)
+    ws.cell(row=3, column=23, value="H02112617")
+    ws.cell(row=4, column=1, value="EG040723024VN")
+    ws.cell(row=4, column=2, value="03/11/2026")
+    ws.cell(row=4, column=12, value=30618)
+    ws.cell(row=4, column=23, value="H02112641")
     ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 18
     ws.column_dimensions["L"].width = 14
+    ws.column_dimensions["W"].width = 16
     return _workbook_to_bytes(wb), "doi_soat_cuoc_mau.xlsx"
 
 

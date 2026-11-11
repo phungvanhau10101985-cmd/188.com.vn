@@ -4033,10 +4033,10 @@ export default function AdminShippingPage() {
       <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
         <h2 className="text-lg font-semibold text-gray-900">4. Import đối soát cước</h2>
         <p className="text-sm text-gray-600">
-          File <strong>Doi soat cuoc.xls</strong>: cột <strong>A</strong> mã vận chuyển EMS, cột <strong>C</strong>{' '}
-          <strong>Ngay_Phat_Hanh</strong> (ngày đối soát = ngày phát hành gần nhất trong file), cột <strong>L</strong>{' '}
-          cước phí.
-          Mã phải đã có trong bảng vận chuyển và <strong>chưa từng đối soát cước</strong>.
+          File cước shop (<strong>.xls</strong>): cột <strong>A</strong> mã đơn (Ma_E1), cột <strong>B</strong> ngày
+          gửi hàng (ngày đối soát = ngày gửi gần nhất trong file), cột <strong>L</strong> cước, cột <strong>W</strong>{' '}
+          mã tham chiếu. Khớp vận đơn theo mã đơn hoặc mã tham chiếu. Mã phải đã có trong bảng vận chuyển và{' '}
+          <strong>chưa từng đối soát cước</strong>.
           Cước phí &gt; <strong>70.000 đ</strong> sẽ được cảnh báo để xem lại.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
@@ -4175,8 +4175,8 @@ export default function AdminShippingPage() {
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium">#</th>
-                      <th className="px-3 py-2 text-left font-medium">Mã EMS</th>
-                      <th className="px-3 py-2 text-right font-medium">Cước phí</th>
+                      <th className="px-3 py-2 text-left font-medium">Mã đơn</th>
+                      <th className="px-3 py-2 text-right font-medium">Cước</th>
                       <th className="px-3 py-2 text-left font-medium">Cảnh báo</th>
                       <th className="px-3 py-2 text-left font-medium">Kết quả</th>
                     </tr>
@@ -4229,7 +4229,7 @@ export default function AdminShippingPage() {
           </>
         ) : (
           <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-8 text-center text-sm text-gray-500">
-            Chưa có lần đối soát cước nào. Upload file <strong>Doi soat cuoc</strong> để bắt đầu.
+            Chưa có lần đối soát cước nào. Upload file cước shop để bắt đầu.
           </div>
         )}
       </section>

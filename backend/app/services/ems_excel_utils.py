@@ -16,8 +16,18 @@ _EXCEL_DATE_RE = re.compile(
 _SS_NS = "{urn:schemas-microsoft-com:office:spreadsheet}"
 
 
+def _normalize_spreadsheet_xml(file_bytes: bytes) -> bytes:
+    """EMS đôi khi xuất SpreadsheetML với khai báo ``<xml version>`` (thiếu ``?``)."""
+    payload = file_bytes.lstrip(b"\xef\xbb\xbf").lstrip()
+    if payload.startswith(b"<xml version>"):
+        return b'<?xml version="1.0"?>' + payload[len(b"<xml version>") :]
+    if payload.startswith(b"<xml "):
+        return b"<?" + payload[1:]
+    return payload
+
+
 def _read_xml_spreadsheet_rows(file_bytes: bytes) -> list[tuple[Any, ...]]:
-    root = ET.fromstring(file_bytes)
+    root = ET.fromstring(_normalize_spreadsheet_xml(file_bytes))
     rows: list[tuple[Any, ...]] = []
     table = root.find(f".//{_SS_NS}Table")
     if table is None:
