@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import requests
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.services.product_rating_question_groups import (
     RATING_GROUP_ID_WHITELIST,
     extract_import_group_ids_from_model_text,
@@ -109,7 +111,7 @@ def gemini_fallback_import_groups(
     )
 
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
-    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     gen_cfg: Dict[str, Any] = {
         "maxOutputTokens": 512,
         "temperature": 0.1,
@@ -124,13 +126,13 @@ def gemini_fallback_import_groups(
     parsed: Optional[Dict[str, Any]] = None
     content = ""
     try:
-        resp = requests.post(url, json=payload, timeout=_TIMEOUT_SEC)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=_TIMEOUT_SEC)
         if not resp.ok and resp.status_code in {400, 422}:
             cfg2 = dict(gen_cfg)
             cfg2.pop("thinkingConfig", None)
             cfg2.pop("responseMimeType", None)
             payload["generationConfig"] = cfg2
-            resp = requests.post(url, json=payload, timeout=_TIMEOUT_SEC)
+            resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=_TIMEOUT_SEC)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates") or []
@@ -143,7 +145,7 @@ def gemini_fallback_import_groups(
         content = "".join(str(p.get("text") or "") for p in parts if isinstance(p, dict)).strip()
         parsed = _extract_json_object(content)
     except requests.RequestException as exc:
-        warns.append(f"gemini_groups: lỗi mạng/API: {exc}")
+        warns.append(f"gemini_groups: lỗi mạng/API: {redact_secrets(str(exc))}")
         return None, None, warns
     except Exception as exc:
         loose_r, loose_q = extract_import_group_ids_from_model_text(content)

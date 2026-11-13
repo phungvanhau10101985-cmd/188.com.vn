@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.services.image_localization_service import (
     _extract_first_image_bytes_from_gemini_generate_response,
     _normalize_gemini_image_size,
@@ -171,9 +173,9 @@ def gemini_generate_image_from_text(
         "generationConfig": gen_cfg,
     }
     url = f"{_GEMINI_BASE}/models/{model}:generateContent"
-    res = requests.post(url, params={"key": api_key}, json=payload, timeout=tout)
+    res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=tout)
     if res.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {res.status_code}: {(res.text or '')[:400]}")
+        raise RuntimeError(f"Gemini HTTP {res.status_code}: {redact_secrets((res.text or '')[:400])}")
     body = res.json()
     fb = body.get("promptFeedback") or {}
     br = fb.get("blockReason") or fb.get("block_reason")

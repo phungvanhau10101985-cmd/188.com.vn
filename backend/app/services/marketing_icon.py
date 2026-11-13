@@ -16,6 +16,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.models.admin import AdminUser
 from app.models.marketing_icon import MarketingIconAsset
 from app.services.bunny_storage import (
@@ -163,9 +165,9 @@ def gemini_edit_square_icon(
         },
     }
     url = f"{_GEMINI_BASE}/models/{model}:generateContent"
-    res = requests.post(url, params={"key": api_key}, json=payload, timeout=timeout)
+    res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=timeout)
     if res.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {res.status_code}: {(res.text or '')[:400]}")
+        raise RuntimeError(f"Gemini HTTP {res.status_code}: {redact_secrets((res.text or '')[:400])}")
     body = res.json()
     fb = body.get("promptFeedback") or {}
     br = fb.get("blockReason") or fb.get("block_reason")

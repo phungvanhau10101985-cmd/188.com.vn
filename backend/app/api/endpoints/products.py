@@ -35,6 +35,7 @@ from app.models.user import User
 from app.services.flash_sale import set_flash_sale_identity
 from app.services.product_internal_sku import looks_like_internal_sku_search_query
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.crud import product_media_purge
 from app.services.source_stock_checker import (
     admin_preview_source_stock_by_url,
@@ -2259,7 +2260,7 @@ def purge_dead_media_url_by_db_id(
     Bảo vệ bằng `BROKEN_MEDIA_PURGE_SECRET` (header X-Broken-Media-Purge-Key) — gọi từ Next server, không public.
     """
     secret = (getattr(settings, "BROKEN_MEDIA_PURGE_SECRET", None) or "").strip()
-    if not secret or (x_broken_media_purge_key or "").strip() != secret:
+    if not secret_equals(x_broken_media_purge_key, secret):
         raise HTTPException(status_code=404, detail="Not found")
     p = crud.product.get_product(db, product_id=id)
     if p is None:
@@ -2278,7 +2279,7 @@ def _require_cron_secret(authorization: str | None) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or token.strip() != expected:
+    if scheme.lower() != "bearer" or not secret_equals(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

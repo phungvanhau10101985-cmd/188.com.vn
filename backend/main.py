@@ -27,11 +27,26 @@ def _get_app_config():
 _settings = _get_app_config()
 
 try:
+    from app.core.secret_hygiene import install_secret_log_redaction, register_settings_secrets
+
+    install_secret_log_redaction()
+    register_settings_secrets(_settings)
+except Exception as _redact_exc:
+    print(f"⚠️  Không bật che secret trong log: {type(_redact_exc).__name__}")
+
+try:
     from app.services.ai_usage_tracker import install_ai_usage_tracking
 
     install_ai_usage_tracking()
 except Exception as _ai_usage_exc:
     print(f"⚠️  Không bật ghi log chi phí API AI: {_ai_usage_exc}")
+
+try:
+    from app.services.gemini_http import install_gemini_key_header_transport
+
+    install_gemini_key_header_transport()
+except Exception as _gemini_key_exc:
+    print(f"⚠️  Không chuyển Gemini API key sang header: {type(_gemini_key_exc).__name__}")
 
 
 def _setup_file_logging() -> None:
@@ -493,13 +508,13 @@ async def health_ops_alert_manual(
     Dùng khi monitor phát hiện storefront 503: curl từ VPS với CRON_SECRET.
     """
     from app.db.pool_self_heal import get_pool_usage_snapshot, probe_db_pool
+    from app.core.secret_hygiene import bearer_matches
     from app.services.ops_health_alert import collect_heavy_process_hints, notify_ops_health_alert
 
     secret = (getattr(_settings, "CRON_SECRET", None) or "").strip()
     if not secret:
         raise HTTPException(status_code=503, detail="CRON_SECRET chưa cấu hình")
-    auth = (authorization or "").strip()
-    if auth != f"Bearer {secret}":
+    if not bearer_matches(authorization, secret):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     snap = get_pool_usage_snapshot()

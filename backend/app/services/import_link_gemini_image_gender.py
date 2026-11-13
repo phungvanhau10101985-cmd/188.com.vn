@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 import requests
 
 from app.core.config import settings
+from app.services.gemini_http import gemini_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def infer_gender_from_product_image_gemini(
         f"Tên listing (tham khảo, không override ảnh rõ ràng): {title_line or '(không có)'}"
     )
 
-    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     payload = {
         "contents": [
             {
@@ -131,7 +132,7 @@ def infer_gender_from_product_image_gemini(
     }
 
     try:
-        resp = requests.post(url, json=payload, timeout=_API_TIMEOUT)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=_API_TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates") or []

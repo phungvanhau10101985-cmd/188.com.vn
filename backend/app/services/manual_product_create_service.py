@@ -17,6 +17,8 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers, relocate_gemini_api_key
 from app.crud import product as product_crud
 from app.db.session import SessionLocal
 from app.schemas.product import ProductCreate
@@ -361,7 +363,9 @@ def _gemini_edit_from_urls(
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     verify = bool(getattr(settings, "GEMINI_SSL_VERIFY", True))
     try:
-        res = requests.post(url, params={"key": api_key}, json=payload, timeout=tout, verify=verify)
+        res = requests.post(
+            url, headers=gemini_auth_headers(api_key), json=payload, timeout=tout, verify=verify
+        )
     except requests.exceptions.SSLError:
         if not verify:
             raise
@@ -372,9 +376,11 @@ def _gemini_edit_from_urls(
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         except Exception:
             pass
-        res = requests.post(url, params={"key": api_key}, json=payload, timeout=tout, verify=False)
+        res = requests.post(
+            url, headers=gemini_auth_headers(api_key), json=payload, timeout=tout, verify=False
+        )
     if res.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {res.status_code}: {(res.text or '')[:400]}")
+        raise RuntimeError(f"Gemini HTTP {res.status_code}: {redact_secrets((res.text or '')[:400])}")
     body = res.json()
     fb = body.get("promptFeedback") or {}
     br = fb.get("blockReason") or fb.get("block_reason")
@@ -2960,8 +2966,11 @@ def _gemini_request_json(url: str, payload: Dict[str, Any], *, timeout: int = 90
     raw = (getattr(settings, "GEMINI_SSL_VERIFY", None))
     if raw is not None:
         verify = bool(raw)
+    url, relocated = relocate_gemini_api_key(url, {})
+    headers = dict(relocated.get("headers") or {})
+    headers.update(gemini_auth_headers(getattr(settings, "GEMINI_API_KEY", "") or ""))
     try:
-        res = requests.post(url, json=payload, timeout=timeout, verify=verify)
+        res = requests.post(url, json=payload, headers=headers, timeout=timeout, verify=verify)
     except requests.exceptions.SSLError:
         if not verify:
             raise
@@ -2972,9 +2981,9 @@ def _gemini_request_json(url: str, payload: Dict[str, Any], *, timeout: int = 90
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         except Exception:
             pass
-        res = requests.post(url, json=payload, timeout=timeout, verify=False)
+        res = requests.post(url, json=payload, headers=headers, timeout=timeout, verify=False)
     if res.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {res.status_code}: {(res.text or '')[:400]}")
+        raise RuntimeError(f"Gemini HTTP {res.status_code}: {redact_secrets((res.text or '')[:400])}")
     return res.json()
 
 
@@ -3186,7 +3195,7 @@ def name_colorway_from_reference_images(
         prompt += f"\nGợi ý admin (chỉ dùng nếu khớp ảnh): {hint}."
 
     parts: List[Dict[str, Any]] = [{"text": prompt}, *image_parts]
-    gem_url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    gem_url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     gen_cfg: Dict[str, Any] = {
         "temperature": 0.15,
         "maxOutputTokens": 256,
@@ -3396,7 +3405,7 @@ def name_product_from_reference_images(
     parts: List[Dict[str, Any]] = [{"text": prompt}]
     parts.extend(image_parts)
 
-    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     # maxOutputTokens cao: gemini-2.5-flash tính cả thinking vào budget → 800 dễ MAX_TOKENS cắt JSON.
     gen_cfg: Dict[str, Any] = {
         "temperature": 0.2,

@@ -18,6 +18,8 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.db.retry import preload_product_for_offline_use, release_db_session, run_db_write
 from app.db.session import SessionLocal
 from app.models.product import Product
@@ -492,10 +494,10 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
     }
     url = f"{_GEMINI_AI_GENERATE_BASE}/models/{model}:generateContent"
     try:
-        res = requests.post(url, params={"key": api_key}, json=payload, timeout=60)
+        res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=60)
         if res.status_code in {400, 422} and "thinkingConfig" in gen_cfg:
             payload["generationConfig"] = {k: v for k, v in gen_cfg.items() if k != "thinkingConfig"}
-            res = requests.post(url, params={"key": api_key}, json=payload, timeout=60)
+            res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=60)
     except Exception as exc:
         raise ImageLocalizationFatalDependencyError(
             f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gemini_review_failed: không gọi được Gemini đọc ảnh — {exc}"
@@ -503,7 +505,7 @@ def gemini_flash_sees_ink_smear(image_bytes: bytes) -> bool:
     if res.status_code != 200:
         raise ImageLocalizationFatalDependencyError(
             "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gemini_review_failed: "
-            f"Gemini đọc ảnh lỗi HTTP {res.status_code}: {(res.text or '')[:300]}"
+            f"Gemini đọc ảnh lỗi HTTP {res.status_code}: {redact_secrets((res.text or '')[:300])}"
         )
     try:
         body = res.json()
@@ -567,12 +569,12 @@ def detect_ink_bleed(image_bytes: bytes) -> Dict[str, Any]:
     }
     url = f"{_GEMINI_AI_GENERATE_BASE}/models/{model}:generateContent"
     try:
-        res = requests.post(url, params={"key": api_key}, json=payload, timeout=45)
+        res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=45)
     except Exception as exc:
         raise ImageLocalizationGptStopError(f"Kiểm tra mực loang lỗi: {exc}") from exc
     if res.status_code != 200:
         raise ImageLocalizationGptStopError(
-            f"Kiểm tra mực loang lỗi HTTP {res.status_code}: {(res.text or '')[:300]}"
+            f"Kiểm tra mực loang lỗi HTTP {res.status_code}: {redact_secrets((res.text or '')[:300])}"
         )
     try:
         body = res.json()
@@ -880,10 +882,10 @@ class GeminiApiImageAdapter:
             ],
             "generationConfig": gen_cfg,
         }
-        res = requests.post(url, params={"key": api_key}, json=payload, timeout=timeout)
+        res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=timeout)
         if res.status_code != 200:
             raise ImageLocalizationError(
-                f"Gemini API ảnh lỗi HTTP {res.status_code}: {(res.text or '')[:500]}"
+                f"Gemini API ảnh lỗi HTTP {res.status_code}: {redact_secrets((res.text or '')[:500])}"
             )
         try:
             body = res.json()

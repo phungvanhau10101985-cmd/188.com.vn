@@ -8,6 +8,8 @@ from typing import Optional, List
 import requests
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +55,12 @@ Cụm từ cần sửa: "{query.strip()}"
 
 Trả về cụm từ đã chuẩn hóa:"""
     try:
-        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 100, "temperature": 0.1},
         }
-        resp = requests.post(url, json=payload, timeout=10)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates", [])
@@ -75,8 +77,8 @@ Trả về cụm từ đã chuẩn hóa:"""
         print(f"[AI-CORRECT] Gemini corrected: {query.strip()} -> {corrected}")
         return corrected
     except Exception as e:
-        logger.warning("Gemini correct search query failed: %s", e)
-        print(f"[AI-CORRECT] Gemini error: {e}")
+        logger.warning("Gemini correct search query failed: %s", redact_secrets(str(e)))
+        print(f"[AI-CORRECT] Gemini error: {redact_secrets(str(e))}")
         return None
 
 
@@ -99,12 +101,12 @@ Cụm từ gốc: "{query.strip()}"
 
 Trả về JSON:"""
     try:
-        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 120, "temperature": 0.2},
         }
-        resp = requests.post(url, json=payload, timeout=10)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates", [])
@@ -166,12 +168,12 @@ Hãy chọn ra {limit} danh mục phù hợp nhất.
 Chỉ trả về mảng JSON gồm các object có đúng 2 khóa: "id" và "name".
 Không thêm bất kỳ ký tự nào khác."""
     try:
-        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+        url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 200, "temperature": 0.2},
         }
-        resp = requests.post(url, json=payload, timeout=3)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=3)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates", [])

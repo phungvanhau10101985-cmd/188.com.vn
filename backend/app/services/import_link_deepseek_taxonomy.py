@@ -18,6 +18,8 @@ import requests
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.models.category import Category
 from app.services.listing_year_sanitize import (
     LISTING_SANITIZE_PROMPT_VI,
@@ -601,13 +603,13 @@ def _gemini_generate_json(prompt: str, *, max_tokens: int, warnings: List[str], 
         warnings.append(f"{label}: thiếu GEMINI_API_KEY.")
         return None
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()
-    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.15},
     }
     try:
-        resp = requests.post(url, json=payload, timeout=_GEMINI_TIMEOUT_SEC)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=_GEMINI_TIMEOUT_SEC)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates") or []
@@ -619,7 +621,7 @@ def _gemini_generate_json(prompt: str, *, max_tokens: int, warnings: List[str], 
         content = "".join(str(p.get("text") or "") for p in parts if isinstance(p, dict)).strip()
         return _extract_json_object(content)
     except requests.RequestException as exc:
-        warnings.append(f"{label}: lỗi gọi Gemini: {exc}")
+        warnings.append(f"{label}: lỗi gọi Gemini: {redact_secrets(str(exc))}")
     except Exception as exc:
         warnings.append(f"{label}: không đọc JSON từ Gemini — {exc}")
     return None

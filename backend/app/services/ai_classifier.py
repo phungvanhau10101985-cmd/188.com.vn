@@ -3,6 +3,8 @@ import requests
 import json
 from typing import Dict, Any, Optional, List
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 import logging
 import re
 
@@ -121,7 +123,7 @@ class AIClassifier:
             prompt = self._build_detailed_classification_prompt(text)
             full_prompt = f"{system_instruction}\n\n{prompt}"
             
-            url = f"{GEMINI_BASE_URL}/models/{self.gemini_model}:generateContent?key={self.gemini_api_key}"
+            url = f"{GEMINI_BASE_URL}/models/{self.gemini_model}:generateContent"
             payload = {
                 "contents": [{"parts": [{"text": full_prompt}]}],
                 "generationConfig": {
@@ -131,7 +133,9 @@ class AIClassifier:
                 },
             }
             
-            response = requests.post(url, json=payload, timeout=45)
+            response = requests.post(
+                url, headers=gemini_auth_headers(self.gemini_api_key), json=payload, timeout=45
+            )
             
             if response.status_code == 200:
                 result = response.json()
@@ -144,7 +148,11 @@ class AIClassifier:
                 content = (parts[0].get("text") or "").strip()
                 print(f"📨 Gemini response received ({self.gemini_model}, {len(content)} chars)")
                 return self._parse_detailed_ai_response(content)
-            logger.error("Gemini API error: %s - %s", response.status_code, response.text)
+            logger.error(
+                "Gemini API error: %s - %s",
+                response.status_code,
+                redact_secrets(response.text or ""),
+            )
             return None
         except requests.exceptions.Timeout:
             logger.error("Gemini API timeout")

@@ -24,6 +24,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,7 @@ def _detail_from_record(record: logging.LogRecord) -> str:
         text = "".join(traceback.format_exception(*record.exc_info))
     except Exception:
         return ""
-    return text[:_DETAIL_LIMIT]
+    return redact_secrets(text[:_DETAIL_LIMIT])
 
 
 def current_http_context() -> dict[str, str]:
@@ -576,7 +577,7 @@ def _enqueue_log_record(record: logging.LogRecord) -> None:
         log_msg = record.getMessage()
     except Exception:
         return
-    log_msg = (log_msg or "").strip()
+    log_msg = redact_secrets((log_msg or "").strip())
     if not log_msg:
         return
     exc_type = _exc_type_from_record(record)

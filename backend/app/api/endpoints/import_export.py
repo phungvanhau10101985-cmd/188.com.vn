@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 IMPORT_EXCEL_LOG_PREFIX = "[IMPORT_EXCEL]"
 from app.services.excel_importer import ExcelImporter
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.services.category_seo_analyzer import scan_and_create_mappings
 from app.services.import_excel_job_store import (
     ImportExcelJobCancelled,
@@ -1258,7 +1259,7 @@ def _require_cron_secret(authorization: str | None) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or token.strip() != expected:
+    if scheme.lower() != "bearer" or not secret_equals(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

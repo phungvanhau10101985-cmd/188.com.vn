@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.core.security import get_current_user, require_privileged_admin
 from app.db.session import get_db
 from app.models.admin import AdminUser
@@ -47,7 +48,7 @@ def _require_cron_secret(authorization: str | None) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="BIRTHDAY_PROMO_CRON_SECRET is not configured")
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or token.strip() != expected:
+    if scheme.lower() != "bearer" or not secret_equals(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

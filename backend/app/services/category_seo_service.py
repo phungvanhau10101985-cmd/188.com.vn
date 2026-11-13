@@ -8,6 +8,8 @@ import hashlib
 import requests
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ def _call_gemini(prompt: str, max_tokens: int = 200, temperature: float = 0.7) -
     model = getattr(settings, "GEMINI_MODEL", "gemini-2.5-flash")
     if not api_key or len(api_key) < 10:
         return None
-    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
@@ -37,7 +39,7 @@ def _call_gemini(prompt: str, max_tokens: int = 200, temperature: float = 0.7) -
         },
     }
     try:
-        resp = requests.post(url, json=payload, timeout=15)
+        resp = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         candidates = data.get("candidates", [])
@@ -55,7 +57,7 @@ def _call_gemini(prompt: str, max_tokens: int = 200, temperature: float = 0.7) -
             return None
         return (parts[0].get("text") or "").strip()
     except Exception as e:
-        logger.warning("Gemini category SEO request failed: %s", e)
+        logger.warning("Gemini category SEO request failed: %s", redact_secrets(str(e)))
         return None
 
 

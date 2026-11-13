@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.core.security import get_current_user, require_module_permission
 from app.crud import promotion as crud_promotion
 from app.crud.promotion import PromoValidationError
@@ -40,7 +41,7 @@ def _require_cron_secret(authorization: str | None) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or token.strip() != expected:
+    if scheme.lower() != "bearer" or not secret_equals(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

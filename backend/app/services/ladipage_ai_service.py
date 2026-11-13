@@ -21,6 +21,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import redact_secrets
+from app.services.gemini_http import gemini_auth_headers
 from app.models.category import Category
 from app.models.ladipage import Ladipage, LadipageSection
 from app.models.product import Product
@@ -993,9 +995,9 @@ def _gemini_edit_image_from_url(
         "generationConfig": {"responseModalities": ["TEXT", "IMAGE"], "imageConfig": {"imageSize": eff_size}},
     }
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent"
-    res = requests.post(url, params={"key": api_key}, json=payload, timeout=tout)
+    res = requests.post(url, headers=gemini_auth_headers(api_key), json=payload, timeout=tout)
     if res.status_code != 200:
-        raise RuntimeError(f"Gemini HTTP {res.status_code}: {(res.text or '')[:400]}")
+        raise RuntimeError(f"Gemini HTTP {res.status_code}: {redact_secrets((res.text or '')[:400])}")
     body = res.json()
     fb = body.get("promptFeedback") or {}
     br = fb.get("blockReason") or fb.get("block_reason")

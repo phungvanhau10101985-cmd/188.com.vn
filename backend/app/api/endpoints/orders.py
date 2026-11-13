@@ -18,6 +18,7 @@ from app.models.order import (
 )
 from app.core.security import get_current_user, get_current_user_optional, require_module_permission, verify_recent_admin_auth
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.services.email_service import (
     deliver_deposit_confirmed_email,
     send_order_email,
@@ -1687,7 +1688,7 @@ def _require_shipment_cron_secret(authorization: Optional[str]) -> None:
     if not expected:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
     scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or token.strip() != expected:
+    if scheme.lower() != "bearer" or not secret_equals(token, expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

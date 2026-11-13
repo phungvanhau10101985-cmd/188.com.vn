@@ -9,6 +9,8 @@ from typing import List, Optional, Dict, Any, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 
+from app.core.secret_hygiene import redact_database_url
+
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, "reconfigure"):
         try:
@@ -738,11 +740,12 @@ class Settings:
         
         # ========================
         # ZALO OTP CONFIGURATION
+        # Secret chỉ từ môi trường. Không đặt access token / refresh token trong source.
         # ========================
         self.ZALO_OA_ID: str = os.getenv("ZALO_OA_ID", "1714121106420519241")
-        self.ZALO_OA_SECRET: str = os.getenv("ZALO_OA_SECRET", "2689291499106432813")
-        self.ZALO_OA_ACCESS_TOKEN: str = os.getenv("ZALO_OA_ACCESS_TOKEN", "QxshTQU4E1TYiA1rfu0t6c2ohd2dd4H3DCQgSeYMVnW9kwOCpCjG9cADnahRx3z-Uhkl2DhzFW96jDayWlSKAo6emHgUu1OC2P256RF_Uo0LjkD3qDDpRNQBbcAsmrDDEA-OUfl_I1SYjAKXhlbqDtUGdrJglGnvRiISIFktLMTV_fnftSqGQ4QkuL75o1b-GVpmQksq5rH0__jCsSS2NNM4obFpr1ncRBoASQxFMnm5lSCOdF0nAZxTf3whi7nK38YfG9dXV6zUZPHGnjbVOMIsgnUZpZeA8At3ExcR4Wmupi4IWO4tU4Fezq_Rhtj5HUkG9i6cN1XWpimot9SNNd6kt6_TsaL77-cZQjYkOrzev_LlzQOiTshIj5pLXtzrIVIgLjZ4GLfbWhPjekeXKc6_kLz7UVG0eLkhapWO")
-        self.ZALO_REFRESH_TOKEN: str = os.getenv("ZALO_REFRESH_TOKEN", "QiziOEF2O11ZgcTWuyPl7M70QMNZscDL3RmqJ_d9Q30YeZK_oi5fJn321aphlcTQ4_uhPCEXM6b4-1PlZOjU5WNR1ZVSWq16GDHCF9RP1YfBg1K5hiLZ2c_SC7hfgMS2EkSs7jISQoy6_s09WQCo0tBZP0ccfMigSDKo5eEjUsbGhZDXrgnfV3NtOrRta0ftTTPRHl20Btbtx7CTeO8QOIJFI5BYpmHp8BDqIkR-9qmxYKD_vybDTHYH0stEbs9G1lOvIUsAOqKTxGb7tB53NoZd1MFtkNDT7BuKLjdFJciUoIzsxALYVJcbD5VdfcyfU_ydAxcCImX7tpmKgQSsDLlKUII4XIGLOl102wkCE0L-o6WRh8i79Ipr3LMgy0TETP5qJfRrV652e2r-mUrQSB4qFadlrM0V")
+        self.ZALO_OA_SECRET: str = os.getenv("ZALO_OA_SECRET", "").strip()
+        self.ZALO_OA_ACCESS_TOKEN: str = os.getenv("ZALO_OA_ACCESS_TOKEN", "").strip()
+        self.ZALO_REFRESH_TOKEN: str = os.getenv("ZALO_REFRESH_TOKEN", "").strip()
         self.ZALO_API_BASE_URL: str = os.getenv("ZALO_API_BASE_URL", "https://openapi.zalo.me/v3.0/oa")
         
         # Zalo Template IDs for different purposes
@@ -755,13 +758,13 @@ class Settings:
         # FIREBASE CONFIGURATION - FIXED WITH TOKEN_URI
         # ========================
         self.FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "comvn-320603")
-        self.FIREBASE_PRIVATE_KEY: str = os.getenv("FIREBASE_PRIVATE_KEY", "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQCootFfgyYq1gl5\nD9nYZ4baYmqhntyJoENN5UUia7Kc7QQlPwdryki0XewOSdk12tBQnU+udQDs2D3m\n9VMUo3F+6rTylQx0tFKmweeeIgCd0CoX8GjPKxOqINnqDvMYRDJe1QvXNU1HyJiB\nwNYuto7nAH0vDIL0lcTPhoysPUeY37JIl8jWa0Ee6+dTIdDGoBGtBjue2u7+HXYG\nVd3hoW+niAv5il1ZloJTqpfg2NZLrHwKtAgMc6BWxh8FDylH5YRG8sRYRRD6i1hH\nZONcaR7I4Gx7+g2tpxFp8c02dnGl0nPdkkrrCzEeu8Qaw66bSgFUE+zK5EQZRE40\nw6OM8rYlAgMBAAECggEAAcxyxT0F3DEaOsNThH5eLtgb4QtruMAP17XZTeuuJQRW\nJfuNHbYznlDeIqzg9zUVQbbb0bWHw/7uchctwquXm03vjiLO1jPSKdspmEMulIBS\n4px60bLY69ib2mY8a4bWrrJBBROZdmmKTt/6qNbjoU0dCLJudyNdzQTXXULuD5BW\nw1eIReWa9zF2hrKe/kmMcCIEd7MqLQcB+UHJdc9i+cs/LRmT/ujbPEfEloMwP8w9\nnO8KU0KQckuj/HXzXkcm605rP+3j2E35yWRmt7/wodFeu1cqC90N/6B2dpKEmBle\nG3xj6JjNbWz3ez+GajZFI+gyX/XSgOlAaC1LqPD+hQKBgQDsZ07N013Hen6Ems/r\nMfqWBfGxvEjbyeHqk14y1eKds+w+F1K0kCNs0GNo1c7nWEeJb6R+l04R64ZWA1KN\nVH5wFOCYT8Uf8Uyfypaz2Ha55lvtw0Tk2WC2cFnqwKTK+UwI1ZGvacxuUdglrogq\n/gpxAZLV37swWRYrunTp5kZGPwKBgQC2nWxHw7z0ChWXZjqSHLA0Wl6qN6wflfNl\nQ3G6k08yNLemM/p2bwsE+2cYO9SMzdvTC59fmLZT31CHacV2JQU4psbjwcPHNrlg\ndK3qm4LrBDXrO9vWyCbo01XtzP2J4aS9fQQgFmjejQT7AI5oPiRVSw5anXInoAp+\nPxYEpJpSmwKBgQDrslBqfCtK4EFV+ngEWc8qVoDUIRJPOC.frVcScUI1hiGqouV43\nMmJvchE7C7j/BRBF4a6SnE41JarJBQUAbdal7trCYP37y/wGcNjyNIai8B6FnqOI\nu4ZmPvwXRrzGteluAWkACC7PawBjCXEv1Bsa8mOwoyEhoiCttngsX+9+xwKBgQCh\nMhC0wGl4mbY5cHnfJAe+Ds9lPcNoFjtFdeVcJlBQJwy9X0CFbruxaCG22IlkyQp0\nHtxNzEWVf5hcD9fH1CHpwf3qac3hecLlC9nBMAi+X3cg8DO8Qe1ms7Y0NTDQlyeO\nRF5x3JYxbRWqYvFRvxjfWWOQRU7Q/4qDqjhLXOkEZQKBgQDF3jDzyRm+99rUZsNg\nxbgkTy5Pzde/5UDaO9gEyr9Poifm7VCuLe5FhTgi1WHGuSkDxk4+Y9B4hRQf871w\nlwuFY08T5WPR/hEZrF6Z8d6ch+RVmU0sZo1XBytPb0VXcw/ZbFuR6AnCXf48per9\n2Rn/M/Ay/aZT9WHKXkoF+nF8tA==\n-----END PRIVATE KEY-----").replace('\\n', '\n')
+        self.FIREBASE_PRIVATE_KEY: str = os.getenv("FIREBASE_PRIVATE_KEY", "").replace("\\n", "\n").strip()
         self.FIREBASE_CLIENT_EMAIL: str = os.getenv("FIREBASE_CLIENT_EMAIL", "firebase-adminsdk-t34so@comvn-320603.iam.gserviceaccount.com")
         self.FIREBASE_TOKEN_URI: str = os.getenv("FIREBASE_TOKEN_URI", "https://oauth2.googleapis.com/token")
         self.FIREBASE_DATABASE_URL: str = os.getenv("FIREBASE_DATABASE_URL", "https://comvn-320603.firebaseio.com")
         
         # Firebase Web App Config (for frontend)
-        self.FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "AIzaSyCoyAphRSlXKvMr7ZkCnXn15GFaz14sJb4")
+        self.FIREBASE_API_KEY: str = os.getenv("FIREBASE_API_KEY", "").strip()
         self.FIREBASE_AUTH_DOMAIN: str = os.getenv("FIREBASE_AUTH_DOMAIN", "comvn-320603.firebaseapp.com")
         self.FIREBASE_STORAGE_BUCKET: str = os.getenv("FIREBASE_STORAGE_BUCKET", "comvn-320603.firebasestorage.app")
         self.FIREBASE_MESSAGING_SENDER_ID: str = os.getenv("FIREBASE_MESSAGING_SENDER_ID", "746017912204")
@@ -1250,7 +1253,19 @@ class Settings:
         # VALIDATION & DISPLAY
         # ========================
         self._validate_and_display_status()
+        self._refuse_insecure_production_secrets()
     
+    def _refuse_insecure_production_secrets(self) -> None:
+        """Production không được chạy khi SECRET_KEY trống hoặc còn là placeholder."""
+        if (self.ENVIRONMENT or "").strip().lower() != "production":
+            return
+        key = (self.SECRET_KEY or "").strip()
+        if len(key) < 32 or "change-this" in key.lower():
+            raise RuntimeError(
+                "SECRET_KEY production không hợp lệ. Đặt chuỗi ngẫu nhiên ít nhất 32 ký tự "
+                "trong backend/.env. Không để secret trong source."
+            )
+
     def _validate_and_display_status(self):
         """Validate critical settings và hiển thị trạng thái"""
         print("=" * 60)
@@ -1259,7 +1274,8 @@ class Settings:
         
         # Database Validation
         print("\n🗄️  DATABASE:")
-        print(f"   Database URL: {self.DATABASE_URL[:60]}..." if len(self.DATABASE_URL) > 60 else f"   Database URL: {self.DATABASE_URL}")
+        _db_shown = redact_database_url(self.DATABASE_URL)
+        print(f"   Database URL: {_db_shown[:80]}..." if len(_db_shown) > 80 else f"   Database URL: {_db_shown}")
         
         try:
             if self.IS_POSTGRESQL:

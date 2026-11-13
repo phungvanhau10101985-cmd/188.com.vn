@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.secret_hygiene import secret_equals
 from app.crud import site_embed_code as embed_crud
 from app.db.session import SessionLocal, get_db
 from app.services.facebook_capi import post_facebook_capi_events
@@ -73,7 +74,7 @@ def _verify_facebook_capi_ingest(authorization: Optional[str] = Header(None)) ->
             detail="Thiếu Authorization: Bearer <cùng giá trị FACEBOOK_CAPI_INGEST_SECRET>",
         )
     token = authorization[7:].strip()
-    if token != secret:
+    if not secret_equals(token, secret):
         raise HTTPException(status_code=403, detail="Unauthorized")
 
 

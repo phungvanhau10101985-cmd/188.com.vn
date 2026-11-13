@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.services.gemini_http import gemini_auth_headers
 from app.models.admin import AdminUser
 from app.models.marketing_banner import MarketingBannerAsset
 from app.models.user import User
@@ -170,7 +171,7 @@ def generate_dynamic_copy(
     try:
         response = requests.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": api_key},
+            headers=gemini_auth_headers(api_key),
             json={
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": {
