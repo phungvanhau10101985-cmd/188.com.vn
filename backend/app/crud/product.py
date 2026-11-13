@@ -2133,7 +2133,7 @@ def get_product_by_slug(db: Session, slug: str) -> Optional[Product]:
     """Tra SP theo slug; dòng kho thanh lý trả SP gốc (PDP nhóm) hoặc chính nó nếu không có gốc."""
     from app.db.retry import TransientDbError, is_transient_db_error
 
-    s = (slug or "").strip()
+    s = sanitize_sql_text(slug or "").strip()
     if not s:
         return None
     import time as _time
@@ -2273,9 +2273,17 @@ PRODUCT_OOS_GROUP_SLUG_POOL_CANDIDATE_LIMIT = 600
 PRODUCT_OOS_LEGACY_PATH_FALLBACK_MIN_SIMILARITY = 0.42
 
 
+_SQL_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def sanitize_sql_text(value: str) -> str:
+    """Bỏ NUL và ký tự điều khiển. psycopg2 từ chối string có 0x00."""
+    return _SQL_CONTROL_RE.sub("", value or "")
+
+
 def normalize_legacy_source_slug(source_slug: str) -> str:
     """Bỏ prefix index.php (URL cũ WordPress / marketing)."""
-    s = (source_slug or "").strip().lower()
+    s = sanitize_sql_text(source_slug or "").strip().lower()
     if not s:
         return ""
     if "index.php/" in s:
@@ -2688,7 +2696,7 @@ def _cluster_listing_path_from_source_slug(db: Session, source_slug: str) -> Opt
     """Khớp slug cluster trong URL — chỉ query ứng viên / SQL strpos, không load toàn bảng."""
     from app.models.seo_cluster import SeoCluster
 
-    source_l = (source_slug or "").strip().lower()
+    source_l = sanitize_sql_text(source_slug or "").strip().lower()
     if len(source_l) < 8:
         return None
 

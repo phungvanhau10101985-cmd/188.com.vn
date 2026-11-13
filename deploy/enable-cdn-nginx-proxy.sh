@@ -51,7 +51,12 @@ if needle not in text:
 
 block = f"""    # Proxy anh Bunny qua cung domain 188.com.vn - ISP chan *.b-cdn.net van xem duoc.
     location /cdn-media/ {{
-        proxy_pass https://{bunny_origin}/;
+        resolver 1.1.1.1 8.8.8.8 ipv6=off valid=300s;
+        resolver_timeout 5s;
+        set $bunny_cdn_host {bunny_origin};
+        rewrite ^/cdn-media/(.*)$ /$1 break;
+        proxy_pass https://$bunny_cdn_host;
+        proxy_ssl_name {bunny_origin};
         proxy_ssl_server_name on;
         proxy_set_header Host {bunny_origin};
         proxy_set_header X-Real-IP $remote_addr;

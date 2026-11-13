@@ -407,6 +407,24 @@ def is_image_localization_gpt_stop_error(exc: BaseException) -> bool:
     return isinstance(exc, ImageLocalizationGptStopError)
 
 
+_APPAREL_BILLING_HALT_MARKERS = (
+    "http 402",
+    "resource_exhausted",
+    "prepayment credits",
+    "payment required",
+    "insufficient balance",
+    "quota exceeded",
+)
+
+
+def _apparel_gpt_stop_halts_job(exc: BaseException) -> bool:
+    """Mực loang hoặc hết tiền API thì dừng cả job. Lỗi một ảnh thì giữ ảnh gốc."""
+    text = str(exc).lower()
+    if "mực loang vẫn còn sau" in text:
+        return True
+    return any(marker in text for marker in _APPAREL_BILLING_HALT_MARKERS)
+
+
 _FATAL_DEPENDENCY_MARKERS = (
     "IMAGE_LOCALIZATION_FATAL_DEPENDENCY",
     "FatalDependencyError",
@@ -1648,7 +1666,7 @@ class LegacyImageLocalizationPipeline:
                     engine="gpt" if force_gpt else None,
                 )
             except ImageLocalizationGptStopError as exc:
-                if "Mực loang vẫn còn sau" in str(exc):
+                if _apparel_gpt_stop_halts_job(exc):
                     raise
                 logger.warning("Model ảnh bảng size/giặt/thông số quần áo lỗi, giữ ảnh gốc: %s", exc)
                 return PartProcessOutcome(

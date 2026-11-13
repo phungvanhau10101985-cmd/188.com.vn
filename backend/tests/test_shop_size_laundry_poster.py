@@ -333,6 +333,30 @@ def test_apparel_size_gpt_failure_keeps_the_original():
     assert out.image == "orig"
 
 
+def test_apparel_size_billing_402_stops_the_job():
+    pipe = _apparel_pipe()
+    pipe.allows_ai_image_models = True
+    pipe.gemini_mode = "openai"
+
+    def gpt(*_a, **_k):
+        raise ImageLocalizationGptStopError(
+            "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:gpt_image_failed: Kiểm tra mực loang lỗi HTTP 402: "
+            "RESOURCE_EXHAUSTED prepayment credits are depleted"
+        )
+
+    pipe._run_gpt_image = gpt
+    try:
+        pipe._process_image_part(
+            {"image_data": "orig", "ocr_results": _SIZE_BLOCKS, "original_url": "u", "filename": "a.jpg"},
+            None,
+            None,
+        )
+    except ImageLocalizationGptStopError as exc:
+        assert "HTTP 402" in str(exc)
+    else:
+        raise AssertionError("hết tiền API phải dừng job, không giữ ảnh gốc rồi gọi tiếp")
+
+
 def test_ink_bleed_after_two_regens_stops_the_apparel_job():
     pipe = _apparel_pipe()
     pipe.allows_ai_image_models = True

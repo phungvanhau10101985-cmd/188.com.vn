@@ -60,6 +60,11 @@ _CLIENT_NOISE = (
     "chunkloaderror",
     "failed to read the 'localstorage' property",
     "access is denied for this document",
+    # Trình duyệt nhúng / WebKit — không có stack của app.
+    "transformalgorithm is not a function",
+    "emptyranges",
+    "java exception was raised",
+    "the object can not be found here",
 )
 
 _table_ready = False
@@ -169,6 +174,10 @@ def should_capture_record(record: logging.LogRecord) -> bool:
         return False
     # Pool trả connection đã bị Postgres cắt — hệ quả của idle-in-transaction, không phải lỗi mới.
     if name.startswith("sqlalchemy.pool") and "Exception during reset" in msg:
+        return False
+    # yield_per bị hủy (timeout / client ngắt) — hệ quả, request gốc đã được ghi nhận.
+    lowered = msg.lower()
+    if "named cursor isn't valid anymore" in lowered or "error closing cursor" in lowered:
         return False
     return True
 
@@ -434,6 +443,8 @@ def record_site_error(
         source = "web"
     message = (message or "").strip()[:_MESSAGE_LIMIT]
     if not message:
+        return {"skipped": True}
+    if source == "web" and message.lower() in {"unhandledrejection", "window.onerror"}:
         return {"skipped": True}
     if source == "web" and is_client_noise(message, detail):
         return {"skipped": True}

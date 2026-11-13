@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 
 from PIL import Image
@@ -180,3 +180,92 @@ def test_ensure_daily_sale_icons_reuses_and_respects_budget(monkeypatch):
     reused = svc.ensure_daily_sale_icons(db, max_create=1, notify_admin=False)
     assert reused["reused"] == 1
     assert created["n"] == 1
+
+
+def _failed_icon(*, version: int, error_message: str, age: timedelta) -> MarketingIconAsset:
+    when = datetime.now(timezone.utc) - age
+    return MarketingIconAsset(
+        kind="sale",
+        campaign_key="sale-09-09-p6",
+        date_key="09-09",
+        discount_percent=6,
+        prompt="test",
+        provider="gemini",
+        model="gemini-test",
+        status="failed",
+        version=version,
+        is_active=False,
+        error_message=error_message,
+        created_at=when,
+        updated_at=when,
+    )
+
+
+def test_ensure_daily_sale_icons_backs_off_when_gemini_credit_is_empty(monkeypatch):
+    db = _session()
+    db.add(
+        _failed_icon(
+            version=40,
+            error_message="Gemini HTTP 402: prepayment credits are depleted",
+            age=timedelta(minutes=5),
+        )
+    )
+    db.commit()
+    called = {"n": 0}
+
+    def _no(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("không được gọi Gemini khi vừa hết credit")
+
+    monkeypatch.setattr(svc, "generate_sale_icon", _no)
+    stats = svc.ensure_daily_sale_icons(
+        db, day=9, month=9, discount_percent=6, notify_admin=False
+    )
+    assert stats["stopped"] == 1
+    assert called["n"] == 0
+    db.close()
+
+
+def test_ensure_daily_sale_icons_retries_billing_after_backoff(monkeypatch):
+    db = _session()
+    db.add(
+        _failed_icon(
+            version=4,
+            error_message="Gemini HTTP 402: credits are depleted",
+            age=timedelta(hours=13),
+        )
+    )
+    db.commit()
+    called = {"n": 0}
+
+    def _ok(*args, **kwargs):
+        called["n"] += 1
+        row = MarketingIconAsset(status="ready")
+        return row
+
+    monkeypatch.setattr(svc, "generate_sale_icon", _ok)
+    stats = svc.ensure_daily_sale_icons(
+        db, day=9, month=9, discount_percent=6, notify_admin=False
+    )
+    assert called["n"] == 1
+    assert stats["created"] == 1
+    db.close()
+
+
+def test_ensure_daily_sale_icons_stops_after_three_non_billing_failures(monkeypatch):
+    db = _session()
+    db.add(_failed_icon(version=3, error_message="Gemini timeout", age=timedelta(minutes=1)))
+    db.commit()
+    called = {"n": 0}
+
+    def _no(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("đã đủ 3 lần")
+
+    monkeypatch.setattr(svc, "generate_sale_icon", _no)
+    stats = svc.ensure_daily_sale_icons(
+        db, day=9, month=9, discount_percent=6, notify_admin=False
+    )
+    assert stats["stopped"] == 1
+    assert called["n"] == 0
+    db.close()

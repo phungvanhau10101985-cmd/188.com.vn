@@ -174,7 +174,9 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   if (seoDataResult.status === 'error') {
     // Ném lỗi để Next hiển thị error.tsx (đã có nút "Thử lại") — tránh render nhầm
     // "danh mục không có sản phẩm" khi thực ra dữ liệu chưa tải được.
-    throw new Error(`Không tải được dữ liệu danh mục: ${level1}/${level2 ?? ''}/${level3 ?? ''}`);
+    throw new Error(
+      `Không tải được dữ liệu danh mục: ${[level1, level2, level3].filter(Boolean).join('/')}`,
+    );
   }
   if (seoDataResult.status === 'not_found') {
     return (
@@ -217,7 +219,9 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   if (productsResult.fetchFailed) {
     // Cùng lý do như trên: gọi API sản phẩm lỗi tạm — không phải danh mục trống thật.
     // Chỉ ném lỗi khi không còn bản cache gần nhất để hiển thị.
-    throw new Error(`Không tải được sản phẩm danh mục: ${level1}/${level2 ?? ''}/${level3 ?? ''}`);
+    throw new Error(
+      `Không tải được sản phẩm danh mục: ${[level1, level2, level3].filter(Boolean).join('/')}`,
+    );
   }
   const { products, total, total_pages, page: currentPage } = productsResult;
   const productsStale = Boolean(productsResult.stale);

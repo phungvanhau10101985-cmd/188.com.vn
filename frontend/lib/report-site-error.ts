@@ -25,7 +25,11 @@ function isNoise(message: string, stack: string): boolean {
     blob.includes('loading chunk') ||
     blob.includes('chunkloaderror') ||
     blob.includes("failed to read the 'localstorage' property") ||
-    blob.includes('access is denied for this document')
+    blob.includes('access is denied for this document') ||
+    blob.includes('transformalgorithm is not a function') ||
+    blob.includes('emptyranges') ||
+    blob.includes('java exception was raised') ||
+    blob.includes('the object can not be found here')
   );
 }
 

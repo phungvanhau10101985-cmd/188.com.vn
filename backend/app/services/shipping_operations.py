@@ -10,6 +10,7 @@ from app import crud
 from app.models.order import Order, OrderStatus
 from app.models.order_shipment import EmsShippingRecord
 from app.services import affiliate_wallet as affiliate_svc
+from app.services.ems_cod_status import is_cod_settlement_paid
 from app.services.ems_shipment_import import (
     extract_warehouse_sku_from_ems_label,
     looks_like_recipient_not_sku,
@@ -46,7 +47,7 @@ def shipment_qualifies_as_shop_return(
     cod_settlement_status: str | None = None,
 ) -> bool:
     """EMS đang báo hoàn trên đúng vận đơn — không phải giao thành công, chưa trả COD cho shop."""
-    if (cod_settlement_status or "").strip().lower() == "matched":
+    if is_cod_settlement_paid(cod_settlement_status):
         return False
     if _is_delivered(ems_phase=ems_phase, ems_status=ems_status):
         return False
@@ -147,7 +148,7 @@ def _delivery_bucket(record: EmsShippingRecord) -> DeliveryBucket:
         return "return_pending_shop"
     if _is_delivered(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "delivered"
-    if (record.cod_settlement_status or "").strip().lower() == "matched":
+    if is_cod_settlement_paid(record.cod_settlement_status):
         return "delivered"
     if _is_in_transit(ems_phase=record.ems_phase, ems_status=record.ems_status):
         return "in_transit"
@@ -170,7 +171,7 @@ def _record_cod_amount(record: EmsShippingRecord) -> int:
 
 def _is_cod_paid(record: EmsShippingRecord) -> bool:
     """EMS đã trả tiền thu hộ về shop — chỉ khi import file đối soát COD khớp."""
-    return (record.cod_settlement_status or "").strip().lower() == "matched"
+    return is_cod_settlement_paid(record.cod_settlement_status)
 
 
 def _record_cod_paid_date(record: EmsShippingRecord) -> date | None:

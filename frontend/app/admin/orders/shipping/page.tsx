@@ -345,6 +345,7 @@ const COD_RECONCILE_LABELS: Record<string, string> = {
 
 const COD_RECONCILE_BADGE: Record<string, string> = {
   matched: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  confirmed_full: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   amount_mismatch: 'bg-amber-100 text-amber-900 border-amber-200',
   record_not_found: 'bg-red-100 text-red-800 border-red-200',
   parse_error: 'bg-gray-100 text-gray-800 border-gray-200',
@@ -388,6 +389,21 @@ function formatCodAmount(amount: number | null | undefined): string {
   return formatVnd(amount);
 }
 
+function isCodPaidStatus(status: string | null | undefined): boolean {
+  const key = (status || '').trim().toLowerCase();
+  return key === 'matched' || key === 'confirmed_full';
+}
+
+function isCodMismatchStatus(status: string | null | undefined): boolean {
+  return (status || '').trim().toLowerCase() === 'amount_mismatch';
+}
+
+function codRecordStatusLabel(status: string | null | undefined): string {
+  if (isCodMismatchStatus(status)) return 'Đã đối soát nhưng lệch';
+  if ((status || '').trim().toLowerCase() === 'confirmed_full') return 'Đã xác nhận trả đủ';
+  return COD_RECONCILE_LABELS[status || ''] || status || '';
+}
+
 function formatCodPaidDate(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim());
@@ -396,7 +412,7 @@ function formatCodPaidDate(raw: string | null | undefined): string | null {
 }
 
 function formatCodPaidDisplay(row: EmsShippingImportRow): ReactNode {
-  if ((row.cod_settlement_status || '').trim().toLowerCase() !== 'matched') {
+  if (!isCodPaidStatus(row.cod_settlement_status)) {
     return '—';
   }
   const amount = row.cod_paid_amount ?? row.cod_amount ?? null;
@@ -408,12 +424,15 @@ function formatCodPaidDisplay(row: EmsShippingImportRow): ReactNode {
       {paidDate ? (
         <span className="block text-xs text-emerald-700 mt-0.5 font-medium">EMS trả shop: {paidDate}</span>
       ) : null}
+      {(row.cod_settlement_status || '').trim().toLowerCase() === 'confirmed_full' ? (
+        <span className="block text-xs text-emerald-700 mt-0.5 font-medium">Đã xác nhận trả đủ</span>
+      ) : null}
     </>
   );
 }
 
 function formatCodCollectedHint(row: EmsShippingImportRow): ReactNode {
-  if ((row.cod_settlement_status || '').trim().toLowerCase() === 'matched') return null;
+  if (isCodPaidStatus(row.cod_settlement_status) || isCodMismatchStatus(row.cod_settlement_status)) return null;
   if (!row.cod_amount || row.cod_amount <= 0) return null;
   const phase = (row.ems_phase || '').trim().toLowerCase();
   const status = (row.ems_status || '').toLowerCase();
@@ -854,12 +873,15 @@ function EmsSearchResultCard({
   onViewStatus,
   onRefresh,
   refreshing,
+  onConfirmCodFull,
 }: {
   row: EmsShippingImportRow;
   onViewStatus: (row: EmsShippingImportRow) => void;
   onRefresh?: (row: EmsShippingImportRow) => void;
   refreshing?: boolean;
+  onConfirmCodFull?: (row: EmsShippingImportRow) => void;
 }) {
+  const codMismatch = isCodMismatchStatus(row.cod_settlement_status);
   return (
     <article className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -882,13 +904,20 @@ function EmsSearchResultCard({
             )}
           </div>
         </div>
-        <span
-          className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-            SYNC_BADGE[row.sync_status] || SYNC_BADGE.parse_error
-          }`}
-        >
-          {SYNC_LABELS[row.sync_status] || row.sync_status}
-        </span>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          {codMismatch ? (
+            <span className="inline-flex rounded-full border border-amber-200 bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+              Đã đối soát nhưng lệch
+            </span>
+          ) : null}
+          <span
+            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              SYNC_BADGE[row.sync_status] || SYNC_BADGE.parse_error
+            }`}
+          >
+            {SYNC_LABELS[row.sync_status] || row.sync_status}
+          </span>
+        </div>
       </div>
 
       <dl className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-3">
@@ -897,7 +926,16 @@ function EmsSearchResultCard({
         <DetailField label="Thu hộ (COD)">{formatCodAmount(row.cod_amount)}</DetailField>
         <DetailField label="COD EMS trả shop">
           {formatCodPaidDisplay(row)}
-          {formatCodCollectedHint(row)}
+          {codMismatch ? (
+            <span className="block text-xs text-amber-800 mt-0.5 font-medium">
+              Đã đối soát nhưng lệch
+              {row.cod_settlement_message ? (
+                <span className="block font-normal mt-0.5">{row.cod_settlement_message}</span>
+              ) : null}
+            </span>
+          ) : (
+            formatCodCollectedHint(row)
+          )}
         </DetailField>
         <DetailField label="Cước EMS">{formatVnd(row.freight_amount)}</DetailField>
         <DetailField label="Trạng thái EMS">
@@ -923,15 +961,17 @@ function EmsSearchResultCard({
         </p>
       ) : null}
 
-      {row.order_code ? (
+      {row.order_code || (row.id != null && onRefresh) || (codMismatch && row.id != null && onConfirmCodFull) ? (
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => onViewStatus(row)}
-            className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline"
-          >
-            Xem chi tiết trạng thái đơn shop →
-          </button>
+          {row.order_code ? (
+            <button
+              type="button"
+              onClick={() => onViewStatus(row)}
+              className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline"
+            >
+              Xem chi tiết trạng thái đơn shop →
+            </button>
+          ) : null}
           {row.id != null && onRefresh ? (
             <button
               type="button"
@@ -942,16 +982,16 @@ function EmsSearchResultCard({
               {refreshing ? 'Đang tra EMS…' : 'Tra lại EMS'}
             </button>
           ) : null}
+          {codMismatch && row.id != null && onConfirmCodFull ? (
+            <button
+              type="button"
+              onClick={() => onConfirmCodFull(row)}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-950 hover:bg-amber-50"
+            >
+              Xác nhận EMS đã trả đủ
+            </button>
+          ) : null}
         </div>
-      ) : row.id != null && onRefresh ? (
-        <button
-          type="button"
-          onClick={() => onRefresh(row)}
-          disabled={refreshing}
-          className="text-sm font-medium text-indigo-700 hover:text-indigo-900 hover:underline disabled:opacity-50"
-        >
-          {refreshing ? 'Đang tra EMS…' : 'Tra lại EMS'}
-        </button>
       ) : null}
     </article>
   );
@@ -1040,6 +1080,9 @@ export default function AdminShippingPage() {
   const [opsBucketError, setOpsBucketError] = useState<string | null>(null);
   const [timelineBucketContext, setTimelineBucketContext] = useState<TimelineBucketContext | null>(null);
   const [opsBucketFromTimeline, setOpsBucketFromTimeline] = useState(false);
+  const [codFullConfirm, setCodFullConfirm] = useState<EmsShippingImportRow | null>(null);
+  const [codFullConfirmBusy, setCodFullConfirmBusy] = useState(false);
+  const [codFullConfirmError, setCodFullConfirmError] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null);
   const [orderStatusModal, setOrderStatusModal] = useState<OrderStatusModalState | null>(null);
@@ -1279,6 +1322,23 @@ export default function AdminShippingPage() {
       receivedTimelineStats?.items,
     ],
   );
+
+  const submitCodFullConfirm = useCallback(async () => {
+    if (codFullConfirm?.id == null) return;
+    setCodFullConfirmBusy(true);
+    setCodFullConfirmError(null);
+    try {
+      await adminCodSettlementAPI.confirmPaidInFull(codFullConfirm.id);
+      setCodFullConfirm(null);
+      await loadRecords({ silent: true });
+      await loadOpsStats({ silent: true });
+      if (activeOpsBucket) await loadOpsBucketRecords(activeOpsBucket, opsBucketPage);
+    } catch (err) {
+      setCodFullConfirmError(err instanceof Error ? err.message : 'Không xác nhận được.');
+    } finally {
+      setCodFullConfirmBusy(false);
+    }
+  }, [activeOpsBucket, codFullConfirm, loadOpsBucketRecords, loadOpsStats, loadRecords, opsBucketPage]);
 
   const closeOpsBucketModal = useCallback(() => {
     setActiveOpsBucket(null);
@@ -2358,6 +2418,10 @@ export default function AdminShippingPage() {
                     onViewStatus={(r) => void openOrderStatusModal(r)}
                     onRefresh={refreshEmsRow}
                     refreshing={refreshingEms}
+                    onConfirmCodFull={(r) => {
+                      setCodFullConfirmError(null);
+                      setCodFullConfirm(r);
+                    }}
                   />
                 ))}
                 {filteredTotal > EMS_SEARCH_PREVIEW_LIMIT ? (
@@ -4580,7 +4644,13 @@ export default function AdminShippingPage() {
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
                             <div>{formatCodPaidDisplay(row)}</div>
-                            {formatCodCollectedHint(row)}
+                            {isCodMismatchStatus(row.cod_settlement_status) ? (
+                              <div className="mt-0.5 max-w-[180px] text-[11px] font-medium text-amber-800">
+                                Đã đối soát nhưng lệch
+                              </div>
+                            ) : (
+                              formatCodCollectedHint(row)
+                            )}
                             {row.cod_settlement_status ? (
                               <span
                                 className={`inline-flex mt-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
@@ -4588,8 +4658,20 @@ export default function AdminShippingPage() {
                                   COD_RECONCILE_BADGE.parse_error
                                 }`}
                               >
-                                {COD_RECONCILE_LABELS[row.cod_settlement_status] || row.cod_settlement_status}
+                                {codRecordStatusLabel(row.cod_settlement_status)}
                               </span>
+                            ) : null}
+                            {isCodMismatchStatus(row.cod_settlement_status) && row.id != null ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCodFullConfirmError(null);
+                                  setCodFullConfirm(row);
+                                }}
+                                className="mt-1 block text-left text-[11px] font-medium text-amber-900 underline"
+                              >
+                                Xác nhận EMS đã trả đủ
+                              </button>
                             ) : null}
                           </td>
                           <td className="px-3 py-3 text-right tabular-nums whitespace-nowrap">
@@ -4808,6 +4890,7 @@ export default function AdminShippingPage() {
                         )}
                         {row.ems_tracking_code ? ` · ${row.ems_tracking_code}` : ''}
                         {row.reference_code ? ` · ${row.reference_code}` : ''}
+                        {isCodMismatchStatus(row.cod_settlement_status) ? ' · Đã đối soát nhưng lệch' : ''}
                       </li>
                     ))}
                   </ul>
@@ -4823,6 +4906,10 @@ export default function AdminShippingPage() {
                     key={rowKey(row)}
                     row={row}
                     onViewStatus={(r) => void openOrderStatusModal(r)}
+                    onConfirmCodFull={(r) => {
+                      setCodFullConfirmError(null);
+                      setCodFullConfirm(r);
+                    }}
                   />
                 ))
               )}
@@ -4854,6 +4941,59 @@ export default function AdminShippingPage() {
                 </div>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {codFullConfirm ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cod-full-confirm-title"
+          onClick={() => {
+            if (!codFullConfirmBusy) setCodFullConfirm(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white shadow-xl border border-gray-200 p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="cod-full-confirm-title" className="text-lg font-semibold text-gray-900">
+              Xác nhận EMS đã trả đủ
+            </h3>
+            <p className="mt-2 text-sm text-gray-600">
+              Đơn{' '}
+              <strong>
+                {codFullConfirm.order_code || codFullConfirm.ems_tracking_code || codFullConfirm.reference_code || '—'}
+              </strong>{' '}
+              thu hộ <strong>{formatVnd(codFullConfirm.cod_amount)}</strong>. File đối soát đang lệch. Xác nhận EMS đã
+              trả đủ số thu hộ cho shop?
+            </p>
+            {codFullConfirm.cod_settlement_message ? (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                {codFullConfirm.cod_settlement_message}
+              </p>
+            ) : null}
+            {codFullConfirmError ? <p className="mt-2 text-sm text-red-700">{codFullConfirmError}</p> : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={codFullConfirmBusy}
+                onClick={() => setCodFullConfirm(null)}
+                className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={codFullConfirmBusy}
+                onClick={() => void submitCodFullConfirm()}
+                className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+              >
+                {codFullConfirmBusy ? 'Đang ghi…' : 'Xác nhận'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

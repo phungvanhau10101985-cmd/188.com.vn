@@ -36,6 +36,8 @@ VN_TZ = timezone(timedelta(hours=7))
 ASPECT_RATIO = "1:1"
 ICON_OUTPUT_SIZE = 512
 STALE_GENERATING_AFTER = timedelta(minutes=20)
+MAX_SALE_ICON_ATTEMPTS = 3
+BILLING_RETRY_AFTER = timedelta(hours=12)
 _GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
@@ -266,6 +268,49 @@ def _mark_stale_generating(db: Session, row: MarketingIconAsset) -> None:
     db.commit()
 
 
+def _is_billing_exhausted(message: str) -> bool:
+    blob = (message or "").lower()
+    return any(
+        needle in blob
+        for needle in (
+            "402",
+            "prepayment credits",
+            "credits are depleted",
+            "resource_exhausted",
+            "payment required",
+        )
+    )
+
+
+def _latest_campaign_icon(
+    db: Session, *, kind: str, key: str
+) -> Optional[MarketingIconAsset]:
+    return (
+        db.query(MarketingIconAsset)
+        .filter(
+            MarketingIconAsset.kind == kind,
+            MarketingIconAsset.campaign_key == key,
+        )
+        .order_by(MarketingIconAsset.version.desc())
+        .first()
+    )
+
+
+def _icon_auto_retry_blocked(
+    row: MarketingIconAsset, *, now: Optional[datetime] = None
+) -> bool:
+    """Hết credit thì nghỉ 12 giờ. Lỗi khác dừng sau 3 lần, giống banner."""
+    if (row.status or "") != "failed":
+        return False
+    if _is_billing_exhausted(row.error_message or ""):
+        updated = _aware_utc(row.updated_at) or _aware_utc(row.created_at)
+        if updated is None:
+            return True
+        current = now or datetime.now(timezone.utc)
+        return current - updated < BILLING_RETRY_AFTER
+    return int(row.version or 0) >= MAX_SALE_ICON_ATTEMPTS
+
+
 def _find_generating_asset(
     db: Session, *, kind: str, key: str
 ) -> Optional[MarketingIconAsset]:
@@ -458,7 +503,10 @@ def generate_sale_icon(
             row.error_message = str(exc)[:4000]
             row.is_active = False
             db.commit()
-        logger.exception("Tạo icon sale %s thất bại", key)
+        if _is_billing_exhausted(str(exc)):
+            logger.error("Tạo icon sale %s dừng vì Gemini hết credit", key)
+        else:
+            logger.exception("Tạo icon sale %s thất bại", key)
         raise
 
 
@@ -530,7 +578,14 @@ def ensure_daily_sale_icons(
     max_create: int = 1,
     notify_admin: bool = True,
 ) -> Dict[str, int]:
-    stats = {"created": 0, "reused": 0, "failed": 0, "pending": 0, "skipped": 0}
+    stats = {
+        "created": 0,
+        "reused": 0,
+        "failed": 0,
+        "pending": 0,
+        "skipped": 0,
+        "stopped": 0,
+    }
     if day is None or month is None or discount_percent is None:
         match = matching_same_day_month_event(db)
         if not match:
@@ -549,6 +604,10 @@ def ensure_daily_sale_icons(
         return stats
     if generating:
         _mark_stale_generating(db, generating)
+    latest = _latest_campaign_icon(db, kind="sale", key=key)
+    if latest is not None and _icon_auto_retry_blocked(latest):
+        stats["stopped"] += 1
+        return stats
     if max_create <= 0:
         stats["pending"] += 1
         return stats

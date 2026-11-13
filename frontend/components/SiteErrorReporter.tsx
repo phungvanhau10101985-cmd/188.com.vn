@@ -16,10 +16,24 @@ export default function SiteErrorReporter() {
     const onRejection = (event: PromiseRejectionEvent) => {
       const reason = event.reason;
       if (reason instanceof Error) {
+        if (!reason.message.trim()) return;
         reportSiteError({ message: reason.message, stack: reason.stack });
         return;
       }
-      reportSiteError({ message: typeof reason === 'string' ? reason : 'unhandledrejection' });
+      if (typeof reason === 'string') {
+        if (!reason.trim()) return;
+        reportSiteError({ message: reason });
+        return;
+      }
+      if (reason && typeof reason === 'object') {
+        const rec = reason as { message?: unknown; stack?: unknown };
+        const message = typeof rec.message === 'string' ? rec.message.trim() : '';
+        if (!message) return;
+        reportSiteError({
+          message,
+          stack: typeof rec.stack === 'string' ? rec.stack : undefined,
+        });
+      }
     };
     window.addEventListener('error', onError);
     window.addEventListener('unhandledrejection', onRejection);

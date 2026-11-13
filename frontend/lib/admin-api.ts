@@ -5789,6 +5789,12 @@ export const adminCodSettlementAPI = {
     }
     return res.json();
   },
+
+  confirmPaidInFull: (recordId: number) =>
+    fetchAdmin<{ ok: boolean; row: EmsShippingImportRow }>('/orders/admin/shipping/cod-confirm-full', {
+      method: 'POST',
+      body: JSON.stringify({ record_id: recordId }),
+    }),
 };
 
 export type EmsFreightReconcileStatus = 'settled' | 'already_settled' | 'record_not_found' | 'parse_error';

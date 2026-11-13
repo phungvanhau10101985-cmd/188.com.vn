@@ -143,13 +143,34 @@ def test_handler_ignores_info_and_own_logger():
         "Exception during reset or similar",
     )
     assert svc.should_capture_record(pool_reset) is False
+    cursor = logging_record(
+        logging.ERROR,
+        "sqlalchemy.engine.Engine",
+        "Error closing cursor",
+    )
+    assert svc.should_capture_record(cursor) is False
 
 
 def test_client_noise_ignores_in_app_browser_and_stale_chunks():
     assert svc.is_client_noise("Error invoking postMessage: Java object is gone") is True
     assert svc.is_client_noise("ReferenceError: zaloJSV2 is not defined") is True
     assert svc.is_client_noise("Loading chunk 9225 failed.") is True
+    assert svc.is_client_noise("controller[kState].transformAlgorithm is not a function") is True
+    assert svc.is_client_noise("ReferenceError: Can't find variable: EmptyRanges") is True
     assert svc.is_client_noise("Cannot read cart") is False
+
+
+def test_bare_unhandledrejection_is_not_stored():
+    db = _session()
+    result = svc.record_site_error(
+        source="web",
+        message="unhandledrejection",
+        db=db,
+        now=_now(),
+    )
+    assert result["skipped"] is True
+    assert db.query(SiteErrorLog).count() == 0
+    db.close()
 
 
 def logging_record(level: int, name: str, message: str) -> logging.LogRecord:

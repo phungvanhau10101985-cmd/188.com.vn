@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.order_shipment import EmsCodSettlementBatch, EmsCodSettlementRow, EmsShippingRecord
+from app.services.ems_cod_status import is_cod_amount_mismatch, should_preserve_confirmed_full
 from app.services.ems_excel_utils import parse_excel_date_cell, read_spreadsheet_rows
 from app.services.ems_shipment_import import _parse_cod_amount, _cell_str
 _TRACKING_RE = re.compile(r"^[A-Z]{2}\d+[A-Z]{2}$", re.IGNORECASE)
@@ -58,6 +59,8 @@ def _clear_settlement_on_shipping_record(db: Session, record_id: Optional[int]) 
         return
     shipping = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
     if not shipping:
+        return
+    if should_preserve_confirmed_full(shipping.cod_settlement_status, None):
         return
     shipping.cod_paid_amount = None
     shipping.cod_paid_date = None
@@ -357,6 +360,8 @@ def _apply_settlement_to_shipping_record(
     shipping = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
     if not shipping:
         return
+    if should_preserve_confirmed_full(shipping.cod_settlement_status, status):
+        return
     if paid_amount is not None:
         shipping.cod_paid_amount = paid_amount
     if payment_date:
@@ -480,3 +485,30 @@ def import_cod_settlement_excel(
     payload["import_batch"] = _batch_to_dict(batch, saved_rows)
     payload["summary"] = _build_summary(saved_rows)
     return payload
+
+
+def confirm_cod_paid_in_full(db: Session, record_id: int) -> dict[str, Any]:
+    """Shop xác nhận EMS đã trả đủ thu hộ cho đơn đối soát lệch."""
+    from app.services.ems_shipment_import import _record_to_dict
+
+    record = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
+    if not record:
+        raise ValueError("Không tìm thấy vận đơn.")
+    status = (record.cod_settlement_status or "").strip().lower()
+    if status == "confirmed_full":
+        raise ValueError("Đơn này đã được xác nhận EMS trả đủ.")
+    if not is_cod_amount_mismatch(status):
+        raise ValueError("Chỉ xác nhận được đơn đã đối soát nhưng lệch tiền.")
+    try:
+        cod = int(record.cod_amount or 0)
+    except (TypeError, ValueError):
+        cod = 0
+    if cod <= 0:
+        raise ValueError("Vận đơn không có tiền thu hộ để xác nhận.")
+    record.cod_paid_amount = cod
+    record.cod_paid_date = datetime.now(timezone(timedelta(hours=7))).date()
+    record.cod_settlement_status = "confirmed_full"
+    record.cod_settlement_message = "Shop xác nhận EMS đã trả đủ thu hộ."
+    db.commit()
+    db.refresh(record)
+    return _record_to_dict(record)

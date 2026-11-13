@@ -839,6 +839,22 @@ async def admin_import_cod_settlement_excel(
     return payload
 
 
+@router.post("/admin/shipping/cod-confirm-full")
+def admin_confirm_cod_paid_in_full(
+    record_id: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_admin: models.AdminUser = Depends(require_module_permission("ems_shipping")),
+):
+    """Shop xác nhận EMS đã trả đủ thu hộ cho đơn đối soát lệch."""
+    del current_admin
+    try:
+        row = cod_settlement_svc.confirm_cod_paid_in_full(db, record_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "row": row}
+
+
 @router.get("/admin/shipping/operations-stats")
 def admin_shipping_operations_stats(
     view: str | None = None,

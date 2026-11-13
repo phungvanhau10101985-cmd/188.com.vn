@@ -1505,7 +1505,9 @@ def read_product_group_listing_path(
 ):
     """API nhẹ: chỉ trả đường dẫn listing nhóm (cache HTTP 10 phút)."""
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
-    source = (slug or "").strip()
+    source = crud.product.sanitize_sql_text(slug or "").strip()
+    if not source:
+        return {"redirect_path": "/", "redirect_type": "group_listing"}
     fast = _group_listing_path_fast_no_db(source)
     if fast is not None:
         return {"redirect_path": fast, "redirect_type": "group_listing"}
@@ -1533,7 +1535,15 @@ def read_product_oos_group_redirect(
     không gợi ý PDP sản phẩm khác.
     """
     response.headers["Cache-Control"] = "public, max-age=600, stale-while-revalidate=120"
-    source = (slug or "").strip()
+    source = crud.product.sanitize_sql_text(slug or "").strip()
+    if not source:
+        return {
+            "redirect_slug": None,
+            "redirect_path": "/",
+            "redirect_type": "group_listing",
+            "similarity_min": min_similarity,
+            "legacy_path": legacy_path,
+        }
     fast = _group_listing_path_fast_no_db(source)
     path = fast if fast is not None else _resolve_group_listing_path_with_db(source)
     return {

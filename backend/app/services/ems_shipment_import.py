@@ -19,6 +19,7 @@ from app.models.order_shipment import (
     OrderShipmentEvent,
 )
 from app.services import ems_tracking as ems_tracking_svc
+from app.services.ems_cod_status import is_cod_settlement_paid
 from app.services import order_shipment_timeline as shipment_svc
 
 _ORDER_CODE_RE = re.compile(r"\b(DH\d+)\b", re.IGNORECASE)
@@ -1198,7 +1199,7 @@ def sanitize_cod_paid_without_settlement(db: Session) -> int:
     )
     fixed = 0
     for record in rows:
-        if (record.cod_settlement_status or "").strip().lower() == "matched":
+        if is_cod_settlement_paid(record.cod_settlement_status):
             continue
         record.cod_paid_amount = None
         record.cod_paid_date = None
@@ -1229,7 +1230,7 @@ def _record_to_dict(record: EmsShippingRecord) -> dict[str, Any]:
     settlement = (record.cod_settlement_status or "").strip().lower()
     cod_paid_amount = int(record.cod_paid_amount) if record.cod_paid_amount is not None else None
     cod_paid_date = _isoformat_value(record.cod_paid_date)
-    if settlement != "matched":
+    if not is_cod_settlement_paid(settlement):
         cod_paid_amount = None
         cod_paid_date = None
     return _apply_return_to_shop_fields(
@@ -1361,8 +1362,8 @@ def _upsert_record(
     cod = result.get("cod_amount")
     record.cod_amount = int(cod) if cod is not None else None
     settlement = (record.cod_settlement_status or "").strip().lower()
-    # COD EMS trả shop — chỉ từ file đối soát (cod_settlement_status=matched).
-    if settlement != "matched":
+    # COD EMS trả shop — file đối soát khớp, hoặc shop đã xác nhận trả đủ.
+    if not is_cod_settlement_paid(settlement):
         record.cod_paid_amount = None
         record.cod_paid_date = None
     if source_filename:
