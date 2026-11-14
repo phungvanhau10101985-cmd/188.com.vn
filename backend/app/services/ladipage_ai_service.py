@@ -873,7 +873,10 @@ def generate_and_save_ladipage_seo(
             "seo_collision_warning": None,
         }
 
+    from app.db.session import release_read_transaction
+
     context = build_context(db, ladipage)
+    release_read_transaction(db)
     seo = generate_ladipage_seo(
         context,
         hero_headline=hero_headline,
@@ -1114,14 +1117,32 @@ def generate_or_regenerate_section(
     custom_prompt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Sinh (lần đầu) hoặc tạo lại nội dung 1 section. `target`: all | text | image. Trả `data` mới (caller lưu DB)."""
+    from app.db.session import release_read_transaction
+
     context = build_context(db, ladipage)
     st = section.section_type
     current: Dict[str, Any] = dict(section.data or {})
+    material_filter_raw = getattr(ladipage, "material_filter", None)
+    ladipage_id = int(ladipage.id)
+    single_product_lp = _is_single_product_ladipage(ladipage)
     custom_instruction = custom_prompt if target != "image" else None
     image_reference = _hero_image_reference(context) if st == "hero" else (
         context.get("single_product") or context.get("category_anchor_product")
     )
     category_name = context.get("category_name")
+    product_material_image: Optional[Dict[str, str]] = None
+    material_image_source = "ai"
+    if st == "material":
+        if single_product_lp:
+            material_image_source = str(current.get("image_source") or "product").strip().lower()
+            if material_image_source not in ("ai", "product"):
+                material_image_source = "product"
+        if material_image_source == "product" and target in ("all", "image"):
+            product_material_image = resolve_material_product_image_from_ladipage(
+                db, ladipage, current
+            )
+    # DeepSeek/Gemini có thể chạy vài chục giây. Đóng transaction đọc trước.
+    release_read_transaction(db)
 
     if st == "hero":
         if target in ("all", "text"):
@@ -1164,18 +1185,11 @@ def generate_or_regenerate_section(
 
     if st == "material":
         material = (
-            normalize_material_filter(getattr(ladipage, "material_filter", None))
+            normalize_material_filter(material_filter_raw)
             or normalize_material_filter(str(current.get("material") or ""))
             or context.get("dominant_material")
             or "chất liệu cao cấp"
         )
-        single_product_lp = _is_single_product_ladipage(ladipage)
-        if single_product_lp:
-            image_source = str(current.get("image_source") or "product").strip().lower()
-            if image_source not in ("ai", "product"):
-                image_source = "product"
-        else:
-            image_source = "ai"
         if target in ("all", "text"):
             text = generate_material_text(context, material, custom_instruction=custom_instruction)
             if not text:
@@ -1183,12 +1197,14 @@ def generate_or_regenerate_section(
             current.update(text)
             current["material"] = material
         if target in ("all", "image"):
-            if image_source == "product":
-                current.update(resolve_material_product_image_from_ladipage(db, ladipage, current))
+            if material_image_source == "product":
+                if product_material_image is None:
+                    raise RuntimeError("Không có ảnh sản phẩm cho phần chất liệu.")
+                current.update(product_material_image)
                 current["image_source"] = "product"
             else:
                 image = generate_material_image(
-                    ladipage.id,
+                    ladipage_id,
                     material,
                     current.get("callouts") or [],
                     custom_prompt=custom_prompt if target == "image" else None,

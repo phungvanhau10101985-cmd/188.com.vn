@@ -106,9 +106,10 @@ class Settings:
         self.DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "15"))
         self.DATABASE_POOL_RECYCLE: int = int(os.getenv("DATABASE_POOL_RECYCLE", "1800"))
         self.DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "8"))
-        # Postgres tự đóng session kẹt; daemon API terminate thêm khi gần đầy pool.
+        # Postgres tự đóng session kẹt. 12s > request storefront (vài trăm ms)
+        # và ngắn hơn khoảng watchdog đợi /health, để pool được trả trước khi restart API.
         self.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: int = int(
-            os.getenv("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", "35")
+            os.getenv("DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", "12")
         )
         # 0 = tắt — tránh cắt import/export admin chạy query dài.
         self.DATABASE_STATEMENT_TIMEOUT_SECONDS: int = int(
@@ -125,13 +126,13 @@ class Settings:
             os.getenv("DATABASE_POOL_RELIEF_INTERVAL_SECONDS", "15")
         )
         self.DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS: int = int(
-            os.getenv("DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS", "22")
+            os.getenv("DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS", "10")
         )
         self.DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: int = int(
             os.getenv("DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT", "14")
         )
         self.DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS: int = int(
-            os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS", "18")
+            os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS", "8")
         )
         self.DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT: int = int(
             os.getenv("DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT", "0")

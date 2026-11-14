@@ -52,11 +52,14 @@ health_curl_products_probe() {
 
 health_terminate_idle_db_transactions() {
   local db_name="${POSTGRES_DB_NAME:-188comvn}"
-  local min_idle_sec="${DB_RELIEF_MIN_IDLE_SECONDS:-22}"
+  local min_idle_sec="${DB_RELIEF_MIN_IDLE_SECONDS:-10}"
   if ! command -v sudo >/dev/null 2>&1 || ! id postgres >/dev/null 2>&1; then
     echo "    (bỏ qua terminate idle — không có sudo/postgres)" >&2
     return 0
   fi
+  case "${min_idle_sec}" in
+    ''|*[!0-9]*) min_idle_sec=10 ;;
+  esac
   local terminated
   terminated=$(sudo -u postgres psql -P pager=off -d "${db_name}" -tAc \
     "SELECT count(*) FROM (
@@ -65,6 +68,7 @@ health_terminate_idle_db_transactions() {
        WHERE datname='${db_name}'
          AND state='idle in transaction'
          AND pid <> pg_backend_pid()
+         AND COALESCE(application_name, '') <> '188_export'
          AND now() - state_change > make_interval(secs => ${min_idle_sec})
      ) t;" \
     2>/dev/null || echo "0")

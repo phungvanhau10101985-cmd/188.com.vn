@@ -25,7 +25,7 @@ _daemon_lock = threading.Lock()
 def _pg_connect_options() -> str:
     """Gắn timeout Postgres lên mỗi connection từ pool SQLAlchemy."""
     parts = []
-    idle_sec = max(5, int(getattr(settings, "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", 35) or 35))
+    idle_sec = max(5, int(getattr(settings, "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", 12) or 12))
     parts.append(f"-c idle_in_transaction_session_timeout={idle_sec}s")
     # statement_timeout toàn cục dễ cắt import/export admin — chỉ bật khi set > 0 (giây).
     stmt_sec = int(getattr(settings, "DATABASE_STATEMENT_TIMEOUT_SECONDS", 0) or 0)
@@ -90,7 +90,7 @@ def apply_database_session_guardrails() -> None:
     if not db_name:
         return
 
-    idle_sec = max(5, int(getattr(settings, "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", 35) or 35))
+    idle_sec = max(5, int(getattr(settings, "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS", 12) or 12))
     stmt_sec = int(getattr(settings, "DATABASE_STATEMENT_TIMEOUT_SECONDS", 0) or 0)
 
     from app.db.session import engine
@@ -177,11 +177,11 @@ def release_stale_idle_in_transaction_connections(*, force: bool = False) -> int
     if not getattr(settings, "DATABASE_POOL_RELIEF_ENABLED", True):
         return 0
 
-    min_idle = max(5, int(getattr(settings, "DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS", 22) or 22))
+    min_idle = max(5, int(getattr(settings, "DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS", 10) or 10))
     trigger_count = int(getattr(settings, "DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT", 14) or 14)
     aggressive_min = max(
         5,
-        int(getattr(settings, "DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS", 18) or 18),
+        int(getattr(settings, "DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS", 8) or 8),
     )
     aggressive_when = int(
         getattr(settings, "DATABASE_POOL_RELIEF_AGGRESSIVE_WHEN_IDLE_COUNT", 0) or 0

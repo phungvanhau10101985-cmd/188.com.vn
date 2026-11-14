@@ -7,7 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.models.category import Category
 from app.models.ladipage import Ladipage
 from app.models.seo_cluster import SeoCluster
@@ -43,13 +43,21 @@ def _public_ladipage_response(db: Session, lp: Ladipage) -> LadipagePublicRespon
     # Danh mục liên quan: category_id thật (ladipage danh mục) hoặc danh mục chiếm đa số
     # trong SP đã chọn (ladipage nhiều SP) — dùng cho breadcrumb + link "xem toàn bộ danh mục".
     competitor = resolve_ladipage_category_competitor(db, lp, resolved)
+    # Chép cột trước khi commit — commit làm expire ORM, truy cập sau đó sẽ mở transaction mới.
+    page_id = lp.id
+    page_slug = lp.slug
+    page_title = lp.title
+    page_meta_title = lp.meta_title or lp.title
+    page_meta_description = lp.meta_description
+    page_material_filter = lp.material_filter
+    release_read_transaction(db)
     return LadipagePublicResponse(
-        id=lp.id,
-        slug=lp.slug,
-        title=lp.title,
-        meta_title=lp.meta_title or lp.title,
-        meta_description=lp.meta_description,
-        material_filter=lp.material_filter,
+        id=page_id,
+        slug=page_slug,
+        title=page_title,
+        meta_title=page_meta_title,
+        meta_description=page_meta_description,
+        material_filter=page_material_filter,
         category_id=competitor.get("category_id"),
         category_name=competitor.get("category_name"),
         category_catalog_path=competitor.get("catalog_path"),

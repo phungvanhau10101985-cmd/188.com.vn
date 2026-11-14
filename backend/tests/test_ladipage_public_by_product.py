@@ -12,6 +12,7 @@ def test_get_published_ladipage_for_product_returns_response():
     lp.title = "Demo"
     lp.meta_title = "Demo title"
     lp.meta_description = "Desc"
+    lp.material_filter = None
     lp.status = "published"
     lp.sections = []
 

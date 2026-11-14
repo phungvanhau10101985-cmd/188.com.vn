@@ -104,62 +104,89 @@ def verify_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+def _lookup_user(db: Session, user_id, user_identifier, *, allow_identifier_as_id: bool) -> Optional[User]:
+    user = None
+    if user_id:
+        try:
+            user = crud.user.get_user(db, user_id=int(user_id))
+        except (ValueError, TypeError):
+            pass
+    if not user and user_identifier:
+        if "@" in str(user_identifier):
+            user = crud.user.get_user_by_email(db, email=user_identifier)
+        else:
+            user = crud.user.get_user_by_phone(db, phone=user_identifier)
+    if not user and allow_identifier_as_id and user_identifier:
+        try:
+            user = crud.user.get_user(db, user_id=int(user_identifier))
+        except (ValueError, TypeError):
+            pass
+    return user
+
+
+def _load_detached_user(user_id, user_identifier, *, allow_identifier_as_id: bool, swallow_errors: bool) -> Optional[User]:
+    """Đọc user bằng session riêng rồi đóng ngay.
+
+    Request storefront không giữ connection ở trạng thái idle-in-transaction
+    suốt phần xử lý phía sau. Cột đã load vẫn đọc được trên object đã expunge.
+    """
+    from app.db.session import SessionLocal, _dispose_session
+
+    db = SessionLocal()
+    try:
+        user = _lookup_user(
+            db,
+            user_id,
+            user_identifier,
+            allow_identifier_as_id=allow_identifier_as_id,
+        )
+        if user is not None:
+            db.expunge(user)
+        return user
+    except Exception:
+        if swallow_errors:
+            return None
+        raise
+    finally:
+        _dispose_session(db)
+
+
 def get_current_user(
     token: str = Depends(get_raw_token),
-    db: Session = Depends(get_db)
 ) -> User:
     """Get current user from token - FIXED VERSION"""
     payload = verify_token(token)
-    
+
     # FIX: Get both user_id and phone from payload
     user_id = payload.get("user_id")  # Integer ID (if available)
     user_identifier = payload.get("sub")   # Email or phone
     token_type: str = payload.get("type")
-    
+
     if not user_identifier:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
         )
-    
+
     if token_type != "user":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token type",
         )
-    
-    # FIX: Try to find user by ID first, then by phone
-    user = None
-    
-    # Method 1: Try by user_id (if available in token)
-    if user_id:
-        try:
-            user = crud.user.get_user(db, user_id=int(user_id))
-        except (ValueError, TypeError):
-            # user_id might not be a valid integer
-            pass
-    
-    # Method 2: If not found by ID, try by identifier
-    if not user and user_identifier:
-        if "@" in user_identifier:
-            user = crud.user.get_user_by_email(db, email=user_identifier)
-        else:
-            user = crud.user.get_user_by_phone(db, phone=user_identifier)
-    
-    # Method 3: Try to find by any possible identifier
-    if not user:
-        try:
-            possible_id = int(user_identifier)
-            user = crud.user.get_user(db, user_id=possible_id)
-        except (ValueError, TypeError):
-            pass
-    
+
+    user = _load_detached_user(
+        user_id,
+        user_identifier,
+        allow_identifier_as_id=True,
+        swallow_errors=False,
+    )
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    
+
     return user
 
 
@@ -183,7 +210,12 @@ def optional_user_id_from_token(token: Optional[str]) -> Optional[int]:
 
 
 def resolve_optional_user(db: Session, token: Optional[str]) -> Optional[User]:
-    """User từ token nếu hợp lệ. Không có token, token lỗi, hoặc DB lỗi thì None."""
+    """User từ token nếu hợp lệ. Không có token, token lỗi, hoặc DB lỗi thì None.
+
+    ``db`` giữ để caller cũ không phải đổi chữ ký. Tra user bằng session riêng
+    và đóng ngay, không mở transaction trên session của request.
+    """
+    del db
     if not token:
         return None
     try:
@@ -195,30 +227,19 @@ def resolve_optional_user(db: Session, token: Optional[str]) -> Optional[User]:
     token_type = payload.get("type")
     if not user_identifier or token_type != "user":
         return None
-    try:
-        user = None
-        if user_id:
-            try:
-                user = crud.user.get_user(db, user_id=int(user_id))
-            except (ValueError, TypeError):
-                pass
-        if not user and user_identifier:
-            if "@" in user_identifier:
-                user = crud.user.get_user_by_email(db, email=user_identifier)
-            else:
-                user = crud.user.get_user_by_phone(db, phone=user_identifier)
-        return user
-    except Exception:
-        # Endpoint dùng optional auth (badge, behavior, trang công khai) không được fail cứng vì DB đang căng.
-        return None
+    return _load_detached_user(
+        user_id,
+        user_identifier,
+        allow_identifier_as_id=False,
+        swallow_errors=True,
+    )
 
 
 def get_current_user_optional(
     token: Optional[str] = Depends(get_raw_token_optional),
-    db: Session = Depends(get_db),
 ) -> Optional[User]:
     """Lấy user hiện tại nếu có token hợp lệ; không có token hoặc token lỗi thì trả về None."""
-    return resolve_optional_user(db, token)
+    return resolve_optional_user(None, token)
 
 
 # ========== ADMIN FUNCTIONS ==========

@@ -25,7 +25,7 @@ fi
 
 if command -v sudo >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
   sudo -u postgres psql -P pager=off -d "${DB_NAME}" -c \
-    "ALTER DATABASE \"${DB_NAME}\" SET idle_in_transaction_session_timeout = '35s';" \
+    "ALTER DATABASE \"${DB_NAME}\" SET idle_in_transaction_session_timeout = '12s';" \
     2>/dev/null || true
   sudo -u postgres psql -P pager=off -d "${DB_NAME}" -c \
     "ALTER DATABASE \"${DB_NAME}\" RESET statement_timeout;" \
@@ -38,7 +38,8 @@ if command -v sudo >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
        WHERE datname='${DB_NAME}'
          AND state='idle in transaction'
          AND pid <> pg_backend_pid()
-         AND now() - state_change > interval '22 seconds'
+         AND COALESCE(application_name, '') <> '188_export'
+         AND now() - state_change > interval '10 seconds'
      ) t;" \
     2>/dev/null || echo "0")
   echo "    Đã terminate idle-in-transaction: ${terminated:-0} connection"

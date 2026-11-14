@@ -48,6 +48,24 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base class for models
 Base = declarative_base()
 
+def release_read_transaction(db) -> None:
+    """Kết thúc transaction đọc trước khi gọi mạng ngoài.
+
+    Connection vẫn thuộc session đến khi close, nhưng Postgres không còn
+    thấy «idle in transaction» trong lúc DeepSeek, Gemini hoặc Bunny chạy.
+    """
+    if db is None:
+        return
+    try:
+        if db.in_transaction():
+            db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _dispose_session(db) -> None:
     """Đóng session. Connection đã bị Postgres cắt thì invalidate, không biến cleanup thành 500."""
     try:

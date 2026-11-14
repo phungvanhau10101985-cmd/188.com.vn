@@ -122,6 +122,34 @@ soft_start_api() {
   # watchdog-web.sh sẽ save khi web+nanoai đều listen.
 }
 
+api_port_listening() {
+  ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(^|[.:])'"${API_PORT}"'$'
+}
+
+# Pool đầy làm /health quá 5s. Restart cả API gây connection refused cho khách.
+# Cắt session idle-in-transaction rồi thử lại; chỉ restart khi process không còn nghe cổng
+# hoặc health vẫn fail sau khi đã giải phóng.
+relieve_pool_before_restart() {
+  local reason="$1"
+  if ! api_port_listening; then
+    echo "${LOG_PREFIX} ${reason} — cổng ${API_PORT} không listen, cần restart"
+    return 1
+  fi
+  echo "${LOG_PREFIX} ${reason} — giải phóng idle-in-transaction trước khi restart"
+  DB_RELIEF_MIN_IDLE_SECONDS=10 health_terminate_idle_db_transactions
+  local attempt health="000"
+  for attempt in 1 2 3; do
+    sleep 2
+    health=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health" 8)
+    if [[ "${health}" == "200" ]]; then
+      echo "${LOG_PREFIX} phục hồi sau giải phóng pool (health=200, lần ${attempt}) — không restart"
+      return 0
+    fi
+  done
+  echo "${LOG_PREFIX} health vẫn ${health} sau giải phóng pool — restart"
+  return 1
+}
+
 recover_api() {
   local reason="$1"
   local incident_dir
@@ -183,10 +211,14 @@ if [[ "${pm2_state}" != "online" ]]; then
   exit 0
 fi
 
-health=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health" 5)
+health=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health" 8)
 if [[ "${health}" != "200" ]]; then
-  recover_api "/health=${health}"
-  exit 0
+  if relieve_pool_before_restart "/health=${health}"; then
+    health="200"
+  else
+    recover_api "/health=${health}"
+    exit 0
+  fi
 fi
 
 products=$(health_curl_products_probe "${API_PORT}" 2 20)
