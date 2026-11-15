@@ -585,6 +585,12 @@ if ! pm2 describe "${PM2_API}" &>/dev/null; then
   pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_API}" 2>/dev/null || true
 fi
 
+PM2_STOCK="${PM2_STOCK_WORKER_NAME:-188-stock-worker}"
+if ! pm2 describe "${PM2_STOCK}" &>/dev/null; then
+  echo "    Tạo ${PM2_STOCK} từ ecosystem (Chromium tồn kho, tách khỏi API)"
+  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_STOCK}" 2>/dev/null || true
+fi
+
 if pm2_web_needs_recreate || ! pm2 describe "${PM2_WEB}" &>/dev/null; then
   pm2_recreate_web_from_ecosystem
 fi
@@ -593,9 +599,10 @@ if [[ "${DEPLOY_RESTART_ALL_PM2:-1}" == "1" ]]; then
   echo "    → pm2 restart all --update-env"
   pm2 restart all --update-env 2>/dev/null || true
 else
-  echo "    → DEPLOY_RESTART_ALL_PM2=0 — chỉ restart ${PM2_API} / ${PM2_WEB}"
+  echo "    → DEPLOY_RESTART_ALL_PM2=0 — chỉ restart ${PM2_API} / ${PM2_WEB} / ${PM2_STOCK:-188-stock-worker}"
   pm2 restart "${PM2_API}" --update-env 2>/dev/null || true
   pm2 restart "${PM2_WEB}" --update-env 2>/dev/null || true
+  pm2 restart "${PM2_STOCK:-188-stock-worker}" --update-env 2>/dev/null || true
 fi
 
 pm2 save || true

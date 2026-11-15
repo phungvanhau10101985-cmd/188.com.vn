@@ -429,6 +429,9 @@ def vipomall_gather_admin_batch_scan(
 
     vm_url = build_vipomall_1688_pdp_url(oid)
     matched: List[Any] = list(_find_products_for_item_slug(db, f"abb-{oid}"))
+    from app.db.session import release_db_connection_for_slow_work
+
+    release_db_connection_for_slow_work(db)
     st, err, _via = evaluate_vipomall_1688_offer_stock(oid)
     if st == "in_stock":
         return {

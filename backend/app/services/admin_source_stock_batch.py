@@ -841,6 +841,9 @@ def _gather_platform_scan_attempt(db: Session, *, seed_url: str, platform: str) 
         canonical_url = (cssbuy_page or "").strip() or canonical_url
         slug = cssbuy_item_page_to_item_slug(canonical_url)
         matched = _find_products_for_item_slug(db, slug or "")
+        from app.db.session import release_db_connection_for_slow_work
+
+        release_db_connection_for_slow_work(db)
         try:
             probe = evaluate_cssbuy_pdp_stock(canonical_url)
             st = (probe.status or "").strip().lower()

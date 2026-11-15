@@ -1403,8 +1403,9 @@ export default function AdminSourceStockCheckPage() {
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Kiểm tra nguồn hàng</h1>
             <p className="text-xs sm:text-sm text-gray-600 mt-1 max-w-3xl">
-              <strong>Kiểm tra hết/còn hàng trên nguồn chạy trên máy chủ:</strong> thread daemon trong process FastAPI, xếp
-              từng SP và ghi vào DB. Env chính:{' '}
+              <strong>Kiểm tra hết/còn hàng trên nguồn chạy trên máy chủ:</strong> process PM2{' '}
+              <code className="text-[11px] bg-gray-100 px-1 rounded">188-stock-worker</code>, tách khỏi API để
+              Chromium không làm đơ danh mục. API chỉ ghi hàng chờ vào DB. Env chính:{' '}
               <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_ENABLED</code> (mặc định <strong>bật</strong>; đặt
               false và khởi động lại backend để tắt), cùng <code className="text-[11px] bg-gray-100 px-1 rounded">SOURCE_STOCK_CHECK_*</code>{' '}
               (interval, stale…). Thứ tự <strong>Vipomall → PandaMall → CSSBuy</strong>. Hết hàng hoặc còn hàng thì dừng.
@@ -1656,7 +1657,7 @@ export default function AdminSourceStockCheckPage() {
                       : ''}
                     <br />
                     Luồng <code className="text-[10px] px-1 bg-white/80 rounded border border-indigo-100">source-stock-checker</code>{' '}
-                    trong process này:{' '}
+                    trong <strong>{workerState.worker_process_name || 'process này'}</strong>:{' '}
                     <strong>{workerState.daemon_thread_alive ? 'đang chạy' : 'không hoạt động / chưa bật'}</strong>
                     {' · '}Hàng chờ RAM process:{' '}
                     <strong className="tabular-nums">{workerState.process_in_memory_queue_depth}</strong>

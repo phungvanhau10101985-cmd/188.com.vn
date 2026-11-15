@@ -66,6 +66,21 @@ def release_read_transaction(db) -> None:
             pass
 
 
+def release_db_connection_for_slow_work(db) -> None:
+    """Trả connection về pool trước Playwright hoặc HTTP dài.
+
+    Session vẫn dùng được sau đó: query tiếp theo checkout connection mới.
+    Không ``close()`` — close() sẽ expunge ORM object đang giữ để ghi kết quả.
+    """
+    try:
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _dispose_session(db) -> None:
     """Đóng session. Connection đã bị Postgres cắt thì invalidate, không biến cleanup thành 500."""
     try:

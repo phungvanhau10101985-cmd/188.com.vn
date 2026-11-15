@@ -484,10 +484,14 @@ class Settings:
         )
         self.IMPORT_1688_MAX_IMAGES: int = int(os.getenv("IMPORT_1688_MAX_IMAGES", "24"))
         self.IMPORT_1688_DOWNLOAD_IMAGES: bool = os.getenv("IMPORT_1688_DOWNLOAD_IMAGES", "True").strip().lower() in ("1", "true", "yes")
-        # Kiểm tra tồn kho nguồn 1688: worker nền (thread daemon trong process backend), mặc định bật —
-        # chỉnh SOURCE_STOCK_CHECK_ENABLED=false nếu không muốn chạy trên máy chủ.
+        # Kiểm tra tồn kho nguồn: hàng chờ vẫn ghi DB khi ENABLED.
+        # Chromium không chạy trong 188-api trên VPS: SOURCE_STOCK_CHECK_RUN_DAEMON=false
+        # và process PM2 188-stock-worker đặt RUN_DAEMON=true.
         self.SOURCE_STOCK_CHECK_ENABLED: bool = os.getenv(
             "SOURCE_STOCK_CHECK_ENABLED", "True"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        self.SOURCE_STOCK_CHECK_RUN_DAEMON: bool = os.getenv(
+            "SOURCE_STOCK_CHECK_RUN_DAEMON", "True"
         ).strip().lower() in ("1", "true", "yes", "on")
         self.SOURCE_STOCK_CHECK_INTERVAL_SECONDS: int = max(
             10,

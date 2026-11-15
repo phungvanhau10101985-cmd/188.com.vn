@@ -710,10 +710,16 @@ async def startup_event():
         start_source_stock_checker_daemon_if_enabled()
         from app.core.config import settings as _ssc_settings
         if getattr(_ssc_settings, "SOURCE_STOCK_CHECK_ENABLED", False):
-            print(
-                "   📦 SOURCE_STOCK_CHECK_ENABLED: worker kiểm tra tồn kho nguồn "
-                f"mỗi {_ssc_settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS}s."
-            )
+            if getattr(_ssc_settings, "SOURCE_STOCK_CHECK_RUN_DAEMON", True):
+                print(
+                    "   📦 SOURCE_STOCK_CHECK_ENABLED: daemon trong process API "
+                    f"mỗi {_ssc_settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS}s."
+                )
+            else:
+                print(
+                    "   📦 SOURCE_STOCK_CHECK: API chỉ xếp hàng DB. "
+                    "Chromium chạy ở PM2 188-stock-worker."
+                )
     except Exception as _e_ssc:
         print(f"   ⚠️  source stock checker startup: {_e_ssc}")
 

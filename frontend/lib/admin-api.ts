@@ -829,6 +829,9 @@ export interface AdminSourceStockProductsCommitAudit {
 export interface AdminSourceStockWorkerState {
   ok: boolean;
   env_source_stock_check_enabled: boolean;
+  /** false khi Chromium chạy ở PM2 188-stock-worker, không trong API. */
+  worker_runs_in_api?: boolean;
+  worker_process_name?: string | null;
   db_paused: boolean;
   db_pause_updated_at_utc_iso?: string | null;
   daemon_thread_started_flag: boolean;

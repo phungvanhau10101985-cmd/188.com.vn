@@ -15,6 +15,7 @@ source "${ROOT}/deploy/health-lib.sh"
 
 API_PORT="${API_INTERNAL_PORT:-8001}"
 PM2_API="${PM2_API_NAME:-188-api}"
+API_STARTUP_GRACE_SECONDS="${API_STARTUP_GRACE_SECONDS:-90}"
 INCIDENT_ROOT="${API_INCIDENT_DIR:-/var/log/188-api-incidents}"
 INCIDENT_RETENTION_DAYS="${API_INCIDENT_RETENTION_DAYS:-14}"
 DEPLOY_LOCK="${ROOT}/deploy/.deploy-in-progress"
@@ -36,6 +37,15 @@ if [[ -f "${DEPLOY_LOCK}" ]]; then
   fi
   echo "${LOG_PREFIX} lock deploy quá cũ (${lock_age}s) — xoá và tiếp tục"
   rm -f "${DEPLOY_LOCK}" || true
+fi
+
+# Cron 2 phút có thể chồng lên lần đang restart. Không đo health/restart song song.
+WATCHDOG_LOCK="${API_WATCHDOG_LOCK:-/var/lock/188-watchdog-api.lock}"
+mkdir -p "$(dirname "${WATCHDOG_LOCK}")" 2>/dev/null || true
+exec 9>"${WATCHDOG_LOCK}"
+if ! flock -n 9; then
+  echo "${LOG_PREFIX} skip — lần watchdog trước chưa xong"
+  exit 0
 fi
 
 capture_incident() {
@@ -126,6 +136,49 @@ api_port_listening() {
   ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq '(^|[.:])'"${API_PORT}"'$'
 }
 
+# status và số giây process PM2 đã sống. "missing -1" khi không đọc được.
+api_pm2_status_age() {
+  pm2 jlist 2>/dev/null | python3 -c '
+import json, sys, time
+name = sys.argv[1]
+try:
+    apps = json.load(sys.stdin)
+except Exception:
+    print("unavailable -1")
+    raise SystemExit
+for app in apps:
+    if app.get("name") != name:
+        continue
+    env = app.get("pm2_env") or {}
+    status = env.get("status") or "unknown"
+    raw = env.get("pm_uptime") or 0
+    try:
+        raw = int(raw)
+    except Exception:
+        raw = 0
+    age = max(0, int(time.time() * 1000) - raw) // 1000 if raw else -1
+    print(f"{status} {age}")
+    raise SystemExit
+print("missing -1")
+' "${PM2_API}" 2>/dev/null || echo "unavailable -1"
+}
+
+# API vừa được start/restart: cổng có thể chưa listen. Restart thêm lúc này làm rớt request lần hai.
+api_in_startup_grace() {
+  local info status age
+  info="$(api_pm2_status_age)"
+  status="${info%% *}"
+  age="${info##* }"
+  case "${status}" in
+    online|launching|stopping)
+      if [[ "${age}" =~ ^[0-9]+$ ]] && [[ "${age}" -lt "${API_STARTUP_GRACE_SECONDS}" ]]; then
+        return 0
+      fi
+      ;;
+  esac
+  return 1
+}
+
 # Pool đầy làm /health quá 5s. Restart cả API gây connection refused cho khách.
 # Cắt session idle-in-transaction rồi thử lại; chỉ restart khi process không còn nghe cổng
 # hoặc health vẫn fail sau khi đã giải phóng.
@@ -152,6 +205,10 @@ relieve_pool_before_restart() {
 
 recover_api() {
   local reason="$1"
+  if api_in_startup_grace; then
+    echo "${LOG_PREFIX} skip recover (${reason}) — ${PM2_API} mới lên chưa đủ ${API_STARTUP_GRACE_SECONDS}s, không restart lần hai"
+    return 0
+  fi
   local incident_dir
   incident_dir="$(capture_incident "${reason}")"
   local disable_imgloc=0
@@ -182,9 +239,13 @@ recover_api() {
     sleep 1
   done
   if [[ "${health}" != "200" ]]; then
-    echo "${LOG_PREFIX} soft restart chưa OK (health=${health}) — thử terminate idle DB + restart lại"
-    health_terminate_idle_db_transactions
-    soft_start_api "${disable_imgloc}"
+    if api_in_startup_grace; then
+      echo "${LOG_PREFIX} soft restart chưa OK (health=${health}) nhưng process còn trong ${API_STARTUP_GRACE_SECONDS}s đầu — không restart lần hai"
+    else
+      echo "${LOG_PREFIX} soft restart chưa OK (health=${health}) — thử terminate idle DB + restart lại"
+      health_terminate_idle_db_transactions
+      soft_start_api "${disable_imgloc}"
+    fi
   fi
 }
 

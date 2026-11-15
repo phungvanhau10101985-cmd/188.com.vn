@@ -261,6 +261,9 @@ def pandamall_gather_admin_batch_scan(db: Any, *, seed_url: str) -> Dict[str, An
     oid = resolve_numeric_1688_offer_id_from_source_url(canonical_url)
     slug = f"abb-{oid}" if oid else (cssbuy_item_page_to_item_slug(canonical_url) or "")
     matched = list(_find_products_for_item_slug(db, slug)) if slug else []
+    from app.db.session import release_db_connection_for_slow_work
+
+    release_db_connection_for_slow_work(db)
     st, err, _via = evaluate_pandamall_source_stock(canonical_url)
     if st == "in_stock":
         return {

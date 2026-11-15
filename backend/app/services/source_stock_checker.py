@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -44,6 +45,10 @@ _worker_lock = threading.Lock()
 SOURCE_STOCK_WORKER_STATE_ROW_ID = 1
 # checking/queued lâu hơn khoảng này = worker chết giữa chừng, đưa lại hàng chờ.
 SOURCE_STOCK_IN_PROGRESS_STALE_MINUTES = 30
+_HEARTBEAT_FILE = os.environ.get(
+    "SOURCE_STOCK_WORKER_HEARTBEAT_FILE",
+    "/tmp/188-stock-worker.heartbeat",
+)
 _worker_pause_cached_at_mono: float = -1000.0
 _worker_pause_cached: bool = False
 _worker_pause_updated_at: Optional[datetime] = None
@@ -51,6 +56,27 @@ _worker_pause_lock = threading.Lock()
 _WORKER_PAUSE_CACHE_SECONDS = 2.5
 _last_stale_reclaim_mono: float = -1000.0
 _STALE_RECLAIM_INTERVAL_SECONDS = 60.0
+
+
+def touch_source_stock_worker_heartbeat() -> None:
+    """Báo process 188-stock-worker còn sống. API đọc file này, không đọc thread của chính nó."""
+    path = _HEARTBEAT_FILE
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "a", encoding="utf-8"):
+            pass
+        os.utime(path, None)
+    except Exception:
+        logger.debug("source stock heartbeat failed", exc_info=True)
+
+
+def source_stock_worker_heartbeat_age_seconds() -> Optional[float]:
+    try:
+        return max(0.0, time.time() - os.path.getmtime(_HEARTBEAT_FILE))
+    except OSError:
+        return None
 
 
 def invalidate_source_stock_worker_pause_cache() -> None:
@@ -258,6 +284,7 @@ def _worker_progress_mark_finished(
 def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False) -> Dict[str, Any]:
     paused, pause_updated = worker_pause_db_snapshot(force_refresh=force_refresh_pause)
     env_on = bool(getattr(settings, "SOURCE_STOCK_CHECK_ENABLED", True))
+    runs_in_this_process = bool(getattr(settings, "SOURCE_STOCK_CHECK_RUN_DAEMON", True))
     depth = get_source_stock_worker_memory_queue_depth()
     thread_alive = bool(_worker_thread_ref and _worker_thread_ref.is_alive())
     daemon_flag = bool(_worker_started)
@@ -270,6 +297,21 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
     elif paused:
         idle = "paused_via_db"
         reason_vi = "Tạm dừng qua DB — mọi process backend có quyền DB đều không scrape trong vòng lặp."
+    elif not runs_in_this_process:
+        # Playwright nằm ở PM2 188-stock-worker. Nhịp file được ghi mỗi vòng lặp.
+        age = source_stock_worker_heartbeat_age_seconds()
+        fresh_sec = max(180, int(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS) * 3)
+        thread_alive = age is not None and age <= fresh_sec
+        daemon_flag = thread_alive
+        if thread_alive:
+            idle = None
+            reason_vi = ""
+        else:
+            idle = "external_worker_down"
+            reason_vi = (
+                "Không thấy nhịp 188-stock-worker. "
+                "Kiểm tra: pm2 describe 188-stock-worker"
+            )
     elif not daemon_flag:
         idle = "daemon_not_started"
         reason_vi = "Daemon chưa bật trong process báo snapshot này."
@@ -278,6 +320,12 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
         reason_vi = "Luồng worker không còn sống trong process này — nên khởi động lại tiến trình backend."
     else:
         idle = None
+
+    if not runs_in_this_process and env_on:
+        age = source_stock_worker_heartbeat_age_seconds()
+        fresh_sec = max(180, int(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS) * 3)
+        thread_alive = age is not None and age <= fresh_sec
+        daemon_flag = thread_alive
 
     pu_iso = _utc_iso(pause_updated)
 
@@ -426,6 +474,8 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
 
     return {
         "env_source_stock_check_enabled": env_on,
+        "worker_runs_in_api": runs_in_this_process,
+        "worker_process_name": "188-api" if runs_in_this_process else "188-stock-worker",
         "db_paused": paused,
         "db_pause_updated_at_utc_iso": pu_iso,
         "daemon_thread_started_flag": daemon_flag,
@@ -435,9 +485,14 @@ def get_source_stock_worker_admin_snapshot(*, force_refresh_pause: bool = False)
         "effective_idle_reason": idle,
         "effective_idle_hint_vi": reason_vi or None,
         "deployment_notes_vi": (
-            "Mỗi worker OS (tiến trình Python/Uvicorn) có thread daemon và hàng chờ RAM riêng; "
-            "cờ pause lưu DB áp đồng thời cho mọi process. Trên VPS: một process → một luồng "
-            "`source-stock-checker`; kiểm tra bằng log «source stock» hoặc `ps`/`pm2 list`."
+            "Trên VPS, Chromium chạy trong PM2 188-stock-worker (pool DB 2+1). "
+            "188-api chỉ ghi hàng chờ vào DB và không mở browser. "
+            "Máy dev: SOURCE_STOCK_CHECK_RUN_DAEMON=true thì daemon nằm trong process API."
+            if not runs_in_this_process
+            else (
+                "Daemon source-stock-checker đang nằm trong process API này. "
+                "Trên VPS hãy tắt SOURCE_STOCK_CHECK_RUN_DAEMON ở 188-api và chạy 188-stock-worker."
+            )
         ),
         "checking": checking,
         "last_completed": last_completed,
@@ -898,7 +953,16 @@ def _claim_due_product_id() -> Optional[int]:
     db = SessionLocal()
     try:
         now = _utcnow()
-        product = _eligible_due_products_query(db).first()
+        product = (
+            _eligible_due_products_query(db)
+            .filter(
+                or_(
+                    Product.source_stock_status.is_(None),
+                    Product.source_stock_status != "checking",
+                )
+            )
+            .first()
+        )
         if not product or not _link_eligible_for_source_stock_check(product.link_default or ""):
             return None
         product.source_stock_status = "queued"
@@ -1089,6 +1153,7 @@ def _worker_loop() -> None:
     )
     idle_sleep = max(1, min(15, int(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS)))
     while True:
+        touch_source_stock_worker_heartbeat()
         try:
             paused, _ = worker_pause_db_snapshot(force_refresh=False)
         except Exception:
@@ -1105,8 +1170,25 @@ def _worker_loop() -> None:
         time.sleep(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS)
 
 
+def run_source_stock_worker_forever() -> None:
+    """Process riêng (PM2 188-stock-worker). Không gọi từ uvicorn."""
+    try:
+        os.nice(10)
+    except (AttributeError, OSError):
+        pass
+    logger.info("source stock worker process starting (nice, pool riêng, không nằm trong API)")
+    touch_source_stock_worker_heartbeat()
+    _worker_loop()
+
+
 def start_source_stock_checker_daemon_if_enabled() -> None:
     if not getattr(settings, "SOURCE_STOCK_CHECK_ENABLED", True):
+        return
+    if not getattr(settings, "SOURCE_STOCK_CHECK_RUN_DAEMON", True):
+        logger.info(
+            "source stock daemon không chạy trong process này "
+            "(SOURCE_STOCK_CHECK_RUN_DAEMON=false — dùng 188-stock-worker)"
+        )
         return
     global _worker_started, _worker_thread_ref
     with _worker_lock:

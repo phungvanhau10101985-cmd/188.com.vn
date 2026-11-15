@@ -58,6 +58,9 @@ module.exports = {
         EMS_TRACKING_INTERNAL_SCHEDULER_ENABLED: 'false',
         LEGACY_OOS_DEEPSEEK_ENABLED: 'false',
         GROUP_LISTING_SKIP_SLOW_SLUG_POOL: 'true',
+        // Chromium tồn kho nguồn chạy ở 188-stock-worker, không trong process này.
+        SOURCE_STOCK_CHECK_ENABLED: 'true',
+        SOURCE_STOCK_CHECK_RUN_DAEMON: 'false',
         // Tắt warm nền phối đồ (NanoAI/ảnh). Khối /pdp-outfit vẫn đọc picks đã lưu.
         OUTFIT_VISUAL_WARM: '0',
       },
@@ -87,6 +90,30 @@ module.exports = {
       min_uptime: '10s',
       restart_delay: 3000,
       max_memory_restart: '1536M',
+    },
+    {
+      name: '188-stock-worker',
+      cwd: BACKEND,
+      script: path.join(BACKEND, '.venv/bin/python'),
+      args: 'scripts/source_stock_worker.py',
+      env: {
+        SOURCE_STOCK_CHECK_ENABLED: 'true',
+        SOURCE_STOCK_CHECK_RUN_DAEMON: 'true',
+        // Pool nhỏ: scrape xong mới giữ connection. Không ăn pool 35 của API.
+        DATABASE_POOL_SIZE: '2',
+        DATABASE_MAX_OVERFLOW: '1',
+        DATABASE_POOL_TIMEOUT: '8',
+        DATABASE_POOL_RECYCLE: '1800',
+        RUN_DB_INIT_ON_STARTUP: '0',
+        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
+        LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: 'false',
+      },
+      autorestart: true,
+      max_restarts: 30,
+      min_uptime: '15s',
+      exp_backoff_restart_delay: 2000,
+      kill_timeout: 20000,
+      max_memory_restart: '1200M',
     },
   ],
 };
