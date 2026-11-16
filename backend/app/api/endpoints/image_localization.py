@@ -24,6 +24,7 @@ from app.services.image_localization_job_abort import (
     unregister_running_service,
 )
 from app.services.image_localization_job_runtime import (
+    image_localization_embedded_in_api,
     payload_from_stored,
     start_job_process,
     start_resume_daemon,
@@ -1230,14 +1231,25 @@ def start_job(
     with _jobs_lock:
         _jobs[job_id] = {**initial, "job_id": job_id}
     _create_db_job_row(job_id, payload, extra=initial)
-    start_job_process(job_id, payload.model_dump(), resume=False)
+    if image_localization_embedded_in_api():
+        start_job_process(job_id, payload.model_dump(), resume=False)
+    else:
+        logger.info(
+            "IMAGE_LOCALIZATION_JOB queued job_id=%s for 188-imgloc-worker",
+            job_id,
+        )
     return {"job_id": job_id, "status": "queued"}
 
 
 def start_image_localization_job_resume_daemon_if_enabled() -> None:
-    """Quét job queued/running trong DB và chạy tiếp sau restart backend."""
+    """Quét job queued/running trong DB và chạy tiếp sau restart backend.
+
+    Production tắt embedded: process 188-imgloc-worker nhận job, uvicorn không spawn OCR.
+    """
     from app.core.config import settings
 
+    if not image_localization_embedded_in_api():
+        return
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
         return
     start_resume_daemon(_run_job, StartImageLocalizationPayload)

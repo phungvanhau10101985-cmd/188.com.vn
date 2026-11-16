@@ -14,8 +14,9 @@ PM2_API="${PM2_API_NAME:-188-api}"
 
 echo "==> free-api-now: dừng OCR/job ảnh + khởi động lại API sạch"
 
-echo "1/6 Dừng PM2 API…"
+echo "1/6 Dừng PM2 API và worker OCR…"
 pm2 stop "${PM2_API}" 2>/dev/null || true
+pm2 stop 188-imgloc-worker 2>/dev/null || true
 sleep 3
 
 echo "2/6 Giết worker OCR còn sót…"
@@ -57,11 +58,12 @@ else
   echo "    (bỏ qua psql — không có postgres/sudo)"
 fi
 
-echo "5/6 Khởi động lại API từ ecosystem (resume job ảnh = false)…"
+echo "5/6 Khởi động lại API và worker OCR từ ecosystem…"
 pm2 delete "${PM2_API}" 2>/dev/null || true
 cd "${ROOT}"
-IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP=false RUN_DB_INIT_ON_STARTUP=0 \
-  pm2 start deploy/ecosystem.config.cjs --only "${PM2_API}"
+pm2 start deploy/ecosystem.config.cjs --only "${PM2_API}"
+pm2 start deploy/ecosystem.config.cjs --only 188-imgloc-worker 2>/dev/null \
+  || pm2 restart 188-imgloc-worker --update-env 2>/dev/null || true
 pm2 save 2>/dev/null || true
 
 echo "6/6 Kiểm tra nhanh (tối đa 45s)…"

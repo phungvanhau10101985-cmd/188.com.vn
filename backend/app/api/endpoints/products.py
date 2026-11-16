@@ -269,6 +269,46 @@ def _should_skip_total_storefront_list(
     return True
 
 
+def _serialize_storefront_card_products(
+    db: Session,
+    raw_products: List,
+    user: Optional[User],
+    *,
+    include_warehouse_clearance: bool,
+) -> List:
+    """Payload thẻ danh mục. Không đọc description/gallery vì query đã load_only."""
+    from app.services import sale_calendar as sale_calendar_svc
+    from app.services.product_image_visibility import apply_library_cover_to_payload
+    from app.services.storefront_card_listing import build_storefront_card_payload
+
+    sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
+    paired: List = []
+    for product in raw_products:
+        try:
+            payload = build_storefront_card_payload(product)
+            apply_library_cover_to_payload(payload)
+            if not getattr(product, "is_warehouse_clearance", False):
+                sale_calendar_svc.enrich_product_payload_with_site_sale(payload, sale_state)
+            paired.append((product, payload))
+        except Exception:
+            logger.exception(
+                "card listing serialize failed id=%s",
+                getattr(product, "id", None),
+            )
+    dict_rows = [(obj, payload) for obj, payload in paired if obj is not None and isinstance(payload, dict)]
+    if dict_rows:
+        enrich_product_payloads_with_category_size_guide(
+            db,
+            [row[0] for row in dict_rows],
+            [row[1] for row in dict_rows],
+        )
+        if include_warehouse_clearance:
+            from app.services.warehouse_clearance import enrich_listing_product_payloads
+
+            enrich_listing_product_payloads(db, dict_rows)
+    return [payload for _obj, payload in paired]
+
+
 def _serialize_products_for_api(
     db: Session,
     raw_products: List,
@@ -277,7 +317,15 @@ def _serialize_products_for_api(
     include_warehouse_clearance: bool = False,
     admin_list: bool = False,
     include_image_consult_context: bool = False,
+    card_listing: bool = False,
 ) -> List:
+    if card_listing and not admin_list:
+        return _serialize_storefront_card_products(
+            db,
+            raw_products,
+            user,
+            include_warehouse_clearance=include_warehouse_clearance,
+        )
     paired: List = []
     if admin_list:
         for product in raw_products:
@@ -681,6 +729,17 @@ def _read_products_list_impl(
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
+    from app.services.storefront_card_listing import is_storefront_category_card_request
+
+    card_listing = is_storefront_category_card_request(
+        admin_list=admin_list,
+        q=raw_q,
+        product_id=pid,
+        warehouse_clearance_only=warehouse_clearance_only,
+        category=category,
+        subcategory=subcategory,
+        sub_subcategory=sub_subcategory,
+    )
     search_cache_active = (
         use_search_cache
         and raw_q
@@ -840,6 +899,7 @@ def _read_products_list_impl(
         include_warehouse_products=admin_list,
         warehouse_clearance_only=warehouse_clearance_only,
         admin_list_query=admin_list,
+        card_listing=card_listing,
     )
 
     if listing_filter_cache_key:
@@ -854,7 +914,7 @@ def _read_products_list_impl(
                 own_db.close()
 
         slim = get_or_fetch_listing_raw(listing_filter_cache_key, _fetch_listing_for_cache)
-        result = hydrate_listing_result_from_cache(db, slim)
+        result = hydrate_listing_result_from_cache(db, slim, card_listing=card_listing)
     else:
         result = crud.product.get_products(db, **_list_query_kwargs)
 
@@ -865,7 +925,8 @@ def _read_products_list_impl(
             user=user,
             include_warehouse_clearance=include_warehouse_clearance,
             admin_list=admin_list,
-            include_image_consult_context=not admin_list,
+            include_image_consult_context=not admin_list and not card_listing,
+            card_listing=card_listing,
         )
 
     if (

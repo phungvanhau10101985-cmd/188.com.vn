@@ -9,8 +9,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND="${ROOT}/backend"
 VENV="${BACKEND}/.venv"
 
-echo "==> Dừng API (bắt buộc — worker ghi đè DB nếu API còn chạy)"
+echo "==> Dừng API và worker OCR (worker ghi đè DB nếu còn chạy)"
 pm2 stop 188-api 2>/dev/null || true
+pm2 stop 188-imgloc-worker 2>/dev/null || true
 sleep 4
 
 # Giết worker/subprocess còn sót (orphan sau pm2 stop)
@@ -78,10 +79,10 @@ else
 fi
 deactivate
 
-echo "==> Khởi động lại API (tắt resume 1 lần để tránh chạy lại job cũ)"
+echo "==> Khởi động lại API và worker OCR (job đã hủy trong DB, worker không chạy lại job cũ)"
 cd "${ROOT}"
-IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP=false pm2 start 188-api --update-env 2>/dev/null \
-  || IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP=false pm2 restart 188-api --update-env
+pm2 start 188-api --update-env 2>/dev/null || pm2 restart 188-api --update-env
+pm2 start 188-imgloc-worker --update-env 2>/dev/null || pm2 restart 188-imgloc-worker --update-env 2>/dev/null || true
 pm2 save || true
 
 echo ""

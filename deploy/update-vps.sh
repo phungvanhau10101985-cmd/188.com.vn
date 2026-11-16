@@ -572,7 +572,8 @@ if [[ "${DEPLOY_RESTART_PM2:-1}" != "1" ]]; then
 fi
 
 echo ""
-echo "==> API env: bật resume job bản địa hóa ảnh sau restart PM2"
+echo "==> PM2 worker bản địa hóa ảnh (tách khỏi 188-api)"
+echo "==> API env: uvicorn không resume job ảnh — 188-imgloc-worker nhận job queued"
 bash "${PROJECT_ROOT}/deploy/ensure-api-safe-env.sh" 2>/dev/null || \
   echo "⚠️  ensure-api-safe-env có bước lỗi — tiếp tục deploy"
 
@@ -591,6 +592,12 @@ if ! pm2 describe "${PM2_STOCK}" &>/dev/null; then
   pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_STOCK}" 2>/dev/null || true
 fi
 
+PM2_IMGLOC="${PM2_IMGLOC_WORKER_NAME:-188-imgloc-worker}"
+if ! pm2 describe "${PM2_IMGLOC}" &>/dev/null; then
+  echo "    Tạo ${PM2_IMGLOC} từ ecosystem (OCR bản địa hóa ảnh, tách khỏi API)"
+  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_IMGLOC}" 2>/dev/null || true
+fi
+
 if pm2_web_needs_recreate || ! pm2 describe "${PM2_WEB}" &>/dev/null; then
   pm2_recreate_web_from_ecosystem
 fi
@@ -599,10 +606,11 @@ if [[ "${DEPLOY_RESTART_ALL_PM2:-1}" == "1" ]]; then
   echo "    → pm2 restart all --update-env"
   pm2 restart all --update-env 2>/dev/null || true
 else
-  echo "    → DEPLOY_RESTART_ALL_PM2=0 — chỉ restart ${PM2_API} / ${PM2_WEB} / ${PM2_STOCK:-188-stock-worker}"
+  echo "    → DEPLOY_RESTART_ALL_PM2=0 — chỉ restart ${PM2_API} / ${PM2_WEB} / ${PM2_STOCK:-188-stock-worker} / ${PM2_IMGLOC:-188-imgloc-worker}"
   pm2 restart "${PM2_API}" --update-env 2>/dev/null || true
   pm2 restart "${PM2_WEB}" --update-env 2>/dev/null || true
   pm2 restart "${PM2_STOCK:-188-stock-worker}" --update-env 2>/dev/null || true
+  pm2 restart "${PM2_IMGLOC:-188-imgloc-worker}" --update-env 2>/dev/null || true
 fi
 
 pm2 save || true

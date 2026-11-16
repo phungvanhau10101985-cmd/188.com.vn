@@ -82,7 +82,7 @@ echo "    GET /api/v1/sale-calendar/current    → ${sale_code}"
 echo "    GET / (homepage SSR smoke)           → ${homepage_code}"
 echo ""
 echo "    pm2:"
-pm2 list 2>/dev/null | grep -E '188-api|188-web|name' || pm2 list 2>/dev/null || true
+pm2 list 2>/dev/null | grep -E '188-api|188-web|188-stock-worker|188-imgloc-worker|name' || pm2 list 2>/dev/null || true
 echo ""
 echo "    listen:"
 ss -tlnp 2>/dev/null | grep -E ":(${API_PORT}|${WEB_PORT})\\b" || echo "    (chưa thấy cổng ${API_PORT}/${WEB_PORT})"

@@ -660,7 +660,11 @@ async def startup_event():
         start_periodic_image_localization_temp_cleanup_daemon_if_enabled()
         from app.core.config import settings as _ilr
 
-        if getattr(_ilr, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
+        if not getattr(_ilr, "IMAGE_LOCALIZATION_EMBEDDED_IN_API", False):
+            print(
+                "   🖼️  Job bản địa hóa ảnh chạy ở process 188-imgloc-worker, không trong uvicorn."
+            )
+        elif getattr(_ilr, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
             print(
                 "   🖼️  IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: "
                 "sẽ tiếp tục job queued/running trong DB sau ~2.5s."

@@ -24,7 +24,8 @@ module.exports = {
       env: {
         SERVER_PORT: '8001',
         RUN_DB_INIT_ON_STARTUP: '0',
-        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'true',
+        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
+        IMAGE_LOCALIZATION_EMBEDDED_IN_API: 'false',
         // Chặn vòng OOM: worker ảnh ≤3.2GB AS; không resume khi MemAvailable < 2.8GB.
         IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: '3200',
         IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: '2800',
@@ -59,6 +60,7 @@ module.exports = {
         LEGACY_OOS_DEEPSEEK_ENABLED: 'false',
         GROUP_LISTING_SKIP_SLOW_SLUG_POOL: 'true',
         // Chromium tồn kho nguồn chạy ở 188-stock-worker, không trong process này.
+        // OCR bản địa hóa ảnh chạy ở 188-imgloc-worker, không trong process này.
         SOURCE_STOCK_CHECK_ENABLED: 'true',
         SOURCE_STOCK_CHECK_RUN_DAEMON: 'false',
         // Tắt warm nền phối đồ (NanoAI/ảnh). Khối /pdp-outfit vẫn đọc picks đã lưu.
@@ -114,6 +116,31 @@ module.exports = {
       exp_backoff_restart_delay: 2000,
       kill_timeout: 20000,
       max_memory_restart: '1200M',
+    },
+    {
+      name: '188-imgloc-worker',
+      cwd: BACKEND,
+      script: path.join(BACKEND, '.venv/bin/python'),
+      args: 'scripts/image_localization_worker.py',
+      env: {
+        // Script cũng ép resume=true. Pool nhỏ: job OCR không được chiếm pool 35 của API.
+        IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'true',
+        IMAGE_LOCALIZATION_EMBEDDED_IN_API: 'false',
+        DATABASE_POOL_SIZE: '2',
+        DATABASE_MAX_OVERFLOW: '2',
+        DATABASE_POOL_TIMEOUT: '8',
+        DATABASE_POOL_RECYCLE: '1800',
+        RUN_DB_INIT_ON_STARTUP: '0',
+        LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: 'false',
+        SOURCE_STOCK_CHECK_RUN_DAEMON: 'false',
+        OUTFIT_VISUAL_WARM: '0',
+      },
+      autorestart: true,
+      max_restarts: 30,
+      min_uptime: '15s',
+      exp_backoff_restart_delay: 2000,
+      kill_timeout: 20000,
+      max_memory_restart: '800M',
     },
   ],
 };

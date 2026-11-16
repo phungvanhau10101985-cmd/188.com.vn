@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Đặt biến .env an toàn cho storefront + cho phép job bản địa hóa ảnh tiếp tục sau deploy/restart.
-# Tắt resume một lần (vd. sau cancel job): DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1
+# API không nhận job ảnh. Process 188-imgloc-worker (ecosystem) mới resume OCR.
+# Tắt resume một lần trên worker khi deploy hủy job: DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1
+# không áp vào file này nữa — worker tự bật resume. Cờ này vẫn ghi false để uvicorn không spawn OCR.
 set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -24,19 +25,11 @@ upsert() {
   fi
 }
 
-IL_RESUME="${DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME:-0}"
-if [[ "${IL_RESUME}" == "1" ]]; then
-  upsert IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP false "${ENV_FILE}"
-else
-  upsert IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP true "${ENV_FILE}"
-fi
+upsert IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP false "${ENV_FILE}"
+upsert IMAGE_LOCALIZATION_EMBEDDED_IN_API false "${ENV_FILE}"
 upsert LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP  true    "${ENV_FILE}"
 upsert RUN_DB_INIT_ON_STARTUP               0       "${ENV_FILE}"
 upsert LEGACY_OOS_DEEPSEEK_ENABLED           false   "${ENV_FILE}"
 upsert GROUP_LISTING_SKIP_SLOW_SLUG_POOL     true    "${ENV_FILE}"
 
-if [[ "${IL_RESUME}" == "1" ]]; then
-  echo "✓ API safe env: tắt resume job ảnh (DEPLOY_DISABLE_IMAGE_LOCALIZATION_RESUME=1); OOS redirect không gọi DeepSeek; listing queue auto-resume=on."
-else
-  echo "✓ API safe env: job ảnh + listing queue (Parse thẻ) sẽ resume sau restart; OOS redirect không gọi DeepSeek."
-fi
+echo "✓ API safe env: uvicorn không chạy OCR (188-imgloc-worker nhận job); listing queue auto-resume=on."

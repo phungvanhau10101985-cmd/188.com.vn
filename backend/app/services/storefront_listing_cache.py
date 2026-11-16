@@ -163,7 +163,7 @@ def slim_listing_result_for_cache(result: dict) -> dict:
     return slim
 
 
-def hydrate_listing_result_from_cache(db, slim: dict):
+def hydrate_listing_result_from_cache(db, slim: dict, *, card_listing: bool = False):
     """Nạp lại ORM Product theo thứ tự product_ids."""
     from app.models.product import Product
 
@@ -173,7 +173,12 @@ def hydrate_listing_result_from_cache(db, slim: dict):
         out.pop("product_ids", None)
         out["products"] = []
         return out
-    rows = db.query(Product).filter(Product.id.in_(ids)).all()
+    page_query = db.query(Product).filter(Product.id.in_(ids))
+    if card_listing:
+        from app.services.storefront_card_listing import card_listing_query_options
+
+        page_query = page_query.options(*card_listing_query_options())
+    rows = page_query.all()
     by_id = {int(r.id): r for r in rows}
     products = [by_id[i] for i in ids if i in by_id]
     out = {k: v for k, v in slim.items() if k != "product_ids"}

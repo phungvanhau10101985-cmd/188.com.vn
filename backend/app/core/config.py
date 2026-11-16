@@ -348,6 +348,10 @@ class Settings:
         self.IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: bool = os.getenv(
             "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", "true"
         ).strip().lower() in ("1", "true", "yes", "on")
+        # false = OCR không chạy trong uvicorn. Process 188-imgloc-worker nhận job queued.
+        self.IMAGE_LOCALIZATION_EMBEDDED_IN_API: bool = os.getenv(
+            "IMAGE_LOCALIZATION_EMBEDDED_IN_API", "false"
+        ).strip().lower() in ("1", "true", "yes", "on")
         # Chặn vòng OOM: không auto-resume khi RAM trống thấp / resume quá nhiều lần.
         self.IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: int = int(
             os.getenv("IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB", "2800") or "2800"

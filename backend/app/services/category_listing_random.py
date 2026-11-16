@@ -107,6 +107,7 @@ def paginate_seeded_random_category_listing(
     search_refresh: str,
     skip: int,
     limit: int,
+    card_listing: bool = False,
 ) -> Dict[str, Any]:
     ttl = category_listing_ids_cache_ttl_seconds()
 
@@ -125,7 +126,12 @@ def paginate_seeded_random_category_listing(
     if not page_ids:
         products: List[Product] = []
     else:
-        rows = db.query(Product).filter(Product.id.in_(page_ids)).all()
+        page_query = db.query(Product).filter(Product.id.in_(page_ids))
+        if card_listing:
+            from app.services.storefront_card_listing import card_listing_query_options
+
+            page_query = page_query.options(*card_listing_query_options())
+        rows = page_query.all()
         by_id = {int(r.id): r for r in rows}
         products = [by_id[i] for i in page_ids if i in by_id]
 

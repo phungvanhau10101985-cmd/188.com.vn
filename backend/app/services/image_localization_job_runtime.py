@@ -400,6 +400,11 @@ def _clear_stale_job_thread_mark(job_id: str) -> None:
         _job_threads_running.discard(job_id)
 
 
+def image_localization_embedded_in_api() -> bool:
+    """True = uvicorn tự spawn OCR. Production để false, process 188-imgloc-worker nhận job."""
+    return bool(getattr(settings, "IMAGE_LOCALIZATION_EMBEDDED_IN_API", False))
+
+
 def resume_pending_jobs(run_job, payload_cls: type) -> None:
     """Resume job queued/running trong DB nếu chưa có worker subprocess sống."""
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
@@ -564,3 +569,16 @@ def start_resume_daemon(run_job, payload_cls: type) -> None:
         name="image-localization-job-resume",
     )
     t.start()
+
+
+def run_image_localization_worker_forever() -> None:
+    """Vòng của process 188-imgloc-worker. API không gọi hàm này."""
+    from app.api.endpoints.image_localization import StartImageLocalizationPayload, _run_job
+
+    logger.info("image localization worker loop start")
+    while True:
+        try:
+            resume_pending_jobs(_run_job, StartImageLocalizationPayload)
+        except Exception:
+            logger.exception("image localization worker loop failed")
+        time.sleep(2)

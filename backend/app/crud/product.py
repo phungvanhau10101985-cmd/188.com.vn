@@ -4349,8 +4349,13 @@ def get_products(
     warehouse_clearance_only: bool = False,
     admin_list_query: bool = False,
     search_refresh: Optional[str] = None,
+    card_listing: bool = False,
 ):
     query = db.query(Product)
+    if card_listing and not admin_list_query:
+        from app.services.storefront_card_listing import card_listing_query_options
+
+        query = query.options(*card_listing_query_options())
     if admin_list_query:
         from sqlalchemy.orm import load_only, noload
 
@@ -4496,6 +4501,7 @@ def get_products(
             search_refresh=seed,
             skip=skip,
             limit=limit,
+            card_listing=card_listing,
         )
 
     total = 0
