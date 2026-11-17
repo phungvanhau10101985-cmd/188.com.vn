@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import and_, case, exists, func, not_, or_, select, update
+from sqlalchemy import and_, case, func, not_, or_, select, union, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -121,20 +121,18 @@ def _traffic_recent_check_cutoff() -> datetime:
 
 
 def recent_customer_view_exists(ProductModel: Any, viewed_since_utc: datetime) -> Any:
-    """Đúng khi trong ``viewed_since_utc … now`` có ít nhất một dòng PDP view (guest hoặc user)."""
-    uex = exists(
-        select(UserProductView.id).where(
-            UserProductView.product_id == ProductModel.id,
-            UserProductView.viewed_at >= viewed_since_utc,
-        )
+    """Đúng khi trong ``viewed_since_utc … now`` có ít nhất một dòng PDP view (guest hoặc user).
+
+    Một lần quét lượt xem trong cửa sổ (UNION theo ``viewed_at``), không ``EXISTS`` tương quan
+    theo từng ``products.id``. Tập sản phẩm khớp giữ nguyên.
+    """
+    user_ids = select(UserProductView.product_id).where(
+        UserProductView.viewed_at >= viewed_since_utc
     )
-    gex = exists(
-        select(GuestProductView.id).where(
-            GuestProductView.product_id == ProductModel.id,
-            GuestProductView.viewed_at >= viewed_since_utc,
-        )
+    guest_ids = select(GuestProductView.product_id).where(
+        GuestProductView.viewed_at >= viewed_since_utc
     )
-    return or_(uex, gex)
+    return ProductModel.id.in_(union(user_ids, guest_ids))
 
 
 def _batch_ttl_eligibility_expr(ProductModel: Any, *, view_window_since: datetime) -> Any:

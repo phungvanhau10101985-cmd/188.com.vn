@@ -71,7 +71,10 @@ class User(Base):
 
 class UserProductView(Base):
     __tablename__ = "user_product_views"
-    __table_args__ = (Index("ix_user_product_views_user_viewed", "user_id", "viewed_at"),)
+    __table_args__ = (
+        Index("ix_user_product_views_user_viewed", "user_id", "viewed_at"),
+        Index("ix_user_product_views_viewed_at_product_id", "viewed_at", "product_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

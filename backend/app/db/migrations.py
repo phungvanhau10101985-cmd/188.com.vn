@@ -970,6 +970,57 @@ class MigrationManager:
             logger.warning("migrate_same_shop_recommendation_indexes: %s", e)
             return True
 
+    def migrate_product_view_traffic_indexes(self) -> bool:
+        """Index (viewed_at, product_id) để quét «SP có lượt xem gần đây» bằng range scan, không seq scan."""
+        statements = (
+            (
+                "user_product_views",
+                "ix_user_product_views_viewed_at_product_id",
+                "CREATE INDEX {concurrently} IF NOT EXISTS "
+                "ix_user_product_views_viewed_at_product_id "
+                "ON user_product_views (viewed_at, product_id)",
+            ),
+            (
+                "guest_product_views",
+                "ix_guest_pv_viewed_at_product_id",
+                "CREATE INDEX {concurrently} IF NOT EXISTS "
+                "ix_guest_pv_viewed_at_product_id "
+                "ON guest_product_views (viewed_at, product_id)",
+            ),
+        )
+        try:
+            inspector = inspect(engine)
+            tables = set(inspector.get_table_names())
+            if IS_POSTGRESQL:
+                with engine.connect() as conn:
+                    conn = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    for table, index_name, sql in statements:
+                        if table not in tables:
+                            continue
+                        invalid = conn.execute(
+                            text(
+                                "SELECT 1 FROM pg_index i "
+                                "JOIN pg_class c ON c.oid = i.indexrelid "
+                                "WHERE c.relname = :name AND NOT i.indisvalid"
+                            ),
+                            {"name": index_name},
+                        ).scalar()
+                        if invalid:
+                            conn.execute(text(f"DROP INDEX CONCURRENTLY IF EXISTS {index_name}"))
+                        conn.execute(text(sql.format(concurrently="CONCURRENTLY")))
+            else:
+                with engine.connect() as conn:
+                    for table, _index_name, sql in statements:
+                        if table not in tables:
+                            continue
+                        conn.execute(text(sql.format(concurrently="")))
+                    conn.commit()
+            logger.info("✅ product view traffic indexes ensured")
+            return True
+        except Exception as e:
+            logger.warning("migrate_product_view_traffic_indexes: %s", e)
+            return True
+
     def migrate_product_search_cache_permanent(self) -> bool:
         """Cache JSON tìm kiếm vĩnh viễn: expires_at NULL + backfill norm_q từ JSON.
 
@@ -1844,6 +1895,7 @@ class MigrationManager:
         )
 
         results['same_shop_recommendation_indexes'] = self.migrate_same_shop_recommendation_indexes()
+        results['product_view_traffic_indexes'] = self.migrate_product_view_traffic_indexes()
         results['product_category_active_index'] = self.migrate_product_category_active_index()
         results['product_category_text_lower_index'] = self.migrate_product_category_text_lower_index()
         results['product_listing_default_index'] = self.migrate_product_listing_default_index()

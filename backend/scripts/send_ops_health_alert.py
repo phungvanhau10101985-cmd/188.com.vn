@@ -19,9 +19,8 @@ def main() -> int:
         detail=detail or title,
         heavy_hints=collect_heavy_process_hints(),
         action="Chạy block lệnh SSH trong email (free-api-now + health-check).",
-        force=True,
     )
-    print("ops alert queued:", kind)
+    print("ops alert sent:", kind)
     return 0
 
 

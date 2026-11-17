@@ -9,6 +9,7 @@ class GuestProductView(Base):
     __table_args__ = (
         UniqueConstraint("session_id", "product_id", name="uq_guest_pv_session_product"),
         Index("ix_guest_pv_session_viewed", "session_id", "viewed_at"),
+        Index("ix_guest_pv_viewed_at_product_id", "viewed_at", "product_id"),
     )
 
     id = Column(Integer, primary_key=True, index=True)

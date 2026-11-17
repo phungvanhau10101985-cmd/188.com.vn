@@ -13,6 +13,7 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Deque, Optional, Set
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -117,6 +118,9 @@ def _scan_and_enqueue_backlog(limit: int) -> int:
     view_since = _traffic_view_window_since()
     db = SessionLocal()
     try:
+        if getattr(settings, "IS_POSTGRESQL", False):
+            # Cắt scan này trước khi pool relief terminate connection (mốc active query ~45s).
+            db.execute(text("SET LOCAL statement_timeout = '12s'"))
         covered = product_ids_with_single_ladipage(db)
         rows = (
             db.query(Product.id)
@@ -137,6 +141,13 @@ def _scan_and_enqueue_backlog(limit: int) -> int:
         if enqueued:
             logger.info("ladipage on-view scan enqueued %s product(s)", enqueued)
         return enqueued
+    except Exception:
+        logger.exception("ladipage on-view scan failed")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return 0
     finally:
         db.close()
 
@@ -188,21 +199,25 @@ def _worker_loop() -> None:
     )
 
     while True:
-        if not ladipage_on_view_enabled():
-            time.sleep(idle_sleep)
-            continue
+        try:
+            if not ladipage_on_view_enabled():
+                time.sleep(idle_sleep)
+                continue
 
-        product_id = _pop_queued_product_id()
-        if product_id is None:
-            _scan_and_enqueue_backlog(scan_batch)
             product_id = _pop_queued_product_id()
-        if product_id is None:
-            time.sleep(idle_sleep)
-            continue
+            if product_id is None:
+                _scan_and_enqueue_backlog(scan_batch)
+                product_id = _pop_queued_product_id()
+            if product_id is None:
+                time.sleep(idle_sleep)
+                continue
 
-        _process_one_product(product_id)
-        if job_sleep > 0:
-            time.sleep(job_sleep)
+            _process_one_product(product_id)
+            if job_sleep > 0:
+                time.sleep(job_sleep)
+        except Exception:
+            logger.exception("ladipage on-view worker iteration failed")
+            time.sleep(idle_sleep)
 
 
 def start_ladipage_on_view_worker_if_enabled() -> None:
