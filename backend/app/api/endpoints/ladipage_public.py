@@ -87,13 +87,13 @@ def list_published_ladipages_for_sitemap(db: Session = Depends(get_db)):
         .order_by(Ladipage.published_at.desc(), Ladipage.updated_at.desc())
         .all()
     )
-    return LadipageSitemapResponse(
-        items=[
-            LadipageSitemapItem(slug=lp.slug, updated_at=lp.updated_at, published_at=lp.published_at)
-            for lp in rows
-            if not is_single_product_ladipage(lp)
-        ]
-    )
+    items = [
+        LadipageSitemapItem(slug=lp.slug, updated_at=lp.updated_at, published_at=lp.published_at)
+        for lp in rows
+        if not is_single_product_ladipage(lp)
+    ]
+    release_read_transaction(db)
+    return LadipageSitemapResponse(items=items)
 
 
 @router.get("/public/related", response_model=LadipageRelatedResponse)
@@ -141,7 +141,9 @@ def list_related_published_ladipages(
         limit=limit,
         exclude_ladipage_id=exclude_id,
     )
-    return LadipageRelatedResponse(items=[_related_item(lp) for lp in rows])
+    items = [_related_item(lp) for lp in rows]
+    release_read_transaction(db)
+    return LadipageRelatedResponse(items=items)
 
 
 @router.get("/public/by-product/{product_db_id}", response_model=LadipagePublicResponse)

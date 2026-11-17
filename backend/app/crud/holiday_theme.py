@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -40,6 +41,7 @@ class HolidayProgram:
 
 _RULES_TTL_SECONDS = 30.0
 _rules_cache: tuple[float, list] | None = None
+_rules_lock = threading.Lock()
 
 
 def invalidate_public_cache() -> None:
@@ -294,8 +296,22 @@ def ensure_occasion_rows(db: Session) -> None:
     db.commit()
 
 
-def merged_rules(db: Optional[Session]):
+def _load_merged_rules_from_db() -> list:
+    """Đọc cấu hình lễ bằng session riêng, đóng ngay. Không ghi dòng mới trên request khách."""
+    from app.db.session import SessionLocal
+    from app.models.holiday_occasion_setting import HolidayOccasionSetting
     from app.services.holiday_schedule import CATALOG, apply_override
+
+    read_db = SessionLocal()
+    try:
+        rows = {row.code: row for row in read_db.query(HolidayOccasionSetting).all()}
+        return [apply_override(rule, rows.get(code)) for code, rule in CATALOG.items()]
+    finally:
+        read_db.close()
+
+
+def merged_rules(db: Optional[Session]):
+    from app.services.holiday_schedule import CATALOG
 
     if db is None:
         return list(CATALOG.values())
@@ -303,20 +319,16 @@ def merged_rules(db: Optional[Session]):
     now = time.monotonic()
     if _rules_cache is not None and now - _rules_cache[0] < _RULES_TTL_SECONDS:
         return _rules_cache[1]
-    try:
-        ensure_occasion_rows(db)
-        from app.models.holiday_occasion_setting import HolidayOccasionSetting
-
-        rows = {row.code: row for row in db.query(HolidayOccasionSetting).all()}
-    except Exception:
+    with _rules_lock:
+        now = time.monotonic()
+        if _rules_cache is not None and now - _rules_cache[0] < _RULES_TTL_SECONDS:
+            return _rules_cache[1]
         try:
-            db.rollback()
+            rules = _load_merged_rules_from_db()
         except Exception:
-            pass
-        return list(CATALOG.values())
-    rules = [apply_override(rule, rows.get(code)) for code, rule in CATALOG.items()]
-    _rules_cache = (now, rules)
-    return rules
+            return list(CATALOG.values())
+        _rules_cache = (now, rules)
+        return rules
 
 
 def admin_theme_out(db: Session, today: Optional[date] = None):

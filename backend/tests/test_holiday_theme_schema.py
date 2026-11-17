@@ -247,6 +247,35 @@ def test_sale_continues_after_theme_window():
     assert sale.sale_end == date(2027, 2, 16)
 
 
+def test_merged_rules_customer_read_closes_its_own_session(monkeypatch):
+    import app.crud.holiday_theme as ht
+
+    ht._rules_cache = None
+    closed = {"n": 0}
+
+    class FakeQuery:
+        def all(self):
+            raise RuntimeError("db down")
+
+    class FakeSession:
+        def query(self, *args, **kwargs):
+            return FakeQuery()
+
+        def close(self):
+            closed["n"] += 1
+
+    monkeypatch.setattr("app.db.session.SessionLocal", lambda: FakeSession())
+    rules = ht.merged_rules(object())
+    assert closed["n"] == 1
+    assert len(rules) == len(CATALOG)
+
+    ht._rules_cache = (ht.time.monotonic(), rules)
+    again = ht.merged_rules(object())
+    assert again is rules
+    assert closed["n"] == 1
+    ht._rules_cache = None
+
+
 def test_banner_headlines_cover_catalog_without_dates():
     assert set(BANNER_HEADLINES) == set(CATALOG)
     for code, headline in BANNER_HEADLINES.items():

@@ -14,7 +14,7 @@ from app.core.security import (
     require_privileged_admin,
 )
 from app.crud import sale_calendar as crud_sale_calendar
-from app.db.session import get_db
+from app.db.session import get_db, release_read_transaction
 from app.models.admin import AdminUser
 from app.models.user import User
 from app.schemas.sale_calendar import (
@@ -117,7 +117,9 @@ def get_current_sale_calendar(
     current_user: User | None = Depends(get_current_user_optional),
 ):
     state = sale_calendar_svc.resolve_sale_calendar_state(db, user=current_user)
-    return SaleCalendarPublicResponse(**state.to_public_dict())
+    payload = state.to_public_dict()
+    release_read_transaction(db)
+    return SaleCalendarPublicResponse(**payload)
 
 
 @router.get("/admin/test-settings")

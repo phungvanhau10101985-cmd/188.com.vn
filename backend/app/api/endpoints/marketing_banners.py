@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_optional, require_module_permission
-from app.db.session import SessionLocal, get_db
+from app.db.session import SessionLocal, get_db, release_read_transaction
 from app.models.admin import AdminUser
 from app.models.marketing_banner import MarketingBannerAsset
 from app.models.user import User
@@ -161,6 +161,7 @@ def current_marketing_banners(
         warehouse_asset = banner_svc.ensure_banner_web_size(db, warehouse_asset)
         if warehouse_asset and warehouse_asset.image_url:
             items.append(_public_item(warehouse_asset))
+    release_read_transaction(db)
     return MarketingBannerCurrentResponse(items=items)
 
 

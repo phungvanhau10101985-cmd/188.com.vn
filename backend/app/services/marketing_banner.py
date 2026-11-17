@@ -490,8 +490,16 @@ def ensure_banner_web_size(
         return row
     if not _is_managed_banner_url(row.image_url):
         return row
+    image_url = row.image_url
+    kind = row.kind
+    key = row.campaign_key
+    version = int(row.version or 1)
+    row_id = row.id
+    from app.db.session import release_db_connection_for_slow_work
+
+    release_db_connection_for_slow_work(db)
     try:
-        response = requests.get(row.image_url, timeout=20)
+        response = requests.get(image_url, timeout=20)
         response.raise_for_status()
         raw = response.content
         if not raw or len(raw) > 12_000_000:
@@ -508,9 +516,9 @@ def ensure_banner_web_size(
             return row
         image_url = _upload_banner(
             fitted,
-            kind=row.kind,
-            key=row.campaign_key,
-            version=int(row.version or 1),
+            kind=kind,
+            key=key,
+            version=version,
         )
         row.image_url = image_url
         row.image_width = width
@@ -518,7 +526,7 @@ def ensure_banner_web_size(
         db.commit()
         logger.info(
             "Đã thu banner %s về %sx%s (%s byte)",
-            row.id,
+            row_id,
             width,
             height,
             len(fitted),
