@@ -32,6 +32,7 @@ import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/site-json-ld"
 import { getInitialSiteSaleCalendar } from "@/lib/site-sale-public";
 import { fetchPublicHolidayTheme } from "@/lib/holiday-theme";
 import { HolidayThemeProvider } from "@/lib/holiday-theme-context";
+import ProductTapFeedback from "@/components/ProductTapFeedback";
 
 /** Origin cho metadata (OG, icons). Luôn có scheme — `new URL("188.com.vn")` throw → SSR 500 / trắng trang nếu env prod thiếu https:// */
 function normalizeAbsoluteSiteUrl(raw: string): string {
@@ -229,6 +230,7 @@ export default async function RootLayout({
         ) : null}
         <SiteEmbedsRoot embeds={siteEmbeds} headClientRemainders={headClientRemainders} />
         <AppWebIconSync />
+        <ProductTapFeedback />
         <DeferredLayoutFloaters />
         <Suspense fallback={null}>
           <GoogleAutomatedDiscountCapture />

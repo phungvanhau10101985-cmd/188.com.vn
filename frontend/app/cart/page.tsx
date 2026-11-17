@@ -13,6 +13,7 @@ import LoadingLink from '@/components/ui/LoadingLink';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
 import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
+import { markProductTap } from '@/lib/product-tap-feedback';
 import { trackEvent } from '@/lib/analytics';
 import { trackMetaOrderAwaitingDeposit, trackMetaPurchase, trackMetaInitiateCheckout } from '@/lib/meta-pixel';
 import { getMetaAdsCheckoutFields, patchMetaAdvancedMatching } from '@/lib/meta-attribution';
@@ -1222,7 +1223,7 @@ export default function CartPage() {
                       siteLabel: siteSaleProgramLabel(lineItem.site_sale, siteSaleState),
                     }) || siteSaleProgramLabel(lineItem.site_sale, siteSaleState);
                 return (
-                  <div key={lineKey} className="px-3 md:px-5 py-3 md:py-4">
+                  <div key={lineKey} data-product-tap-host className="px-3 md:px-5 py-3 md:py-4">
                     <div className={`grid grid-cols-1 gap-3 items-center ${mdCartGridCols}`}>
                       <div className="flex gap-3 md:gap-4 items-center md:contents">
                         <div className="flex shrink-0 items-center justify-center md:flex md:justify-center md:items-center md:row-span-1">
@@ -1238,11 +1239,15 @@ export default function CartPage() {
                           <div
                             role="button"
                             tabIndex={0}
-                            onClick={() => handleOpenProduct(item)}
+                            onClick={(e) => {
+                              markProductTap(e.currentTarget);
+                              void handleOpenProduct(item);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
-                                handleOpenProduct(item);
+                                markProductTap(e.currentTarget);
+                                void handleOpenProduct(item);
                               }
                             }}
                             className="flex-shrink-0 w-16 h-16 md:w-20 md:h-20 bg-gray-100 rounded-xl overflow-hidden relative touch-manipulation cursor-pointer"
@@ -1253,7 +1258,10 @@ export default function CartPage() {
                           <div className="min-w-0 flex-1">
                             <button
                               type="button"
-                              onClick={() => handleOpenProduct(item)}
+                              onClick={(e) => {
+                                markProductTap(e.currentTarget);
+                                void handleOpenProduct(item);
+                              }}
                               className="text-left text-base md:text-lg font-semibold text-gray-900 line-clamp-2 hover:text-[#ea580c] transition-colors"
                             >
                               {item.product_data?.name ?? 'Sản phẩm'}

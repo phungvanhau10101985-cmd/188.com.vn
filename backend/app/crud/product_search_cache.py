@@ -3,8 +3,8 @@
 
 Mặc định cache vĩnh viễn (PRODUCT_SEARCH_CACHE_TTL_SECONDS=0). Khi SP liên quan bị thêm/xóa,
 ``refresh_caches_for_product_states`` chỉ hết hạn dòng khớp từ khóa (không nạp ``response_json``).
-Request tìm kiếm sau đó dựng lại đúng một dòng. Nạp cả bảng (~3GB) đã làm OOM API khi xóa
-hàng loạt sản phẩm hết hàng.
+Request tìm kiếm sau đó dựng lại đúng một dòng. Không nạp cả cột response_json (~3GB):
+làm mới và dọn dòng cũ đi từng khóa, và dòng dài hơn 120 SP được cắt về cửa sổ trang.
 """
 
 from __future__ import annotations
@@ -311,13 +311,87 @@ def paginate_cached_search_response(
     return out
 
 
+def clip_search_cache_window(data: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """Giữ tối đa 120 SP đầu — đúng cửa sổ list_cache_fetch_limit dùng để cắt trang.
+
+    Danh sách ngắn hơn giữ nguyên. ``total`` và các field khác không đổi.
+    """
+    products = data.get("products")
+    if not isinstance(products, list) or len(products) <= SEARCH_LIST_EAGER_FETCH_MAX:
+        return data, False
+    clipped = dict(data)
+    clipped["products"] = products[:SEARCH_LIST_EAGER_FETCH_MAX]
+    return clipped, True
+
+
+def _persist_clipped_search_cache(cache_key: str, data: Dict[str, Any]) -> None:
+    """Ghi lại dòng đã cắt bằng session riêng, không commit session của request."""
+    from app.db.session import SessionLocal
+
+    body = json.dumps(data, ensure_ascii=False, default=str)
+    own = SessionLocal()
+    try:
+        own.query(ProductSearchCache).filter(ProductSearchCache.cache_key == cache_key).update(
+            {ProductSearchCache.response_json: body},
+            synchronize_session=False,
+        )
+        own.commit()
+    except Exception:
+        own.rollback()
+        logger.warning(
+            "product_search_cache: cắt cửa sổ 120 SP thất bại key=%s",
+            cache_key,
+            exc_info=True,
+        )
+        return
+    finally:
+        own.close()
+    _write_listing_redis(cache_key, data)
+
+
+def _write_listing_redis(cache_key: str, data: Dict[str, Any]) -> None:
+    try:
+        from app.core import redis_cache
+        from app.core.config import settings
+
+        if redis_cache.is_enabled():
+            redis_cache.set_json(
+                redis_cache.listing_cache_key(cache_key),
+                data,
+                ttl_seconds=settings.REDIS_LISTING_CACHE_TTL_SECONDS,
+            )
+    except Exception:
+        logger.warning("product_search_cache: ghi redis listing lỗi key=%s", cache_key, exc_info=True)
+
+
+def _delete_listing_redis_keys(cache_keys: List[str]) -> None:
+    try:
+        from app.core import redis_cache
+
+        if not redis_cache.is_enabled():
+            return
+        step = 500
+        redis_keys = [redis_cache.listing_cache_key(key) for key in cache_keys if key]
+        for index in range(0, len(redis_keys), step):
+            redis_cache.delete(*redis_keys[index : index + step])
+    except Exception:
+        logger.warning("product_search_cache: xóa redis listing lỗi", exc_info=True)
+
+
+def _clip_cached_payload(cache_key: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    clipped, changed = clip_search_cache_window(data)
+    if changed:
+        _persist_clipped_search_cache(cache_key, clipped)
+    return clipped
+
+
 def get_cached_result(db: Session, cache_key: str) -> Optional[Dict[str, Any]]:
     from app.core import redis_cache
 
     if redis_cache.is_enabled():
         cached = redis_cache.get_json(redis_cache.listing_cache_key(cache_key))
         if isinstance(cached, dict):
-            return cached
+            return _clip_cached_payload(cache_key, cached)
 
     now = datetime.now(timezone.utc)
     row = (
@@ -328,19 +402,24 @@ def get_cached_result(db: Session, cache_key: str) -> Optional[Dict[str, Any]]:
     if not row:
         return None
     try:
-        data = json.loads(row.response_json)
+        raw_json = row.response_json or ""
+        data = json.loads(raw_json)
     except json.JSONDecodeError:
         return None
+    finally:
+        try:
+            db.expire(row)
+        except Exception:
+            pass
+    if not isinstance(data, dict):
+        return data
 
-    if redis_cache.is_enabled() and isinstance(data, dict):
-        from app.core.config import settings
-
-        redis_cache.set_json(
-            redis_cache.listing_cache_key(cache_key),
-            data,
-            ttl_seconds=settings.REDIS_LISTING_CACHE_TTL_SECONDS,
-        )
-    return data
+    clipped, changed = clip_search_cache_window(data)
+    if changed:
+        _persist_clipped_search_cache(cache_key, clipped)
+    else:
+        _write_listing_redis(cache_key, clipped)
+    return clipped
 
 
 def _prune_expired(db: Session) -> None:
@@ -631,27 +710,61 @@ def _normalize_keyword_list_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+_CACHE_KEY_BATCH = 200
+
+
+def legacy_paginated_cache_keys(rows: List[Tuple[str, Optional[str]]]) -> List[str]:
+    """Chọn cache_key cũ theo skip/limit. Chỉ cần cache_query_json, không đọc response_json."""
+    keys: List[str] = []
+    for cache_key, raw in rows:
+        raw_text = (raw or "").strip()
+        if not raw_text or not cache_key:
+            continue
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and is_legacy_paginated_cache_payload(payload):
+            keys.append(str(cache_key))
+    return keys
+
+
 def clear_legacy_paginated_cache_rows(db: Session) -> int:
-    """Xóa dòng cache cũ lưu theo skip/limit (từng trang khách xem)."""
+    """Xóa dòng cache cũ lưu theo skip/limit (từng trang khách xem).
+
+    Đọc từng lô cache_key + cache_query_json. Không nạp response_json.
+    """
     deleted = 0
-    try:
-        rows = db.query(ProductSearchCache).all()
-        for row in rows:
-            raw = (getattr(row, "cache_query_json", None) or "").strip()
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict) and is_legacy_paginated_cache_payload(payload):
-                db.delete(row)
-                deleted += 1
-        if deleted:
+    last_key = ""
+    while True:
+        batch = (
+            db.query(ProductSearchCache.cache_key, ProductSearchCache.cache_query_json)
+            .filter(ProductSearchCache.cache_key > last_key)
+            .order_by(ProductSearchCache.cache_key.asc())
+            .limit(_CACHE_KEY_BATCH)
+            .all()
+        )
+        if not batch:
+            break
+        new_last = str(batch[-1][0] or "")
+        if not new_last or new_last <= last_key:
+            break
+        last_key = new_last
+        drop_keys = legacy_paginated_cache_keys(
+            [(str(cache_key or ""), raw) for cache_key, raw in batch]
+        )
+        if not drop_keys:
+            continue
+        try:
+            db.query(ProductSearchCache).filter(ProductSearchCache.cache_key.in_(drop_keys)).delete(
+                synchronize_session=False
+            )
             db.commit()
-    except Exception:
-        db.rollback()
-        raise
+        except Exception:
+            db.rollback()
+            raise
+        deleted += len(drop_keys)
+        _delete_listing_redis_keys(drop_keys)
     return deleted
 
 
@@ -862,9 +975,43 @@ def refresh_caches_for_product_states(db: Session, *product_states: Any) -> int:
 
 
 def refresh_all_caches(db: Session) -> int:
-    """Bulk import — làm mới toàn bộ cache tìm kiếm đang lưu."""
-    rows = db.query(ProductSearchCache).all()
-    refreshed = _refresh_cache_rows_deduped(db, rows)
+    """Bulk import — làm mới toàn bộ cache tìm kiếm, từng dòng.
+
+    Danh sách khóa không gồm response_json. Mỗi vòng chỉ nạp một dòng rồi expunge,
+    tránh giữ ~3GB JSON trong process API.
+    """
+    keys = [
+        str(key)
+        for (key,) in db.query(ProductSearchCache.cache_key)
+        .order_by(ProductSearchCache.cache_key.asc())
+        .all()
+        if key
+    ]
+    refreshed = 0
+    done_keys: set[str] = set()
+    for key in keys:
+        row = db.query(ProductSearchCache).filter(ProductSearchCache.cache_key == key).first()
+        if row is None:
+            continue
+        try:
+            raw_payload = _query_payload_for_row(row)
+            if not raw_payload:
+                continue
+            canonical_key = keyword_cache_key_from_payload(raw_payload)
+            if canonical_key in done_keys:
+                if row.cache_key != canonical_key:
+                    _delete_cache_row(db, row)
+                continue
+            done_keys.add(canonical_key)
+            if _refresh_cache_row(db, row):
+                refreshed += 1
+        except Exception:
+            logger.exception("product_search_cache: refresh failed for key=%s", key)
+        finally:
+            try:
+                db.expunge(row)
+            except Exception:
+                pass
     if refreshed:
         logger.info("product_search_cache: refreshed all %s row(s)", refreshed)
     return refreshed

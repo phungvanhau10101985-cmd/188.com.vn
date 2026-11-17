@@ -403,7 +403,7 @@ def remember_flash_sale_block(
     key = _block_cache_key(user_id, guest_session_id, slot_key)
     if not key:
         return
-    ttl_cache.set(key, payload)
+    ttl_cache.set(key, payload, ttl_seconds=FLASH_SALE_BLOCK_CACHE_SECONDS)
 
 
 def get_flash_sale_assignment(

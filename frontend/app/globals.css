@@ -626,3 +626,88 @@ button[data-loading='true'],
     margin-right: 0;
   }
 }
+
+/* Bấm sản phẩm trên iOS/Android: viền ngay khi chạm, không chờ 300ms của click. */
+a[href*="/products/"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(234, 88, 12, 0.38);
+}
+
+[data-product-tap-pressed] {
+  box-shadow: inset 0 0 0 3px #ea580c !important;
+  transition: none !important;
+}
+
+.product-tap-ack {
+  position: fixed;
+  z-index: 90;
+  top: calc(env(safe-area-inset-top, 0px) + 4.25rem);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
+@media (max-width: 767px) {
+  .product-tap-ack {
+    top: calc(var(--mobile-app-header-height, 140px) + 8px);
+  }
+}
+
+.product-tap-ack-spin {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: product-tap-spin 0.7s linear infinite;
+}
+
+.product-tap-veil {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 3px #ea580c;
+  background: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+
+.product-tap-veil > span {
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.88);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 7px 10px;
+}
+
+@keyframes product-tap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .product-tap-ack-spin {
+    animation: none;
+    border-top-color: #fff;
+  }
+}
