@@ -30,6 +30,9 @@ DEFAULT_TTL_SECONDS = 0
 _CACHE_QUERY_PAYLOAD_VERSION = 18
 # Một dòng cache / từ khóa + filter — lưu danh sách SP; phân trang chỉ khi trả response.
 SEARCH_LIST_CACHE_MAX_PRODUCTS = 5000
+# Một request tìm kiếm không được nạp hàng nghìn dòng đầy cột vào RAM/GIL.
+# Trang sâu hơn mức này dùng LIMIT/OFFSET của chính trang đó.
+SEARCH_LIST_EAGER_FETCH_MAX = 120
 
 
 def _configured_ttl_seconds() -> Optional[int]:
@@ -265,9 +268,9 @@ def build_cache_key(
 
 
 def list_cache_fetch_limit(requested_skip: int, requested_limit: int) -> int:
-    """Số SP cần SELECT từ đầu để phục vụ trang (tránh OFFSET sâu trên DB)."""
+    """Số SP SELECT từ đầu cho một trang gần. Không kéo tới hàng nghìn dòng đầy cột."""
     need = max(0, int(requested_skip)) + max(1, int(requested_limit))
-    return min(SEARCH_LIST_CACHE_MAX_PRODUCTS, need)
+    return min(SEARCH_LIST_EAGER_FETCH_MAX, need)
 
 
 def cached_list_covers_page(cached: Dict[str, Any], skip: int, limit: int) -> bool:
@@ -561,7 +564,7 @@ def _payload_to_get_products_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
         skip = int(payload.get("sk") or 0)
     else:
         skip = 0
-        limit = SEARCH_LIST_CACHE_MAX_PRODUCTS
+        limit = SEARCH_LIST_EAGER_FETCH_MAX
     return {
         "skip": skip,
         "limit": limit,

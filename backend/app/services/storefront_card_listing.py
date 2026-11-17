@@ -64,12 +64,32 @@ def is_storefront_category_card_request(
     subcategory: Optional[str],
     sub_subcategory: Optional[str],
 ) -> bool:
-    """Chỉ lưới /danh-muc. Tìm kiếm, admin, kho-sale và trang chủ giữ payload đầy đủ."""
+    """Chỉ lưới /danh-muc. Tìm kiếm, admin và kho-sale giữ payload đầy đủ."""
     if admin_list or warehouse_clearance_only:
         return False
     if (q or "").strip() or (product_id or "").strip():
         return False
     return any(str(part or "").strip() for part in (category, subcategory, sub_subcategory))
+
+
+def is_storefront_grid_card_request(
+    *,
+    admin_list: bool,
+    q: Optional[str],
+    product_id: Optional[str],
+    warehouse_clearance_only: bool,
+) -> bool:
+    """Lưới public (trang chủ và danh mục).
+
+    Không gồm tìm kiếm, admin, tra một mã, kho-sale, hay ``/products/list/full``.
+    Những đường đó cần đủ cột. Lưới chỉ cần thẻ đang vẽ — SELECT đủ gallery/mô tả
+    trên một process uvicorn làm đứng cả site.
+    """
+    if admin_list or warehouse_clearance_only:
+        return False
+    if (q or "").strip() or (product_id or "").strip():
+        return False
+    return True
 
 
 def _image_urls(value: Any, limit: int = _CARD_IMAGE_LIMIT) -> list:

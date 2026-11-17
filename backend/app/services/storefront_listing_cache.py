@@ -111,25 +111,8 @@ def should_use_listing_filter_cache(
         return False
     if not skip_total or skip > 0 or limit > 120:
         return False
-    text_filters = (
-        category,
-        subcategory,
-        sub_subcategory,
-        shop_name,
-        shop_id,
-        style,
-        shop_name_chinese,
-        chinese_name,
-        pro_lower_price,
-        pro_high_price,
-        filter_size,
-        filter_color,
-        filter_style_tag,
-    )
-    if not any(x is not None and str(x).strip() for x in text_filters):
-        return False
-    if min_price is not None or max_price is not None:
-        return True
+    # Bộ lọc chữ/giá không chặn cache. Chúng nằm trong cache key ở
+    # build_listing_filter_cache_key, gồm cả trang chủ không lọc.
     return True
 
 

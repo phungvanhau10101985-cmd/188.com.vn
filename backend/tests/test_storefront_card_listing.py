@@ -9,8 +9,30 @@ from app.services.storefront_card_listing import (
     build_storefront_card_payload,
     card_listing_query_options,
     is_storefront_category_card_request,
+    is_storefront_grid_card_request,
     slim_product_info_for_card,
 )
+
+
+def test_home_grid_uses_card_payload_without_search():
+    assert is_storefront_grid_card_request(
+        admin_list=False,
+        q="",
+        product_id="",
+        warehouse_clearance_only=False,
+    )
+    assert not is_storefront_grid_card_request(
+        admin_list=False,
+        q="áo thun",
+        product_id="",
+        warehouse_clearance_only=False,
+    )
+    assert not is_storefront_grid_card_request(
+        admin_list=False,
+        q="",
+        product_id="A1",
+        warehouse_clearance_only=False,
+    )
 
 
 def test_category_card_request_is_only_category_browse():

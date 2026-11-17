@@ -1095,31 +1095,24 @@ def export_merchant_center_feed_tsv():
     Tuỳ chọn `.env`: `MERCHANT_FEED_CURRENCY` (mặc định `VND`), `MERCHANT_FEED_IMAGE_BASE_URL`
     (không đặt thì `BUNNY_CDN_PUBLIC_BASE` trong app.core.config).
 
-    Dùng session RIÊNG (pool export nhỏ) — cron nền tảng khác đọc feed có thể chậm (mạng chậm/quét
-    ~100k SP), không được giữ connection pool chính trong lúc đó (tránh 503 cho khách đang duyệt web).
+    File snapshot tối đa 15 phút. Đối tác tải chậm không giữ connection Postgres.
     """
+    from app.services.catalog_feed_snapshot import ensure_catalog_feed_file
     from app.services.merchant_feed_tsv import iter_merchant_feed_lines
-    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
 
-    def body():
-        db = get_export_db_session()
-        try:
-            for line in iter_merchant_feed_lines(db, shop, currency=cur, image_site_base=img or shop):
-                yield (line + "\n").encode("utf-8")
-        finally:
-            close_export_session(db)
+    def produce(db):
+        return iter_merchant_feed_lines(db, shop, currency=cur, image_site_base=img or shop)
 
-    return StreamingResponse(
-        body(),
+    path = ensure_catalog_feed_file("google-merchant", produce)
+    return FileResponse(
+        path=str(path),
+        filename="merchant-center-products.tsv",
         media_type="text/tab-separated-values; charset=utf-8",
-        headers={
-            "Content-Disposition": 'attachment; filename="merchant-center-products.tsv"',
-            "Cache-Control": "no-store",
-        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1133,10 +1126,10 @@ def export_meta_catalog_feed_tsv():
     custom_label_0–4, **`video_url`** (link video), shipping weight.
     Đặt `META_FEED_FB_PRODUCT_CATEGORY` và tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` backend.
 
-    Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
+    File snapshot tối đa 15 phút — xem `export_merchant_center_feed_tsv`.
     """
+    from app.services.catalog_feed_snapshot import ensure_catalog_feed_file
     from app.services.social_catalog_feed_tsv import iter_meta_catalog_lines
-    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
@@ -1144,28 +1137,22 @@ def export_meta_catalog_feed_tsv():
     fb_cat = getattr(settings, "META_FEED_FB_PRODUCT_CATEGORY", "") or "Apparel & Accessories"
     gcat = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
 
-    def body():
-        db = get_export_db_session()
-        try:
-            for line in iter_meta_catalog_lines(
-                db,
-                shop,
-                currency=cur,
-                image_site_base=img or shop,
-                fb_product_category=fb_cat,
-                google_product_category_default=gcat,
-            ):
-                yield (line + "\n").encode("utf-8")
-        finally:
-            close_export_session(db)
+    def produce(db):
+        return iter_meta_catalog_lines(
+            db,
+            shop,
+            currency=cur,
+            image_site_base=img or shop,
+            fb_product_category=fb_cat,
+            google_product_category_default=gcat,
+        )
 
-    return StreamingResponse(
-        body(),
+    path = ensure_catalog_feed_file("meta-catalog", produce)
+    return FileResponse(
+        path=str(path),
+        filename="meta-catalog-products.tsv",
         media_type="text/tab-separated-values; charset=utf-8",
-        headers={
-            "Content-Disposition": 'attachment; filename="meta-catalog-products.tsv"',
-            "Cache-Control": "no-store",
-        },
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -1177,37 +1164,31 @@ def export_tiktok_catalog_feed_tsv():
     Feed **TSV UTF-8** catalogue TikTok (`sku_id`, `link`, `image_link`, giá sale như `CATALOG_SALE_*`, …).
     Tuỳ chọn `CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY` trong `.env` nếu cần taxonomy Google mặc định.
 
-    Dùng session RIÊNG (pool export nhỏ) — xem lý do ở `export_merchant_center_feed_tsv`.
+    File snapshot tối đa 15 phút — xem `export_merchant_center_feed_tsv`.
     """
+    from app.services.catalog_feed_snapshot import ensure_catalog_feed_file
     from app.services.social_catalog_feed_tsv import iter_tiktok_catalog_lines
-    from app.db.export_session import close_export_session, get_export_db_session
 
     shop = (settings.FRONTEND_BASE_URL or "").rstrip("/") or "http://localhost:3001"
     cur = getattr(settings, "MERCHANT_FEED_CURRENCY", "VND") or "VND"
     img = getattr(settings, "MERCHANT_FEED_IMAGE_BASE_URL", "") or ""
     gcat = getattr(settings, "CATALOG_FEED_DEFAULT_GOOGLE_PRODUCT_CATEGORY", "") or ""
 
-    def body():
-        db = get_export_db_session()
-        try:
-            for line in iter_tiktok_catalog_lines(
-                db,
-                shop,
-                currency=cur,
-                image_site_base=img or shop,
-                google_product_category_default=gcat,
-            ):
-                yield (line + "\n").encode("utf-8")
-        finally:
-            close_export_session(db)
+    def produce(db):
+        return iter_tiktok_catalog_lines(
+            db,
+            shop,
+            currency=cur,
+            image_site_base=img or shop,
+            google_product_category_default=gcat,
+        )
 
-    return StreamingResponse(
-        body(),
+    path = ensure_catalog_feed_file("tiktok-catalog", produce)
+    return FileResponse(
+        path=str(path),
+        filename="tiktok-catalog-products.tsv",
         media_type="text/tab-separated-values; charset=utf-8",
-        headers={
-            "Content-Disposition": 'attachment; filename="tiktok-catalog-products.tsv"',
-            "Cache-Control": "no-store",
-        },
+        headers={"Cache-Control": "no-store"},
     )
 
 

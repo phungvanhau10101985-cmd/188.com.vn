@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 import io
 import logging
 import random
+import threading
+import time
 from urllib.parse import unquote
 
 import pandas as pd
@@ -57,6 +59,9 @@ from app.services.admin_source_stock_batch import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Một lần đọc catalog đầy đủ. Hai crawler cùng lúc sẽ chiếm GIL và pool export.
+_FULL_CATALOG_LIST_LOCK = threading.Lock()
 
 _DB_UNAVAILABLE_DETAIL = "Cơ sở dữ liệu tạm thời không phản hồi — vui lòng thử lại sau vài giây"
 
@@ -344,7 +349,9 @@ def _serialize_products_for_api(
     from app.services.consult_image_text import build_image_consult_context
 
     sale_state = sale_calendar_svc.resolve_sale_calendar_state(db, user=user)
-    for product in raw_products:
+    for index, product in enumerate(raw_products):
+        if index and index % 20 == 0:
+            time.sleep(0)
         try:
             d = Product.model_validate(product).model_dump()
             from app.services.product_image_visibility import apply_library_cover_to_payload
@@ -672,6 +679,7 @@ def _read_products_list_impl(
     include_warehouse_clearance: bool = False,
     warehouse_clearance_only: bool = False,
     admin_list: bool = False,
+    full_schema: bool = False,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -729,16 +737,13 @@ def _read_products_list_impl(
         user is not None and sale_calendar_svc.is_site_sale_test_enabled(db, user)
     )
     sort_norm = crud.product.normalize_product_list_sort(sort)
-    from app.services.storefront_card_listing import is_storefront_category_card_request
+    from app.services.storefront_card_listing import is_storefront_grid_card_request
 
-    card_listing = is_storefront_category_card_request(
+    card_listing = False if full_schema else is_storefront_grid_card_request(
         admin_list=admin_list,
         q=raw_q,
         product_id=pid,
         warehouse_clearance_only=warehouse_clearance_only,
-        category=category,
-        subcategory=subcategory,
-        sub_subcategory=sub_subcategory,
     )
     search_cache_active = (
         use_search_cache
@@ -807,7 +812,9 @@ def _read_products_list_impl(
                 _overlay_flash_sale_on_dicts(db, page.get("products"), user)
             return page
 
-        beyond_list_cap = skip + limit > product_search_cache_crud.SEARCH_LIST_CACHE_MAX_PRODUCTS
+        beyond_list_cap = (
+            skip + limit > product_search_cache_crud.SEARCH_LIST_EAGER_FETCH_MAX
+        )
         if not beyond_list_cap:
             fetch_skip = 0
             fetch_limit = product_search_cache_crud.list_cache_fetch_limit(skip, limit)
@@ -1238,8 +1245,15 @@ def read_products_full_list(
     """
     from app.db.export_session import get_export_db_session
 
-    db = get_export_db_session()
+    if not _FULL_CATALOG_LIST_LOCK.acquire(timeout=2):
+        raise HTTPException(
+            status_code=429,
+            detail="Catalog đầy đủ đang được xuất. Thử lại sau vài giây.",
+            headers={"Retry-After": "5"},
+        )
+    db = None
     try:
+        db = get_export_db_session()
         return _read_products_list_impl(
             response,
             db,
@@ -1268,11 +1282,14 @@ def read_products_full_list(
             filter_style_tag=style_tag,
             search_refresh=search_refresh,
             user=current_user,
+            full_schema=True,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}
     finally:
-        db.close()
+        if db is not None:
+            db.close()
+        _FULL_CATALOG_LIST_LOCK.release()
 
 
 @router.get("/category-facets", response_model=dict)
