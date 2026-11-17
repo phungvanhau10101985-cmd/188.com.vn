@@ -4,8 +4,6 @@
 #
 # Mặc định: soft recover (pm2 start/restart) — KHÔNG hủy job bản địa hóa ảnh.
 # Hủy cứng OCR/job ảnh chỉ khi: WATCHDOG_HARD_FREE=1
-# /products 000 hoặc 503 trong khi cổng còn listen và /health = 200: không restart
-# (restart làm nginx 503 hàng loạt). /health fail thì đếm 3 lần cron liên tiếp.
 #
 # Usage:
 #   */2 * * * * cd /var/www/188.com.vn && bash deploy/watchdog-api.sh >> /var/log/188-watchdog.log 2>&1
@@ -18,8 +16,6 @@ source "${ROOT}/deploy/health-lib.sh"
 API_PORT="${API_INTERNAL_PORT:-8001}"
 PM2_API="${PM2_API_NAME:-188-api}"
 API_STARTUP_GRACE_SECONDS="${API_STARTUP_GRACE_SECONDS:-90}"
-HEALTH_FAIL_LIMIT="${API_WATCHDOG_HEALTH_FAIL_LIMIT:-3}"
-HEALTH_FAIL_FILE="${API_WATCHDOG_HEALTH_FAIL_FILE:-/var/lock/188-watchdog-health-fails}"
 INCIDENT_ROOT="${API_INCIDENT_DIR:-/var/log/188-api-incidents}"
 INCIDENT_RETENTION_DAYS="${API_INCIDENT_RETENTION_DAYS:-14}"
 DEPLOY_LOCK="${ROOT}/deploy/.deploy-in-progress"
@@ -253,56 +249,6 @@ recover_api() {
   fi
 }
 
-health_fail_count() {
-  local n=0
-  if [[ -f "${HEALTH_FAIL_FILE}" ]]; then
-    n="$(tr -cd '0-9' < "${HEALTH_FAIL_FILE}" || true)"
-  fi
-  if [[ -z "${n}" ]]; then
-    n=0
-  fi
-  echo "${n}"
-}
-
-clear_health_fail_streak() {
-  rm -f "${HEALTH_FAIL_FILE}"
-}
-
-bump_health_fail_streak() {
-  local n
-  n="$(health_fail_count)"
-  n=$((n + 1))
-  mkdir -p "$(dirname "${HEALTH_FAIL_FILE}")" 2>/dev/null || true
-  printf '%s\n' "${n}" > "${HEALTH_FAIL_FILE}"
-  echo "${n}"
-}
-
-# Cổng không listen → restart ngay. /health vẫn fail sau khi cắt idle transaction
-# thì chỉ restart ở lần cron thứ HEALTH_FAIL_LIMIT (mặc định 3 lần, cron 2 phút).
-handle_unhealthy_health() {
-  local reason="$1"
-  if ! api_port_listening; then
-    echo "${LOG_PREFIX} ${reason} — cổng ${API_PORT} không listen"
-    clear_health_fail_streak
-    recover_api "${reason} — cổng ${API_PORT} không listen"
-    exit 0
-  fi
-  if relieve_pool_before_restart "${reason}"; then
-    clear_health_fail_streak
-    return 0
-  fi
-  local streak
-  streak="$(bump_health_fail_streak)"
-  if [[ "${streak}" -ge "${HEALTH_FAIL_LIMIT}" ]]; then
-    echo "${LOG_PREFIX} ${reason} — ${streak} lần liên tiếp, restart"
-    clear_health_fail_streak
-    recover_api "${reason} liên tiếp ${streak} lần"
-    exit 0
-  fi
-  echo "${LOG_PREFIX} ${reason} — lần ${streak}/${HEALTH_FAIL_LIMIT}, cổng còn listen, chưa restart"
-  exit 0
-}
-
 pm2_state="$(
   pm2 jlist 2>/dev/null |
     node -e '
@@ -328,28 +274,25 @@ fi
 
 health=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health" 8)
 if [[ "${health}" != "200" ]]; then
-  handle_unhealthy_health "/health=${health}"
+  if relieve_pool_before_restart "/health=${health}"; then
+    health="200"
+  else
+    recover_api "/health=${health}"
+    exit 0
+  fi
 fi
-clear_health_fail_streak
 
-# Probe ngắn. Listing chậm không được kéo theo restart cả API khi /health vẫn 200.
-products=$(health_curl_products_probe "${API_PORT}" 1 8)
+products=$(health_curl_products_probe "${API_PORT}" 2 20)
 if [[ "${products}" != "200" ]]; then
   echo "${LOG_PREFIX} products=${products} → terminate idle + retry"
   health_terminate_idle_db_transactions
   sleep 2
-  products=$(health_curl_products_probe "${API_PORT}" 1 8)
+  products=$(health_curl_products_probe "${API_PORT}" 2 25)
 fi
 
 if [[ "${products}" != "200" ]]; then
-  if api_port_listening; then
-    health_now=$(health_curl_http_code "http://127.0.0.1:${API_PORT}/health" 8)
-    if [[ "${health_now}" == "200" ]]; then
-      echo "${LOG_PREFIX} products=${products} nhưng /health=200 và cổng ${API_PORT} còn listen — không restart"
-      exit 0
-    fi
-  fi
-  handle_unhealthy_health "products=${products} và /health không 200"
+  recover_api "products vẫn ${products}"
+  exit 0
 fi
 
 # Job OCR/bản địa hóa đang chạy là bình thường — tuyệt đối không coi là sự cố.
