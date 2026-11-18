@@ -77,6 +77,7 @@ def update_settings(
         row.flash_sale_enabled = bool(flash_sale_enabled)
     db.commit()
     db.refresh(row)
+    sale_calendar_svc.invalidate_public_sale_state_cache()
     if flash_sale_enabled is not None:
         from app.services.flash_sale import invalidate_flash_sale_enabled_cache
 
@@ -110,4 +111,5 @@ def update_month_rule(
         row.discount_percent_override = Decimal(str(discount_percent_override))
     db.commit()
     db.refresh(row)
+    sale_calendar_svc.invalidate_public_sale_state_cache()
     return row

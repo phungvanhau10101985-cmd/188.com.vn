@@ -48,6 +48,12 @@ def invalidate_public_cache() -> None:
     global _rules_cache
     _rules_cache = None
     ttl_cache.invalidate(HOLIDAY_THEME_PUBLIC_CACHE_KEY)
+    try:
+        from app.services.sale_calendar import invalidate_public_sale_state_cache
+
+        invalidate_public_sale_state_cache()
+    except Exception:
+        pass
 
 
 def normalize_theme(value: str | None) -> str | None:

@@ -912,10 +912,11 @@ def _read_products_list_impl(
     if listing_filter_cache_key:
 
         def _fetch_listing_for_cache() -> dict:
-            from app.db.session import SessionLocal
+            from app.db.session import SessionLocal, apply_read_statement_timeout
 
             own_db = SessionLocal()
             try:
+                apply_read_statement_timeout(own_db, 8)
                 return crud.product.get_products(own_db, **_list_query_kwargs)
             finally:
                 own_db.close()
@@ -1136,6 +1137,54 @@ def read_products(
         )
     set_flash_sale_identity(current_user.id if current_user else None, x_guest_session_id)
     try:
+        if not admin_list:
+            from app.db.session import (
+                SessionLocal,
+                apply_read_statement_timeout,
+                release_read_transaction,
+            )
+
+            # Session của request chỉ dùng để xác thực. Listing chạy trên session riêng
+            # và đóng trước khi trả JSON, để pool không bị giữ suốt lúc serialize.
+            release_read_transaction(db)
+            own_db = SessionLocal()
+            try:
+                apply_read_statement_timeout(own_db, 8)
+                return _read_products_list_impl(
+                    response,
+                    own_db,
+                    skip=skip,
+                    limit=limit,
+                    category=category,
+                    subcategory=subcategory,
+                    sub_subcategory=sub_subcategory,
+                    shop_name=shop_name,
+                    shop_id=shop_id,
+                    style=style,
+                    shop_name_chinese=shop_name_chinese,
+                    chinese_name=chinese_name,
+                    pro_lower_price=pro_lower_price,
+                    pro_high_price=pro_high_price,
+                    min_price=min_price,
+                    max_price=max_price,
+                    is_active=is_active,
+                    q=q,
+                    product_id=product_id,
+                    order_random=order_random,
+                    sort=sort,
+                    use_search_cache=True,
+                    filter_size=size,
+                    filter_color=color,
+                    filter_style_tag=style_tag,
+                    search_refresh=search_refresh,
+                    skip_total=skip_total,
+                    user=current_user,
+                    include_warehouse_clearance=include_warehouse_clearance,
+                    warehouse_clearance_only=warehouse_clearance_only,
+                    admin_list=admin_list,
+                )
+            finally:
+                own_db.close()
         return _read_products_list_impl(
             response,
             db,

@@ -22,6 +22,20 @@ _defaults_ensured_at: float = 0.0
 _DEFAULTS_ENSURE_TTL_SECONDS = 300.0
 _maintain_checked_at: float = 0.0
 _MAINTAIN_CHECK_TTL_SECONDS = 60.0
+# Khách không đăng nhập: cùng một trạng thái sale cho mọi request. Cache ngắn
+# để listing/PDP không mở transaction sale mỗi lần.
+_public_sale_state_cache: tuple[float, "SaleCalendarState"] | None = None
+_PUBLIC_SALE_STATE_TTL_SECONDS = 20.0
+
+
+def invalidate_public_sale_state_cache() -> None:
+    global _public_sale_state_cache
+    _public_sale_state_cache = None
+
+
+def _store_public_sale_state(state: SaleCalendarState) -> None:
+    global _public_sale_state_cache
+    _public_sale_state_cache = (_perf_time.monotonic(), state)
 
 FEED_TITLE_PREFIX_TEASER = "Sắp giảm giá"
 FEED_TITLE_PREFIX_ACTIVE = "Đang giảm giá"
@@ -350,6 +364,21 @@ def resolve_sale_calendar_state(
     user=None,
 ) -> SaleCalendarState:
     """Trạng thái campaign hiện tại (teaser / active / không)."""
+    if user is None and now is None:
+        cached = _public_sale_state_cache
+        if cached is not None and (_perf_time.monotonic() - cached[0]) < _PUBLIC_SALE_STATE_TTL_SECONDS:
+            return cached[1]
+        state = _resolve_sale_calendar_state_uncached(db, now=None, user=None)
+        _store_public_sale_state(state)
+        return state
+    return _resolve_sale_calendar_state_uncached(db, now=now, user=user)
+
+
+def _resolve_sale_calendar_state_uncached(
+    db: Session,
+    now: Optional[datetime] = None,
+    user=None,
+) -> SaleCalendarState:
     maintain_sale_calendar_settings(db)
     if user is not None:
         test_state = get_site_sale_test_state_for_user(db, user, now=now)

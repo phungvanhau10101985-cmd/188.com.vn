@@ -48,6 +48,21 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Base class for models
 Base = declarative_base()
 
+def apply_read_statement_timeout(db, seconds: int = 8) -> None:
+    """Cắt query đọc storefront nếu chạy quá lâu, để connection không bị giữ 20s+."""
+    if db is None or is_sqlite:
+        return
+    try:
+        from sqlalchemy import text
+
+        db.execute(text(f"SET LOCAL statement_timeout = '{int(seconds)}s'"))
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def release_read_transaction(db) -> None:
     """Kết thúc transaction đọc trước khi gọi mạng ngoài.
 
