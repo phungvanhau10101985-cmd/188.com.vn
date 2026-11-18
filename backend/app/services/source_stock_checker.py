@@ -1147,11 +1147,14 @@ def _maybe_reclaim_stale_in_progress() -> None:
 def _worker_loop() -> None:
     logger.info(
         "source stock checker started: interval=%ss stale=%sm "
-        "(vipomall → pandamall → cssbuy; chỉ CF mới chuyển nền; cả 3 chặn thì dừng worker)",
+        "(vipomall → pandamall → cssbuy; nhường trình duyệt khi đang cào sản phẩm; "
+        "cào xong chạy tiếp ngay)",
         settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS,
         settings.SOURCE_STOCK_CHECK_STALE_MINUTES,
     )
     idle_sleep = max(1, min(15, int(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS)))
+    from app.services.heavy_work_gate import poll_heavy_work
+
     while True:
         touch_source_stock_worker_heartbeat()
         try:
@@ -1162,11 +1165,23 @@ def _worker_loop() -> None:
             time.sleep(idle_sleep)
             continue
         _maybe_reclaim_stale_in_progress()
-        product_id = _pop_queued_id() or _claim_due_product_id()
+        # Cào sản phẩm đang giữ trình duyệt thì chờ ngắn rồi thử lại — không hoãn sang tối.
+        lease = poll_heavy_work("source_stock", camp=False)
+        if lease is None:
+            time.sleep(2)
+            continue
+        product_id = None
+        try:
+            product_id = _pop_queued_id() or _claim_due_product_id()
+            if product_id is not None:
+                check_product_source_stock(product_id)
+        finally:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                release()
         if product_id is None:
             time.sleep(idle_sleep)
             continue
-        check_product_source_stock(product_id)
         time.sleep(settings.SOURCE_STOCK_CHECK_INTERVAL_SECONDS)
 
 

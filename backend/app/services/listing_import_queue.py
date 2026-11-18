@@ -2,8 +2,9 @@
 Hàng đợi import link từ trang HTML listing (admin): lưu snapshot JSON trong DB.
 
 Trong mỗi đợt (queue_token), xử lý tuần tự từng link; có tạm dừng / tiếp tục / dừng hẳn giữa các job
-(không cắt giữa chừng một scrape đang chạy). Mỗi đợt có một luồng ``threading.Thread`` riêng —
-nhiều đợt có thể chạy song song, độc lập (không khóa chéo giữa các đợt).
+(không cắt giữa chừng một scrape đang chạy). Mỗi đợt có một luồng ``threading.Thread`` riêng.
+Các đợt dùng chung một lượt trình duyệt (``heavy_work_gate``): một đợt cào xong thì đợt khác
+hoặc kiểm tra nguồn hàng mới chạy tiếp — không xếp sang buổi tối.
 
 Token bị «xóa khỏi DB» được ghi vào bảng revocation để worker không tái tạo snapshot.
 File legacy `static/uploads/listing_import_queues/*.json` vẫn được đọc và tự migrate sang DB khi gặp.
@@ -506,8 +507,22 @@ def _execute_one_import(
 
 
 def _worker_loop(token: str) -> None:
+    """Giữ lượt trình duyệt suốt đợt cào. Xong thì kiểm tra nguồn hàng chạy tiếp."""
+    from app.services.heavy_work_gate import heavy_work_slot
+
+    with heavy_work_slot("listing_crawl"):
+        _run_listing_queue_worker(token)
+
+
+def _run_listing_queue_worker(token: str) -> None:
+    from app.services.host_pressure import host_blocks_background
+
     lock = _lock_for(token)
     while True:
+        # Khách đông thì chưa cào link kế. Link đang scrape vẫn chạy nốt.
+        if host_blocks_background():
+            time.sleep(2)
+            continue
         with lock:
             q = load_queue(token)
             if not q:
@@ -627,7 +642,7 @@ def enqueue(
     Ghi thêm tasks; tạo queue mới nếu không có token hoặc queue cũ đã stopped.
 
     Mỗi ``queue_token`` có một worker ``threading.Thread`` riêng (``_ensure_worker_started``).
-    Nhiều đợt có thể chạy song song, độc lập — không có khóa toàn cục giữa các đợt.
+    Các đợt không cào Chromium cùng lúc: đợt đang chạy giữ lượt đến khi hết link.
 
     tasks: [{url, source: vipomall|pandamall|cssbuy, label?: str}]
     """

@@ -550,7 +550,11 @@ def schedule_outfit_visual_warm(product_id: int) -> None:
 
     def _run() -> None:
         try:
-            _warm_outfit_visual(pid)
+            from app.services.heavy_work_gate import heavy_work_slot
+
+            # Có việc thì warm. Đang bản địa hóa thì chờ hết job đó rồi chạy, không hoãn sang tối.
+            with heavy_work_slot("outfit_visual"):
+                _warm_outfit_visual(pid)
         finally:
             with _WARM_LOCK:
                 _WARM_INFLIGHT.discard(pid)

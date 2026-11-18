@@ -693,6 +693,21 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     message="Đã hủy job sau khi xong bước hiện tại.",
                 )
                 return
+            from app.services.host_pressure import wait_while_host_busy
+
+            if not wait_while_host_busy(should_stop=should_cancel):
+                _finalize_job_cancelled(
+                    job_id,
+                    done=done,
+                    failed=failed,
+                    skipped=skipped,
+                    total=total,
+                    processed_ids=processed_ids,
+                    results=results,
+                    skipped_reports=skipped_reports,
+                    message="Đã hủy job trong lúc chờ máy rảnh cho khách.",
+                )
+                return
             if not _wait_for_deepseek_off_peak_if_enabled(
                 job_id,
                 should_cancel=should_cancel,

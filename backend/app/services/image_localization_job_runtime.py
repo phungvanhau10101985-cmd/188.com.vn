@@ -287,8 +287,14 @@ def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> No
         unmark_job_thread_running(job_id)
 
 
-def start_job_process(job_id: str, payload_dict: dict, *, resume: bool = False) -> None:
-    """Chạy job trong subprocess riêng — hủy ngay có thể terminate process."""
+def start_job_process(
+    job_id: str,
+    payload_dict: dict,
+    *,
+    resume: bool = False,
+    lease: Any = None,
+) -> bool:
+    """Chạy một job trong subprocess. Có việc thì chạy; không mở thêm job khi đang bận."""
     blocked, detail = memory_pressure_blocks_imgloc()
     if blocked:
         logger.warning(
@@ -296,26 +302,62 @@ def start_job_process(job_id: str, payload_dict: dict, *, resume: bool = False) 
             job_id,
             detail,
         )
-        return
-    if not mark_job_thread_running(job_id):
-        logger.warning("image localization job %s already running in this process", job_id)
-        return
-    ctx = multiprocessing.get_context("spawn")
-    proc = ctx.Process(
-        target=_multiprocess_job_entry,
-        args=(job_id, payload_dict, resume),
-        daemon=True,
-        name=f"imgloc-{job_id[:8]}",
-    )
-    proc.start()
-    with _proc_lock:
-        _job_processes[job_id] = proc
-    logger.info(
-        "IMAGE_LOCALIZATION_JOB_PROCESS start job_id=%s pid=%s (%s)",
-        job_id,
-        proc.pid,
-        detail or "mem-ok",
-    )
+        return False
+    from app.services.heavy_work_gate import poll_heavy_work
+
+    created_lease = False
+    if lease is None:
+        lease = poll_heavy_work("image_localization", camp=True)
+        if lease is None:
+            return False
+        created_lease = True
+    marked = False
+    try:
+        if not mark_job_thread_running(job_id):
+            logger.warning("image localization job %s already running in this process", job_id)
+            return False
+        marked = True
+        ctx = multiprocessing.get_context("spawn")
+        proc = ctx.Process(
+            target=_multiprocess_job_entry,
+            args=(job_id, payload_dict, resume),
+            daemon=True,
+            name=f"imgloc-{job_id[:8]}",
+        )
+        proc.start()
+        with _proc_lock:
+            _job_processes[job_id] = proc
+        try:
+            threading.Thread(
+                target=_watch_imgloc_lease,
+                args=(proc, lease, job_id),
+                daemon=True,
+                name=f"imgloc-gate-{job_id[:8]}",
+            ).start()
+        except Exception:
+            logger.exception("IMAGE_LOCALIZATION_JOB_PROCESS watcher failed job_id=%s", job_id)
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            _unregister_process(job_id)
+            raise
+        created_lease = False
+        marked = False
+        logger.info(
+            "IMAGE_LOCALIZATION_JOB_PROCESS start job_id=%s pid=%s (%s)",
+            job_id,
+            proc.pid,
+            detail or "mem-ok",
+        )
+        return True
+    finally:
+        if marked:
+            unmark_job_thread_running(job_id)
+        if created_lease and lease is not None:
+            release = getattr(lease, "release", None)
+            if callable(release):
+                release()
 
 
 def start_job_thread(job_id: str, target, args: tuple, kwargs: dict) -> None:
@@ -392,6 +434,32 @@ def _job_worker_alive(job_id: str) -> bool:
     return proc is not None and proc.is_alive()
 
 
+def _another_imgloc_running(except_job_id: str) -> bool:
+    skip = (except_job_id or "").strip()
+    with _proc_lock:
+        for job_id, proc in _job_processes.items():
+            if job_id == skip:
+                continue
+            if proc is not None and proc.is_alive():
+                return True
+    return False
+
+
+def _watch_imgloc_lease(proc: Any, lease: Any, job_id: str) -> None:
+    """Giữ lượt ảnh đến khi subprocess kết thúc, rồi nhả cho phối đồ hoặc job sau."""
+    try:
+        proc.join()
+    finally:
+        release = getattr(lease, "release", None)
+        if callable(release):
+            try:
+                release()
+            except Exception:
+                logger.exception("release image localization heavy-work lease job_id=%s", job_id)
+        _unregister_process(job_id)
+        unmark_job_thread_running(job_id)
+
+
 def _clear_stale_job_thread_mark(job_id: str) -> None:
     """Worker subprocess chết giữa chừng (deploy/restart) — bỏ cờ in-memory để resume lại."""
     if _job_worker_alive(job_id):
@@ -407,7 +475,10 @@ def image_localization_embedded_in_api() -> bool:
 
 def resume_pending_jobs(run_job, payload_cls: type) -> None:
     """Resume job queued/running trong DB nếu chưa có worker subprocess sống."""
+    from app.services.heavy_work_gate import clear_camp, gate_enabled, poll_heavy_work
+
     if not getattr(settings, "IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP", True):
+        clear_camp("image_localization")
         return
 
     from app.crud import image_localization_job as job_crud
@@ -419,12 +490,14 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
         db.close()
 
     if not rows:
+        clear_camp("image_localization")
         return
 
     reap_untracked_imgloc_workers()
 
     blocked, detail = memory_pressure_blocks_imgloc()
     if blocked:
+        clear_camp("image_localization")
         logger.warning(
             "IMAGE_LOCALIZATION_JOB_RESUME deferred — memory pressure (%s)",
             detail,
@@ -449,6 +522,8 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
 
     max_resume = int(getattr(settings, "IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT", 6) or 6)
     stall_seconds = int(getattr(settings, "IMAGE_LOCALIZATION_JOB_STALL_SECONDS", 1200) or 0)
+    one_at_a_time = gate_enabled()
+    saw_runnable = False
 
     for row in rows:
         if _job_worker_alive(row.job_id):
@@ -519,26 +594,54 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
                 db_fail.close()
             continue
 
-        db_patch = SessionLocal()
+        if one_at_a_time and _another_imgloc_running(row.job_id):
+            continue
+        saw_runnable = True
+        lease = None
+        if one_at_a_time:
+            lease = poll_heavy_work("image_localization", camp=True)
+            if lease is None:
+                return
+
+        started = False
         try:
-            job_crud.patch_job(
-                db_patch,
-                row.job_id,
-                {
-                    "status": "queued",
-                    "phase": "queued",
-                    "message": (
-                        f"Tiếp tục sau khởi động server "
-                        f"(resume #{(row.resume_count or 0) + 1})…"
-                    ),
-                    "resume_count": (row.resume_count or 0) + 1,
-                },
+            db_patch = SessionLocal()
+            try:
+                job_crud.patch_job(
+                    db_patch,
+                    row.job_id,
+                    {
+                        "status": "queued",
+                        "phase": "queued",
+                        "message": (
+                            f"Tiếp tục sau khởi động server "
+                            f"(resume #{(row.resume_count or 0) + 1})…"
+                        ),
+                        "resume_count": (row.resume_count or 0) + 1,
+                    },
+                )
+            finally:
+                db_patch.close()
+
+            logger.info("IMAGE_LOCALIZATION_JOB_RESUME job_id=%s", row.job_id)
+            started = bool(
+                start_job_process(
+                    row.job_id,
+                    payload.model_dump(),
+                    resume=True,
+                    lease=lease,
+                )
             )
         finally:
-            db_patch.close()
+            if lease is not None and not started:
+                release = getattr(lease, "release", None)
+                if callable(release):
+                    release()
+        if one_at_a_time:
+            return
 
-        logger.info("IMAGE_LOCALIZATION_JOB_RESUME job_id=%s", row.job_id)
-        start_job_process(row.job_id, payload.model_dump(), resume=True)
+    if not saw_runnable:
+        clear_camp("image_localization")
 
 
 def resume_pending_jobs_after_startup(run_job, payload_cls: type) -> None:

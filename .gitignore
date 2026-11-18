@@ -75,6 +75,7 @@ ai_analysis/project_analysis.json
 
 # Image localization runtime: Google Vision keys, Gemini cookies/profiles, temp images
 **/backend/runtime/image_localization/**
+**/backend/runtime/heavy-work/**
 
 # Scraped EMS frontend bundles (có thể chứa API key bên thứ ba — không commit)
 **/backend/scripts/tra-cuu.js

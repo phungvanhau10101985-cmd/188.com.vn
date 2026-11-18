@@ -65,6 +65,10 @@ module.exports = {
         SOURCE_STOCK_CHECK_RUN_DAEMON: 'false',
         // Tắt warm nền phối đồ (NanoAI/ảnh). Khối /pdp-outfit vẫn đọc picks đã lưu.
         OUTFIT_VISUAL_WARM: '0',
+        // Cào ưu tiên trình duyệt; nguồn hàng chạy tiếp khi cào xong. Không hoãn sang tối.
+        HEAVY_WORK_GATE_ENABLED: '1',
+        // CPU hoặc RAM cả máy ≥ 85% thì việc nền chờ khách. Mở lại khi cả hai ≤ 80%.
+        HOST_PRESSURE_ENABLED: '1',
       },
       autorestart: true,
       max_restarts: 50,
@@ -109,6 +113,8 @@ module.exports = {
         RUN_DB_INIT_ON_STARTUP: '0',
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
         LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: 'false',
+        HEAVY_WORK_GATE_ENABLED: '1',
+        HOST_PRESSURE_ENABLED: '1',
       },
       autorestart: true,
       max_restarts: 30,
@@ -134,6 +140,8 @@ module.exports = {
         LISTING_IMPORT_QUEUE_RESUME_ON_STARTUP: 'false',
         SOURCE_STOCK_CHECK_RUN_DAEMON: 'false',
         OUTFIT_VISUAL_WARM: '0',
+        HEAVY_WORK_GATE_ENABLED: '1',
+        HOST_PRESSURE_ENABLED: '1',
       },
       autorestart: true,
       max_restarts: 30,
