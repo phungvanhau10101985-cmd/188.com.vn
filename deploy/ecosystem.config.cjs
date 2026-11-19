@@ -20,9 +20,10 @@ module.exports = {
       script: path.join(BACKEND, '.venv/bin/python'),
       // Bound graceful shutdown so PM2 can forcibly replace an API instance
       // that is waiting on a stuck request or Starlette background task.
-      args: '-m uvicorn main:app --host 127.0.0.1 --port 8001 --timeout-graceful-shutdown 5',
+      args: '-m uvicorn main:app --host 127.0.0.1 --port 8001 --workers 2 --timeout-graceful-shutdown 5',
       env: {
         SERVER_PORT: '8001',
+        UVICORN_WORKERS: '2',
         RUN_DB_INIT_ON_STARTUP: '0',
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
         IMAGE_LOCALIZATION_EMBEDDED_IN_API: 'false',
@@ -32,11 +33,10 @@ module.exports = {
         IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT: '6',
         // 25MP/batch thay 70MP — giảm spike RAM khi OCR merge trên VPS 11GB.
         IMAGE_LOCALIZATION_MERGE_MAX_PIXELS: '25000000',
-        // Postgres max_connections=100 trên VPS nanoai — 15+20=35 vẫn còn dư địa lớn cho
-        // các app khác (thu-do-online, worksheet-worker...). Tăng từ 10+15=25 vì admin bấm
-        // nhiều thao tác nặng liên tiếp (tải danh sách + lọc + job ảnh...) từng chạm ngưỡng cũ.
-        DATABASE_POOL_SIZE: '15',
-        DATABASE_MAX_OVERFLOW: '20',
+        // 2 uvicorn workers × (10+8)=18 → 36 conn API. Postgres max_connections=100,
+        // còn chỗ cho thu-do / stock / imgloc. Không để 15+20=35 × 2 = 70.
+        DATABASE_POOL_SIZE: '10',
+        DATABASE_MAX_OVERFLOW: '8',
         DATABASE_POOL_TIMEOUT: '8',
         DATABASE_POOL_RECYCLE: '1800',
         DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS: '12',
@@ -45,12 +45,12 @@ module.exports = {
         DATABASE_POOL_RELIEF_INTERVAL_SECONDS: '15',
         DATABASE_POOL_RELIEF_MIN_IDLE_SECONDS: '10',
         DATABASE_POOL_RELIEF_AGGRESSIVE_MIN_IDLE_SECONDS: '8',
-        DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: '14',
+        DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: '8',
         DATABASE_POOL_SELF_HEAL_ENABLED: 'true',
         DATABASE_POOL_SELF_HEAL_INTERVAL_SECONDS: '15',
         DATABASE_ACTIVE_QUERY_KILL_SECONDS: '45',
         DATABASE_POOL_RELIEF_INTERVAL_SECONDS: '10',
-        DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: '10',
+        DATABASE_POOL_RELIEF_TRIGGER_IDLE_COUNT: '8',
         DATABASE_POOL_SELF_HEAL_PROBE_TIMEOUT_SECONDS: '3',
         // A transient probe failure during a heavy admin operation must not
         // terminate the only API worker. Restart only after three failed
@@ -79,8 +79,8 @@ module.exports = {
       // PM2 sends SIGKILL after this period if Uvicorn is still waiting for
       // open connections/background tasks during shutdown.
       kill_timeout: 8000,
-      /** Tránh API treo sau nhiều giờ (RAM phình → pool DB kẹt). 3.5G: dưới mức treo ~3.8G trên VPS nanoai. */
-      max_memory_restart: '3500M',
+      /** 2 worker ~1.6–1.8GB mỗi process + parent. 3.5G sẽ kill cả cụm ngay sau start. */
+      max_memory_restart: '5500M',
     },
     {
       name: '188-web',

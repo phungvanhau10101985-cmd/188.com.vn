@@ -233,6 +233,37 @@ def _should_run_db_init_on_startup() -> bool:
         return False
     return False
 
+
+def _uvicorn_worker_count() -> int:
+    try:
+        return max(1, int((os.getenv("UVICORN_WORKERS") or "1").strip() or "1"))
+    except ValueError:
+        return 1
+
+
+def _owns_api_singleton_daemons() -> bool:
+    """
+    uvicorn --workers N chạy startup trong mỗi process.
+    Pool relief / self-heal giữ theo process (mỗi worker một SQLAlchemy pool).
+    Backup, cron nội bộ, queue resume chỉ chạy ở 1 worker — flock trên Linux.
+    """
+    if _uvicorn_worker_count() <= 1:
+        return True
+    try:
+        import fcntl
+    except ImportError:
+        return True
+    lock_path = (os.getenv("API_SINGLETON_LOCK_PATH") or "/tmp/188-api-singleton.lock").strip()
+    try:
+        fp = open(lock_path, "w")
+        fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fp.write(str(os.getpid()))
+        fp.flush()
+        _owns_api_singleton_daemons._lock_fp = fp  # type: ignore[attr-defined]
+        return True
+    except OSError:
+        return False
+
 # ========== LOAD API ROUTES ==========
 def load_api_routes():
     """Load API routes với error handling"""
@@ -598,46 +629,8 @@ def _ensure_newsletter_router() -> None:
         print(f"⚠️  newsletter router ensure failed: {exc}")
 
 
-_ensure_newsletter_router()
-
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        from app.services.site_error_log import ensure_site_error_table, install_site_error_logging
-
-        install_site_error_logging()
-        ensure_site_error_table()
-    except Exception as _site_err_exc:
-        print(f"⚠️  Không bật ghi log lỗi site: {_site_err_exc}")
-
-    print("\n" + "="*60)
-    print("🚀 188.com.vn API Server Starting...")
-    print("="*60)
-
-    if _should_run_db_init_on_startup():
-        init_database_tables()
-    else:
-        print(
-            "⏭️  Bỏ qua init DB lúc startup (mặc định). "
-            "Deploy script đã chạy init_database_tables. "
-            "Cần bật lại: RUN_DB_INIT_ON_STARTUP=1 trong backend/.env"
-        )
-
-    print("🔍 IMPORT/EXPORT ENDPOINTS (if loaded):")
-    for name, path in API_LOADED_ROUTES:
-        if "import-export" in name or "import" in name or "export" in name:
-            print(f"   📤 {path}")
-
-    print("\n📌 IMPORTANT ENDPOINTS TO TEST:")
-    print("   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)")
-    print("   POST   /api/v1/import-export/import/excel/async    (202 + job_id)")
-    print("   GET    /api/v1/import-export/import/excel/job/{job_id}")
-    print("   GET    /api/v1/import-export/export/excel")
-    print("   GET    /api/v1/import-export/export/sample")
-    print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
-    print("   GET    /api/v1/import-export/download/latest-export")
-
+def _start_api_singleton_daemons() -> None:
+    """Backup, queue resume, email — chỉ 1 uvicorn worker khi --workers > 1."""
     try:
         from app.api.endpoints.import_1688 import start_import_batch_resume_daemon_if_enabled
 
@@ -799,6 +792,104 @@ async def startup_event():
         print(f"   ⚠️  category menu cache startup: {_e_menu_cache}")
 
     try:
+        from app.db.session import SessionLocal
+        from app.services.product_image_visibility import deactivate_products_without_storefront_image
+
+        _img_db = SessionLocal()
+        try:
+            _removed = deactivate_products_without_storefront_image(_img_db, limit=500)
+            if _removed:
+                print(f"   🖼️  Gỡ { _removed } SP không có ảnh khỏi storefront (is_active=false).")
+        finally:
+            _img_db.close()
+    except Exception as _e_no_img:
+        print(f"   ⚠️  No-image product cleanup startup: {_e_no_img}")
+
+    try:
+        from app.services.product_reply_notify import start_product_reply_email_daemon_if_needed
+
+        start_product_reply_email_daemon_if_needed()
+        print(
+            "   ✉️  Product reply email: debounce qua DB, daemon quét hàng đợi mỗi ~15s."
+        )
+    except Exception as _e_pre:
+        print(f"   ⚠️  Product reply email daemon startup: {_e_pre}")
+
+    try:
+        from app.services.vps_backup_service import start_vps_backup_scheduler_daemon_if_enabled
+
+        start_vps_backup_scheduler_daemon_if_enabled()
+        print("   💾 VPS backup scheduler: kiểm tra lịch mỗi 60s (VPS_BACKUP_SCHEDULER_ENABLED).")
+    except Exception as _e_vps_bk:
+        print(f"   ⚠️  VPS backup scheduler startup: {_e_vps_bk}")
+
+    try:
+        from app.services.google_sheets_hang_dat_moi_autofill import (
+            start_hang_dat_moi_autofill_daemon_if_enabled,
+        )
+        from app.core.config import settings as _hdm_settings
+
+        start_hang_dat_moi_autofill_daemon_if_enabled()
+        if getattr(_hdm_settings, "GOOGLE_SHEETS_HANG_DAT_MOI_AUTOFILL_ENABLED", False):
+            print(
+                "   📋 Hàng Đặt Mới autofill: Q→S/T/U/W/AB mỗi "
+                f"{getattr(_hdm_settings, 'GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS', 2)}s."
+            )
+    except Exception as _e_hdm:
+        print(f"   ⚠️  Hàng Đặt Mới autofill startup: {_e_hdm}")
+
+
+_ensure_newsletter_router()
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        from app.services.site_error_log import ensure_site_error_table, install_site_error_logging
+
+        install_site_error_logging()
+        ensure_site_error_table()
+    except Exception as _site_err_exc:
+        print(f"⚠️  Không bật ghi log lỗi site: {_site_err_exc}")
+
+    print("\n" + "="*60)
+    print("🚀 188.com.vn API Server Starting...")
+    print("="*60)
+    _singleton = _owns_api_singleton_daemons()
+    print(
+        f"   ⚙️  pid={os.getpid()} UVICORN_WORKERS={_uvicorn_worker_count()} "
+        f"singleton_daemons={'yes' if _singleton else 'no (HTTP only)'}"
+    )
+
+    if _should_run_db_init_on_startup():
+        init_database_tables()
+    else:
+        print(
+            "⏭️  Bỏ qua init DB lúc startup (mặc định). "
+            "Deploy script đã chạy init_database_tables. "
+            "Cần bật lại: RUN_DB_INIT_ON_STARTUP=1 trong backend/.env"
+        )
+
+    print("🔍 IMPORT/EXPORT ENDPOINTS (if loaded):")
+    for name, path in API_LOADED_ROUTES:
+        if "import-export" in name or "import" in name or "export" in name:
+            print(f"   📤 {path}")
+
+    print("\n📌 IMPORTANT ENDPOINTS TO TEST:")
+    print("   POST   /api/v1/import-export/import/excel          (đồng bộ, cần Bearer admin)")
+    print("   POST   /api/v1/import-export/import/excel/async    (202 + job_id)")
+    print("   GET    /api/v1/import-export/import/excel/job/{job_id}")
+    print("   GET    /api/v1/import-export/export/excel")
+    print("   GET    /api/v1/import-export/export/sample")
+    print("   GET    /api/v1/import-export/download/sample       (file mẫu import — UI admin)")
+    print("   GET    /api/v1/import-export/download/latest-export")
+
+    if _singleton:
+        _start_api_singleton_daemons()
+    else:
+        print("   ⏭️  Bỏ daemon toàn cục trên worker này (backup/queue/scheduler chỉ 1 process).")
+
+    try:
         from app.db.pool_relief import start_pool_relief_daemon_if_enabled
 
         start_pool_relief_daemon_if_enabled()
@@ -845,53 +936,6 @@ async def startup_event():
             )
     except Exception as _e_self_heal:
         print(f"   ⚠️  DB pool self-heal startup: {_e_self_heal}")
-
-    try:
-        from app.db.session import SessionLocal
-        from app.services.product_image_visibility import deactivate_products_without_storefront_image
-
-        _img_db = SessionLocal()
-        try:
-            _removed = deactivate_products_without_storefront_image(_img_db, limit=500)
-            if _removed:
-                print(f"   🖼️  Gỡ { _removed } SP không có ảnh khỏi storefront (is_active=false).")
-        finally:
-            _img_db.close()
-    except Exception as _e_no_img:
-        print(f"   ⚠️  No-image product cleanup startup: {_e_no_img}")
-
-    try:
-        from app.services.product_reply_notify import start_product_reply_email_daemon_if_needed
-
-        start_product_reply_email_daemon_if_needed()
-        print(
-            "   ✉️  Product reply email: debounce qua DB, daemon quét hàng đợi mỗi ~15s."
-        )
-    except Exception as _e_pre:
-        print(f"   ⚠️  Product reply email daemon startup: {_e_pre}")
-
-    try:
-        from app.services.vps_backup_service import start_vps_backup_scheduler_daemon_if_enabled
-
-        start_vps_backup_scheduler_daemon_if_enabled()
-        print("   💾 VPS backup scheduler: kiểm tra lịch mỗi 60s (VPS_BACKUP_SCHEDULER_ENABLED).")
-    except Exception as _e_vps_bk:
-        print(f"   ⚠️  VPS backup scheduler startup: {_e_vps_bk}")
-
-    try:
-        from app.services.google_sheets_hang_dat_moi_autofill import (
-            start_hang_dat_moi_autofill_daemon_if_enabled,
-        )
-        from app.core.config import settings as _hdm_settings
-
-        start_hang_dat_moi_autofill_daemon_if_enabled()
-        if getattr(_hdm_settings, "GOOGLE_SHEETS_HANG_DAT_MOI_AUTOFILL_ENABLED", False):
-            print(
-                "   📋 Hàng Đặt Mới autofill: Q→S/T/U/W/AB mỗi "
-                f"{getattr(_hdm_settings, 'GOOGLE_SHEETS_HANG_DAT_MOI_POLL_SECONDS', 2)}s."
-            )
-    except Exception as _e_hdm:
-        print(f"   ⚠️  Hàng Đặt Mới autofill startup: {_e_hdm}")
 
     from app.core.config import settings as _startup_settings
     _db_url = (_startup_settings.DATABASE_URL or "").lower()
