@@ -29,6 +29,7 @@ import { apiClient, NANOAI_TEXT_SEARCH_LIMIT } from '@/lib/api-client';
 import { getGuestSessionId } from '@/lib/guest-session';
 import { useLazyRevealList } from '@/hooks/useLazyRevealList';
 import { trackEvent } from '@/lib/analytics';
+import { trackMetaSearch } from '@/lib/meta-pixel';
 import type {
   Product,
   ProductListResponse,
@@ -1118,6 +1119,7 @@ export default function HomePageClient({
       results: totalProducts,
       page: currentPage,
     });
+    trackMetaSearch({ searchString: qFromUrl.trim(), results: totalProducts });
   }, [qFromUrl, totalProducts, currentPage, loading]);
 
   useEffect(() => {

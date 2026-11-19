@@ -950,13 +950,19 @@ class ApiClient {
   }
 
   async addToFavorites(productId: number, productData?: any): Promise<any> {
-    return this.fetch('/user-behavior/products/favorite', {
+    const result = await this.fetch('/user-behavior/products/favorite', {
       method: 'POST',
       body: JSON.stringify({ 
         product_id: productId,
         product_data: productData 
       })
     });
+    if (typeof window !== 'undefined') {
+      void import('@/lib/meta-pixel')
+        .then((m) => m.trackMetaAddToWishlistFromFavorite(productId, productData))
+        .catch(() => {});
+    }
+    return result;
   }
 
   async removeFromFavorites(productId: number): Promise<any> {

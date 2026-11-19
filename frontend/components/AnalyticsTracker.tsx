@@ -51,9 +51,13 @@ export default function AnalyticsTracker() {
       path,
       title: typeof document !== 'undefined' ? document.title : '',
     });
-    trackMetaPageView(path);
-    trackTikTokPageView(path);
-    trackGoogleAdsRouteRetail(path);
+    /** Admin không phải khách — tránh PageView CAPI gắn email/SĐT nhân sự (cảnh báo trùng >50%). */
+    const isStaffRoute = (pathname || '').startsWith('/admin');
+    if (!isStaffRoute) {
+      trackMetaPageView(path);
+      trackTikTokPageView(path);
+      trackGoogleAdsRouteRetail(path);
+    }
   }, [pathname, searchKey]);
 
   return null;

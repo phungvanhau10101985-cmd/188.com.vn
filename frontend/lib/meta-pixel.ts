@@ -2,6 +2,7 @@ import type { AddToCartRequest } from '@/features/cart/types/cart';
 import type { CartItem } from '@/features/cart/types/cart';
 import type { Product } from '@/types/api';
 import { newMetaEventId, sendFacebookCapiFromBrowser } from '@/lib/facebook-capi-client';
+import { installFbqEmptyEventGuard } from '@/lib/meta-attribution';
 
 export const META_PIXEL_CURRENCY = 'VND';
 
@@ -11,7 +12,15 @@ export function metaPurchaseEventId(orderId: number | string): string {
 }
 
 type FbqFn = (...args: unknown[]) => void;
-type StandardEventName = 'PageView' | 'ViewContent' | 'AddToCart' | 'InitiateCheckout' | 'Purchase';
+type StandardEventName =
+  | 'PageView'
+  | 'ViewContent'
+  | 'AddToCart'
+  | 'AddToWishlist'
+  | 'InitiateCheckout'
+  | 'Purchase'
+  | 'Search'
+  | 'Contact';
 type PixelEventMode = 'standard' | 'custom';
 
 /**
@@ -94,6 +103,7 @@ function whenFbqReady(run: () => void): void {
     if (done) return;
     if (!isFbqFullyReady()) return;
     done = true;
+    installFbqEmptyEventGuard();
     run();
   };
   const onEmbeds = () => fire();
@@ -114,6 +124,7 @@ function whenFbqReady(run: () => void): void {
       /** Timeout: vẫn thử nếu chỉ còn stub (tốt hơn mất hẳn sự kiện). */
       if (getFbq()) {
         done = true;
+        installFbqEmptyEventGuard();
         run();
       }
     }
@@ -167,19 +178,24 @@ function firePixelAndCapi(
     syncPixel?: boolean;
     onPixelFired?: () => void;
     capiRetries?: number;
-    /** false = bỏ email khỏi CAPI. ViewContent vẫn gửi email khi khách đã đăng nhập. */
+    /** false = bỏ email khỏi CAPI. Chỉ gửi khi matching có email khách thật. */
     includeEmail?: boolean;
+    /** false = bỏ SĐT khỏi CAPI. Chỉ gửi khi matching có SĐT khách thật. */
+    includePhone?: boolean;
     /** Cố định event_id — dedupe Pixel ↔ CAPI (vd. Purchase theo order_id). */
     eventId?: string;
   }
 ): void {
-  const eventId = opts?.eventId ?? newMetaEventId(eventName);
+  const name = String(eventName ?? '').trim();
+  if (!name) return;
+  const eventId = opts?.eventId ?? newMetaEventId(name);
   const eventTime = Math.floor(Date.now() / 1000);
   const trackFn = opts?.mode === 'custom' ? 'trackCustom' : 'track';
   const firePixel = () => {
+    installFbqEmptyEventGuard();
     const fbq = getFbq();
     if (fbq) {
-      fbq(trackFn, eventName, customData, { eventID: eventId });
+      fbq(trackFn, name, customData, { eventID: eventId });
       opts?.onPixelFired?.();
     }
   };
@@ -194,7 +210,7 @@ function firePixelAndCapi(
   const custom_data = Object.keys(customData).length ? customData : undefined;
   void sendFacebookCapiFromBrowser(
     {
-      event_name: eventName,
+      event_name: name,
       event_id: eventId,
       event_time: eventTime,
       custom_data,
@@ -203,6 +219,7 @@ function firePixelAndCapi(
       keepalive: opts?.keepalive === true,
       retries: opts?.capiRetries ?? 1,
       includeEmail: opts?.includeEmail !== false,
+      includePhone: opts?.includePhone !== false,
     }
   );
 }
@@ -275,8 +292,8 @@ export function trackMetaPageView(
   if (shouldSkipMetaPageView(key, now, opts?.skipDedupe)) {
     return;
   }
-  /** Chỉ Pixel — gửi thêm CAPI PageView khiến Pixel Helper thường báo 2× PageView (browser + server). */
-  firePixelAndCapi('PageView', {}, { sendCapi: false });
+  /** Pixel + CAPI cùng event_id — Events Manager khử trùng (Đã loại bỏ trùng lặp). */
+  firePixelAndCapi('PageView', {}, { keepalive: true });
 }
 
 /** Trang thanh toán cọc — bắn sau khi có đơn (Pixel thường đã load; tránh lỡ PageView sớm từ router). */
@@ -440,6 +457,74 @@ export function trackMetaAddToCart(item: AddToCartRequest): void {
   markAddToCartDedupe(fp, now);
   /** syncPixel: bắn ngay trong stack click — Pixel Helper / Meta nhận AddToCart (không defer qua whenFbqReady). */
   firePixelAndCapi('AddToCart', customData, { keepalive: true, syncPixel: true });
+}
+
+let lastAddToWishlistFingerprint: string | null = null;
+let lastAddToWishlistAtMs = 0;
+const ADD_TO_WISHLIST_DEDUPE_MS = 2000;
+
+export function trackMetaAddToWishlist(
+  product: Pick<Product, 'id' | 'product_id' | 'name' | 'price'> & {
+    category?: string | null;
+    subcategory?: string | null;
+  }
+): void {
+  const content_ids = metaContentIdsForProduct(product);
+  if (!content_ids.length) return;
+  const fp = `${content_ids.join(',')}|${product.id}`;
+  const now = Date.now();
+  if (lastAddToWishlistFingerprint === fp && now - lastAddToWishlistAtMs < ADD_TO_WISHLIST_DEDUPE_MS) {
+    return;
+  }
+  lastAddToWishlistFingerprint = fp;
+  lastAddToWishlistAtMs = now;
+  const value = typeof product.price === 'number' && Number.isFinite(product.price) ? product.price : 0;
+  const category = product.category || product.subcategory;
+  const primaryId = content_ids[0]!;
+  const customData: Record<string, unknown> = {
+    content_ids,
+    content_type: 'product',
+    ...(product.name ? { content_name: product.name } : {}),
+    ...(category ? { content_category: category } : {}),
+    value,
+    currency: META_PIXEL_CURRENCY,
+    contents: [{ id: primaryId, quantity: 1, item_price: value }],
+  };
+  firePixelAndCapi('AddToWishlist', customData, { keepalive: true, syncPixel: true });
+}
+
+/** Favorite API — payload có thể thiếu field Product đầy đủ. */
+export function trackMetaAddToWishlistFromFavorite(
+  productId: number,
+  productData?: Record<string, unknown> | null
+): void {
+  const pd = productData && typeof productData === 'object' ? productData : {};
+  const sheetId = pd.product_id != null ? String(pd.product_id).trim() : '';
+  const rawPrice = pd.price;
+  const price =
+    typeof rawPrice === 'number' && Number.isFinite(rawPrice)
+      ? rawPrice
+      : Number.isFinite(Number(rawPrice))
+        ? Number(rawPrice)
+        : 0;
+  const name = pd.name != null ? String(pd.name) : '';
+  trackMetaAddToWishlist({
+    id: productId,
+    product_id: sheetId || String(productId),
+    name,
+    price,
+    category: pd.category != null ? String(pd.category) : undefined,
+  });
+}
+
+export function trackMetaSearch(params: { searchString: string; results?: number }): void {
+  const searchString = (params.searchString || '').trim();
+  if (!searchString) return;
+  const customData: Record<string, unknown> = {
+    search_string: searchString,
+    ...(params.results != null && Number.isFinite(params.results) ? { num_items: params.results } : {}),
+  };
+  firePixelAndCapi('Search', customData, { keepalive: true });
 }
 
 let lastInitiateCheckoutFingerprint: string | null = null;

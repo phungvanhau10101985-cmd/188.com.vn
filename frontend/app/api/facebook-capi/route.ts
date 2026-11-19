@@ -71,8 +71,11 @@ export async function POST(req: NextRequest) {
   const userData: Record<string, unknown> = {
     ...(body.user_data && typeof body.user_data === 'object' ? body.user_data : {}),
   };
-  if (typeof userData.fbc === 'string' && !userData.fbc.trim()) {
-    delete userData.fbc;
+  for (const key of ['em', 'ph', 'fn', 'ln', 'ct', 'st', 'fbc', 'fbp', 'external_id']) {
+    const v = userData[key];
+    if (typeof v === 'string' && !v.trim()) {
+      delete userData[key];
+    }
   }
 
   const ip = clientIpForMeta(req);

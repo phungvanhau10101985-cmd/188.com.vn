@@ -31,6 +31,17 @@ META_PIXEL_CURRENCY = "VND"
 META_CLICK_ID_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000
 META_CLOCK_SKEW_MS = 5 * 60 * 1000
 _SHA256_HEX_RE = re.compile(r"^[a-f0-9]{64}$")
+_CUSTOMER_EMAIL_RE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$")
+_VN_MOBILE_RE = re.compile(r"^84[35789]\d{8}$")
+_BLOCKED_EMAIL_DOMAINS = frozenset({"188.com.vn"})
+_BLOCKED_EMAILS = frozenset(
+    {
+        "hotro@188.com.vn",
+        "noreply@188.com.vn",
+        "no-reply@188.com.vn",
+    }
+)
+_BLOCKED_PHONES = frozenset({"84968659836"})
 _FBP_RE = re.compile(r"^fb\.\d+\.(\d{13})\.\d+$")
 # Group 1 = creation time ms. Đuôi là fbclid, có thể kèm phụ lục (dấu chấm) do Pixel/Parameter Builder.
 _FBC_RE = re.compile(r"^fb\.\d{1,3}\.(\d{13})\.\S+$")
@@ -142,8 +153,24 @@ def _sha256_normalized(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode("utf-8")).hexdigest()
 
 
+_BLOCKED_EMAIL_HASHES = frozenset(_sha256_normalized(e) for e in _BLOCKED_EMAILS)
+_BLOCKED_PHONE_HASHES = frozenset(_sha256_normalized(p) for p in _BLOCKED_PHONES)
+
+
 def _already_hashed(value: str) -> bool:
     return bool(_SHA256_HEX_RE.match((value or "").strip().lower()))
+
+
+def is_real_customer_email(value: str) -> bool:
+    email = (value or "").strip().lower()
+    if not _CUSTOMER_EMAIL_RE.match(email):
+        return False
+    domain = email.rsplit("@", 1)[-1]
+    if domain in _BLOCKED_EMAIL_DOMAINS:
+        return False
+    if email in _BLOCKED_EMAILS:
+        return False
+    return True
 
 
 def _normalize_phone_vn(phone: str) -> Optional[str]:
@@ -151,9 +178,15 @@ def _normalize_phone_vn(phone: str) -> Optional[str]:
     if not digits:
         return None
     if digits.startswith("0"):
-        return "84" + digits[1:]
-    if not digits.startswith("84"):
-        return "84" + digits
+        digits = "84" + digits[1:]
+    elif not digits.startswith("84"):
+        digits = "84" + digits
+    if not _VN_MOBILE_RE.match(digits):
+        return None
+    if len(set(digits[2:])) <= 1:
+        return None
+    if digits in _BLOCKED_PHONES:
+        return None
     return digits
 
 
@@ -245,17 +278,28 @@ def _hash_pii_value(key: str, raw: str) -> Optional[str]:
     if not value:
         return None
     if _already_hashed(value):
-        return value.lower()
+        hashed = value.lower()
+        if key == "em" and hashed in _BLOCKED_EMAIL_HASHES:
+            return None
+        if key == "ph" and hashed in _BLOCKED_PHONE_HASHES:
+            return None
+        return hashed
     if key == "em":
         value = value.lower()
-        if "@" not in value:
+        if not is_real_customer_email(value):
             return None
-        return _sha256_normalized(value)
+        hashed = _sha256_normalized(value)
+        if hashed in _BLOCKED_EMAIL_HASHES:
+            return None
+        return hashed
     if key == "ph":
         phone = _normalize_phone_vn(value)
         if not phone:
             return None
-        return _sha256_normalized(phone)
+        hashed = _sha256_normalized(phone)
+        if hashed in _BLOCKED_PHONE_HASHES:
+            return None
+        return hashed
     if key in {"fn", "ln", "ct", "st"}:
         folded = fold_meta_text(value)
         if not folded:

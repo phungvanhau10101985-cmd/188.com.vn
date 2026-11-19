@@ -3,6 +3,8 @@
  * Meta: thiếu fbc trên Purchase làm giảm mạnh số chuyển đổi được báo cáo thêm.
  */
 
+import { getGuestSessionId } from '@/lib/guest-session';
+
 const COOKIE_MAX_AGE_SEC = 90 * 24 * 60 * 60;
 const META_CLICK_ID_MAX_AGE_MS = COOKIE_MAX_AGE_SEC * 1000;
 const META_CLOCK_SKEW_MS = 5 * 60 * 1000;
@@ -27,10 +29,26 @@ export type MetaAdvancedMatchingPatch = {
   country?: string | null;
 };
 
+type FbqGuarded = ((...args: unknown[]) => void) & {
+  __188Guard?: boolean;
+  loaded?: boolean;
+  callMethod?: unknown;
+  queue?: unknown[];
+  version?: string;
+  push?: unknown;
+};
+
 type PixelWindow = Window & {
-  fbq?: (...args: unknown[]) => void;
+  fbq?: FbqGuarded;
+  _fbq?: FbqGuarded;
   __188FbPixelId?: string;
 };
+
+/** Email/SĐT shop — không bao giờ gắn vào CAPI (Meta cảnh báo trùng >50%). */
+const BLOCKED_EMAILS = new Set(['hotro@188.com.vn', 'noreply@188.com.vn', 'no-reply@188.com.vn']);
+const BLOCKED_PHONES = new Set(['84968659836']);
+const CUSTOMER_EMAIL_RE = /^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$/;
+const VN_MOBILE_RE = /^84[35789]\d{8}$/;
 
 let matching: MetaAdvancedMatchingPatch = {};
 let pixelReadyBound = false;
@@ -184,6 +202,30 @@ function normalizePhoneVn(phone: string): string | undefined {
   return digits;
 }
 
+/** Email thật của khách — không gửi chuỗi rỗng, placeholder, hay email shop. */
+export function isRealCustomerEmail(raw: string | null | undefined): raw is string {
+  const email = (raw || '').trim().toLowerCase();
+  if (!CUSTOMER_EMAIL_RE.test(email)) return false;
+  const domain = email.split('@')[1] || '';
+  if (domain === '188.com.vn') return false;
+  if (BLOCKED_EMAILS.has(email)) return false;
+  return true;
+}
+
+/** SĐT di động VN của chính khách — 0912345678 → 84912345678. */
+export function isRealCustomerPhone(raw: string | null | undefined): raw is string {
+  const phone = normalizePhoneVn(raw || '');
+  if (!phone || !VN_MOBILE_RE.test(phone)) return false;
+  if (new Set(phone.slice(2)).size <= 1) return false;
+  if (BLOCKED_PHONES.has(phone)) return false;
+  return true;
+}
+
+export function normalizeCustomerPhoneVn(raw: string | null | undefined): string | undefined {
+  if (!isRealCustomerPhone(raw)) return undefined;
+  return normalizePhoneVn(raw);
+}
+
 function genderToMeta(raw: string): 'm' | 'f' | undefined {
   const s = foldMetaText(raw).replace(/\s+/g, '');
   if (s === 'male' || s === 'm' || s === 'nam') return 'm';
@@ -199,11 +241,16 @@ function dobToMeta(raw: string): string | undefined {
   return compact.length === 8 ? compact : undefined;
 }
 
+function deviceExternalId(): string {
+  if (typeof window === 'undefined') return '';
+  return (getGuestSessionId() || '').trim();
+}
+
 function matchingToPixelParams(src: MetaAdvancedMatchingPatch): Record<string, string> {
   const out: Record<string, string> = {};
   const email = (src.email || '').trim().toLowerCase();
-  if (email.includes('@')) out.em = email;
-  const phone = normalizePhoneVn(src.phone || '');
+  if (isRealCustomerEmail(email)) out.em = email;
+  const phone = normalizeCustomerPhoneVn(src.phone);
   if (phone) out.ph = phone;
   const names = splitVnName(src.fullName || '');
   if (names.fn) out.fn = names.fn;
@@ -218,14 +265,48 @@ function matchingToPixelParams(src: MetaAdvancedMatchingPatch): Record<string, s
   if (st) out.st = st;
   const country = foldMetaText(src.country || 'vn') || 'vn';
   if (country) out.country = country.length === 2 ? country : 'vn';
-  if (src.userId != null && String(src.userId).trim()) {
-    out.external_id = String(src.userId).trim();
-  }
+  const userId = src.userId != null ? String(src.userId).trim() : '';
+  const ext = userId || deviceExternalId();
+  if (ext) out.external_id = ext;
   return out;
+}
+
+/**
+ * Chặn fbq('track'/'trackCustom') khi tên sự kiện rỗng — tránh __missing_event trên Events Manager.
+ * Chỉ gắn sau khi fbevents.js sẵn sàng (có callMethod/loaded) để không phá stub queue.
+ */
+export function installFbqEmptyEventGuard(): void {
+  if (typeof window === 'undefined') return;
+  const w = window as PixelWindow;
+  const orig = w.fbq;
+  if (typeof orig !== 'function' || orig.__188Guard) return;
+  if (orig.loaded !== true && typeof orig.callMethod !== 'function') return;
+
+  const guarded = function fbqGuarded(this: unknown, ...args: unknown[]) {
+    const cmd = String(args[0] ?? '');
+    if (cmd === 'track' || cmd === 'trackCustom') {
+      const name = args[1];
+      if (name == null || String(name).trim() === '') return;
+    }
+    if (cmd === 'trackSingle' || cmd === 'trackSingleCustom') {
+      const name = args[2];
+      if (name == null || String(name).trim() === '') return;
+    }
+    return orig.apply(this, args);
+  } as FbqGuarded;
+  guarded.__188Guard = true;
+  guarded.loaded = orig.loaded;
+  guarded.callMethod = orig.callMethod;
+  guarded.queue = orig.queue;
+  guarded.version = orig.version;
+  guarded.push = orig.push;
+  w.fbq = guarded;
+  w._fbq = guarded;
 }
 
 export function applyPixelAdvancedMatching(): void {
   if (typeof window === 'undefined') return;
+  installFbqEmptyEventGuard();
   const w = window as PixelWindow;
   const fbq = w.fbq;
   const pid = (w.__188FbPixelId || '').trim();
@@ -243,10 +324,13 @@ export function patchMetaAdvancedMatching(patch: MetaAdvancedMatchingPatch): voi
 
 export function resetMetaAdvancedMatching(): void {
   matching = {};
+  bindPixelReady();
+  applyPixelAdvancedMatching();
 }
 
 export function persistMetaClickIds(): { fbp?: string; fbc?: string } {
   if (typeof window === 'undefined' || typeof document === 'undefined') return {};
+  installFbqEmptyEventGuard();
 
   const params = new URLSearchParams(window.location.search);
   const urlClid = (params.get('fbclid') || '').trim();
@@ -298,12 +382,15 @@ export function readMetaClickIds(): { fbp?: string; fbc?: string } {
 }
 
 export function getMetaCapiUserData(
-  opts?: { includeEmail?: boolean }
+  opts?: { includeEmail?: boolean; includePhone?: boolean }
 ): Record<string, string> {
   persistMetaClickIds();
   const cookies = readMetaClickIds();
   const pii = matchingToPixelParams(matching);
   if (opts?.includeEmail === false) delete pii.em;
+  if (opts?.includePhone === false) delete pii.ph;
+  if (pii.em && !isRealCustomerEmail(pii.em)) delete pii.em;
+  if (pii.ph && !isRealCustomerPhone(pii.ph)) delete pii.ph;
   return {
     country: 'vn',
     ...pii,

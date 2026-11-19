@@ -10,13 +10,17 @@ from app.services.facebook_capi import (
     build_purchase_user_data,
     fold_meta_text,
     geo_from_address,
+    is_real_customer_email,
     is_valid_meta_fbc,
     meta_purchase_event_id,
     normalize_capi_user_data,
     order_eligible_for_meta_purchase,
     split_vn_name,
 )
-from app.services.site_embed_templates import expand_facebook_pixel
+from app.services.site_embed_templates import (
+    _sanitize_facebook_pixel_html,
+    expand_facebook_pixel,
+)
 
 
 def _sha(value: str) -> str:
@@ -105,6 +109,50 @@ def test_build_purchase_user_data_includes_click_id_and_geo():
     assert ud["ge"] == [_sha("f")]
     assert ud["db"] == [_sha("19940520")]
     assert ud["external_id"] == [_sha("7")]
+
+
+def test_normalize_capi_user_data_drops_shop_and_invalid_pii():
+    out = normalize_capi_user_data(
+        {
+            "em": "hotro@188.com.vn",
+            "ph": "0968659836",
+            "country": "vn",
+        }
+    )
+    assert "em" not in out
+    assert "ph" not in out
+    assert out["country"] == [_sha("vn")]
+
+    empty = normalize_capi_user_data({"em": " ", "ph": "0", "fn": ""})
+    assert "em" not in empty
+    assert "ph" not in empty
+    assert "fn" not in empty
+
+    invalid_mail = normalize_capi_user_data({"em": "not-an-email", "ph": "123"})
+    assert "em" not in invalid_mail
+    assert "ph" not in invalid_mail
+
+
+def test_is_real_customer_email():
+    assert is_real_customer_email("Khach@Gmail.com") is True
+    assert is_real_customer_email("hotro@188.com.vn") is False
+    assert is_real_customer_email("linked-user-1@188.com.vn") is False
+    assert is_real_customer_email("") is False
+    assert is_real_customer_email("no-at-sign") is False
+
+
+def test_sanitize_facebook_pixel_html_strips_all_track_calls():
+    raw = (
+        "fbq('init','123');\n"
+        "fbq('track','PageView');\n"
+        "fbq('trackCustom', undefined);\n"
+        "fbq('track', '');\n"
+    )
+    cleaned = _sanitize_facebook_pixel_html(raw)
+    assert "PageView" not in cleaned
+    assert "trackCustom" not in cleaned
+    assert "fbq('track'" not in cleaned
+    assert "fbq('init','123')" in cleaned
 
 
 def test_normalize_capi_user_data_does_not_rehash_or_keep_invalid_fbc():

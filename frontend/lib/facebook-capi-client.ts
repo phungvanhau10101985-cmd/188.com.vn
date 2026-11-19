@@ -1,6 +1,6 @@
 'use client';
 
-import { getMetaCapiUserData } from '@/lib/meta-attribution';
+import { getMetaCapiUserData, isRealCustomerEmail, isRealCustomerPhone } from '@/lib/meta-attribution';
 
 export type FacebookCapiPayload = {
   event_name: string;
@@ -27,12 +27,19 @@ export function newMetaEventId(prefix: string): string {
 
 function buildFacebookCapiBody(
   payload: FacebookCapiPayload,
-  opts?: { includeEmail?: boolean }
+  opts?: { includeEmail?: boolean; includePhone?: boolean }
 ): FacebookCapiPayload {
   const mergedUser: Record<string, unknown> = {
-    ...getMetaCapiUserData({ includeEmail: opts?.includeEmail !== false }),
+    ...getMetaCapiUserData({
+      includeEmail: opts?.includeEmail !== false,
+      includePhone: opts?.includePhone !== false,
+    }),
     ...(payload.user_data && typeof payload.user_data === 'object' ? payload.user_data : {}),
   };
+  const em = mergedUser.em;
+  if (typeof em !== 'string' || !isRealCustomerEmail(em)) delete mergedUser.em;
+  const ph = mergedUser.ph;
+  if (typeof ph !== 'string' || !isRealCustomerPhone(ph)) delete mergedUser.ph;
   const user_data = Object.keys(mergedUser).length ? mergedUser : undefined;
   return {
     ...payload,
@@ -59,7 +66,7 @@ function postFacebookCapiBeacon(body: FacebookCapiPayload): boolean {
  */
 export async function sendFacebookCapiFromBrowser(
   payload: FacebookCapiPayload,
-  opts?: { keepalive?: boolean; retries?: number; includeEmail?: boolean }
+  opts?: { keepalive?: boolean; retries?: number; includeEmail?: boolean; includePhone?: boolean }
 ): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   const body = buildFacebookCapiBody(payload, opts);

@@ -171,15 +171,15 @@ def _extract_facebook_pixel_id(s: str) -> str | None:
 
 
 def _sanitize_facebook_pixel_html(html: str) -> str:
-    """Bỏ PageView inline — SPA gửi PageView qua AnalyticsTracker."""
+    """Bỏ mọi fbq track* trong snippet dán tay — SPA gửi sự kiện (tránh __missing_event)."""
     out = re.sub(
-        r"fbq\s*\(\s*['\"]track['\"]\s*,\s*['\"]PageView['\"][^)]*\)\s*;?",
+        r"fbq\s*\(\s*['\"]track(?:Custom|Single|SingleCustom)?['\"][\s\S]*?;",
         "",
         html,
         flags=re.I,
     )
     out = re.sub(
-        r"fbq\s*\(\s*['\"]trackSingle['\"]\s*,\s*['\"]\d+['\"]\s*,\s*['\"]PageView['\"][^)]*\)\s*;?",
+        r"fbq\s*\(\s*['\"]track(?:Custom|Single|SingleCustom)?['\"][^)]*\)\s*;?",
         "",
         out,
         flags=re.I,
