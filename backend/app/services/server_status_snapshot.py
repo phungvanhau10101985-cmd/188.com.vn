@@ -230,7 +230,7 @@ def _stock_job(db: Session) -> Dict[str, Any]:
 def _import_job(db: Session) -> Dict[str, Any]:
     from app.models.listing_import_queue_snapshot import ListingImportQueueSnapshot
 
-    status_text = ListingImportQueueSnapshot.payload_json["run_status"].astext
+    status_text = ListingImportQueueSnapshot.payload_json["run_status"].as_string()
     rows = (
         db.query(status_text)
         .order_by(ListingImportQueueSnapshot.updated_at.desc())

@@ -1,5 +1,8 @@
 """Cảnh báo trang trạng thái máy — không đụng DB."""
 
+from sqlalchemy.dialects import postgresql
+
+from app.models.listing_import_queue_snapshot import ListingImportQueueSnapshot
 from app.services.server_status_snapshot import build_warnings, reset_cpu_sample_for_tests
 
 
@@ -35,3 +38,9 @@ def test_quiet_machine_has_no_warning():
         error_lines=[],
     )
     assert warnings == []
+
+
+def test_import_status_reads_json_as_text():
+    expr = ListingImportQueueSnapshot.payload_json["run_status"].as_string()
+    sql = str(expr.compile(dialect=postgresql.dialect()))
+    assert "->>" in sql
