@@ -1,4 +1,4 @@
-"""Chủ đề ngày lễ storefront — public, cache ngắn."""
+"""Chủ đề ngày lễ storefront — public, một lần mỗi ngày."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,7 @@ from app.utils.ttl_cache import cache as ttl_cache
 
 router = APIRouter()
 
-_PUBLIC_TTL = 20.0
+_PUBLIC_TTL = 86400.0
 
 
 def _fetch_public() -> HolidayThemePublicOut:
@@ -60,7 +60,7 @@ def check_holiday_preview(
 
 @router.get("/public", response_model=HolidayThemePublicOut)
 def get_public_holiday_theme():
-    """Chủ đề đang bật. null = giao diện thường. Cache 20 giây."""
+    """Chủ đề đang bật. null = giao diện thường. Đọc RAM trong ngày, admin lưu thì tính lại."""
     return ttl_cache.get_or_fetch(
         holiday_theme_crud.HOLIDAY_THEME_PUBLIC_CACHE_KEY,
         _PUBLIC_TTL,

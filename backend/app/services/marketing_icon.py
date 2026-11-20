@@ -512,6 +512,30 @@ def generate_sale_icon(
         raise
 
 
+def invalidate_public_icon_cache() -> None:
+    global _public_icon_cache
+    _public_icon_cache = None
+
+
+def public_icon_state_if_fresh() -> Optional[Dict[str, Any]]:
+    from app.services.sale_calendar import vn_today_key
+
+    cached = _public_icon_cache
+    if cached is None or cached[0] != vn_today_key():
+        return None
+    return cached[1]
+
+
+def _store_public_icon(payload: Dict[str, Any]) -> None:
+    global _public_icon_cache
+    from app.services.sale_calendar import vn_today_key
+
+    _public_icon_cache = (vn_today_key(), payload)
+
+
+_public_icon_cache: tuple[str, Dict[str, Any]] | None = None
+
+
 def current_sale_icon_state(
     db: Session,
     *,
@@ -537,7 +561,7 @@ def current_sale_icon_state(
     if getattr(sale, "kind", None) == "holiday" or not (
         sale.phase and sale.event_date and sale.event_date.day == sale.event_date.month
     ):
-        return payload
+        return _finish_public_icon(payload, user)
     row = find_active_icon(
         db,
         day=sale.event_date.day,
@@ -545,7 +569,7 @@ def current_sale_icon_state(
         discount_percent=sale.discount_percent,
     )
     if not row or not row.image_url:
-        return payload
+        return _finish_public_icon(payload, user)
     payload.update(
         {
             "icon_url": row.image_url,
@@ -560,6 +584,12 @@ def current_sale_icon_state(
             "version": row.version,
         }
     )
+    return _finish_public_icon(payload, user)
+
+
+def _finish_public_icon(payload: Dict[str, Any], user) -> Dict[str, Any]:
+    if user is None:
+        _store_public_icon(payload)
     return payload
 
 

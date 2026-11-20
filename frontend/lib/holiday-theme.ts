@@ -53,7 +53,7 @@ function rememberPublic(data: PublicHolidayTheme) {
 
 /** `undefined` = không gọi được API, giữ trạng thái đang có. */
 export async function fetchPublicHolidayTheme(): Promise<PublicHolidayTheme | undefined> {
-  if (typeof window !== 'undefined' && publicCache && Date.now() - publicCache.at < 20000) {
+  if (typeof window !== 'undefined' && publicCache && Date.now() - publicCache.at < 86_400_000) {
     return publicCache.data;
   }
   if (typeof window !== 'undefined' && publicFlight) return publicFlight;
@@ -71,7 +71,7 @@ async function loadPublicHolidayTheme(): Promise<PublicHolidayTheme | undefined>
       headers: { Accept: 'application/json' },
     };
     if (typeof window === 'undefined') {
-      init.next = { revalidate: 20 };
+      init.next = { revalidate: 86400 };
     }
     const res = await fetch(`${getApiBaseUrl()}/holiday-theme/public`, init);
     if (!res.ok) return undefined;

@@ -20,7 +20,7 @@ export type CurrentAppWebIcon = {
   version?: number | null;
 };
 
-const ICON_MEM_TTL_MS = 60_000;
+const ICON_MEM_TTL_MS = 86_400_000;
 let iconMemCache: { expiresAt: number; value: CurrentAppWebIcon } | null = null;
 let iconInflight: Promise<CurrentAppWebIcon> | null = null;
 
@@ -48,7 +48,7 @@ export async function fetchCurrentAppWebIcon(): Promise<CurrentAppWebIcon> {
   iconInflight = (async () => {
     try {
       const res = await fetch(`${base}/marketing-icons/current`, {
-        next: { revalidate: 120 },
+        next: { revalidate: 86400 },
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) return fallbackIcon();

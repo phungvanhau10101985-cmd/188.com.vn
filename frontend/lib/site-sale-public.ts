@@ -10,7 +10,7 @@ const FETCH_TIMEOUT_MS = 4000;
 const isDev = process.env.NODE_ENV === 'development';
 const disableCache =
   process.env.NEXT_PUBLIC_DISABLE_CACHE === '1' || process.env.DISABLE_CACHE === '1';
-const REVALIDATE = isDev || disableCache ? 0 : 60;
+const REVALIDATE = isDev || disableCache ? 0 : 86400;
 
 export async function getInitialSiteSaleCalendar(): Promise<SiteSaleCalendarState | null> {
   try {

@@ -24,10 +24,22 @@ router = APIRouter()
 
 @router.get("/current", response_model=MarketingIconCurrentResponse)
 def current_marketing_icon(
-    db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ):
-    return MarketingIconCurrentResponse(**icon_svc.current_sale_icon_state(db, user=current_user))
+    """Icon công khai đọc RAM trong ngày. Khách đăng nhập vẫn tính riêng."""
+    if current_user is None:
+        cached = icon_svc.public_icon_state_if_fresh()
+        if cached is not None:
+            return MarketingIconCurrentResponse(**cached)
+    db = SessionLocal()
+    try:
+        payload = icon_svc.current_sale_icon_state(db, user=current_user)
+        from app.db.session import release_read_transaction
+
+        release_read_transaction(db)
+        return MarketingIconCurrentResponse(**payload)
+    finally:
+        db.close()
 
 
 def _admin_item(row: MarketingIconAsset) -> MarketingIconAdminItem:

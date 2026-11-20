@@ -22,20 +22,36 @@ _defaults_ensured_at: float = 0.0
 _DEFAULTS_ENSURE_TTL_SECONDS = 300.0
 _maintain_checked_at: float = 0.0
 _MAINTAIN_CHECK_TTL_SECONDS = 60.0
-# Khách không đăng nhập: cùng một trạng thái sale cho mọi request. Cache ngắn
-# để listing/PDP không mở transaction sale mỗi lần.
-_public_sale_state_cache: tuple[float, "SaleCalendarState"] | None = None
-_PUBLIC_SALE_STATE_TTL_SECONDS = 20.0
+# Khách không đăng nhập: một trạng thái sale cho cả ngày VN. Request sau đọc RAM.
+# Admin lưu cài đặt thì xóa cache. Sang ngày mới, request đầu tính lại rồi trả CPU.
+_public_sale_state_cache: tuple[str, "SaleCalendarState"] | None = None
+
+
+def vn_today_key() -> str:
+    return _now_vn().date().isoformat()
 
 
 def invalidate_public_sale_state_cache() -> None:
     global _public_sale_state_cache
     _public_sale_state_cache = None
+    try:
+        from app.services.marketing_icon import invalidate_public_icon_cache
+
+        invalidate_public_icon_cache()
+    except Exception:
+        pass
+
+
+def public_sale_state_if_fresh() -> Optional["SaleCalendarState"]:
+    cached = _public_sale_state_cache
+    if cached is None or cached[0] != vn_today_key():
+        return None
+    return cached[1]
 
 
 def _store_public_sale_state(state: SaleCalendarState) -> None:
     global _public_sale_state_cache
-    _public_sale_state_cache = (_perf_time.monotonic(), state)
+    _public_sale_state_cache = (vn_today_key(), state)
 
 FEED_TITLE_PREFIX_TEASER = "Sắp giảm giá"
 FEED_TITLE_PREFIX_ACTIVE = "Đang giảm giá"
@@ -365,9 +381,9 @@ def resolve_sale_calendar_state(
 ) -> SaleCalendarState:
     """Trạng thái campaign hiện tại (teaser / active / không)."""
     if user is None and now is None:
-        cached = _public_sale_state_cache
-        if cached is not None and (_perf_time.monotonic() - cached[0]) < _PUBLIC_SALE_STATE_TTL_SECONDS:
-            return cached[1]
+        cached = public_sale_state_if_fresh()
+        if cached is not None:
+            return cached
         state = _resolve_sale_calendar_state_uncached(db, now=None, user=None)
         _store_public_sale_state(state)
         return state

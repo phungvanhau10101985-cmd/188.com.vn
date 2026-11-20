@@ -119,6 +119,21 @@ def _compose_listing_product_id(prefix: str, sku: str) -> str:
     return f"{prefix.strip()}a188{sku.strip().upper()}"
 
 
+def _listing_prefix_rows(db: Session, prefix_key: str, exclude: Set[int]):
+    """Chỉ lấy vài dòng trùng prefix. Không kéo cả bảng products vào RAM."""
+    key = prefix_key.casefold()
+    qry = db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None))
+    qry = qry.filter(
+        or_(
+            sql_func.lower(Product.product_id) == key,
+            sql_func.lower(Product.product_id).like(key + "a188%"),
+        )
+    )
+    if exclude:
+        qry = qry.filter(Product.id.notin_(list(exclude)))
+    return qry.limit(8).all()
+
+
 def find_conflicting_product_id_for_same_listing_source(
     db: Session,
     candidate_product_id: str,
@@ -132,16 +147,12 @@ def find_conflicting_product_id_for_same_listing_source(
     cand_src = _listing_source_prefix_from_product_id(candidate_product_id)
     if not cand_src:
         return None
-    pk = cand_src["prefix_key"]
-    ex = exclude_product_pk_ids or set()
     cand_norm = str(candidate_product_id).strip()
-    for row_id, pid_str in db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None)).all():
-        if row_id in ex:
-            continue
+    for _row_id, pid_str in _listing_prefix_rows(db, cand_src["prefix_key"], exclude_product_pk_ids or set()):
         if str(pid_str).strip() == cand_norm:
             continue
         other_src = _listing_source_prefix_from_product_id(pid_str)
-        if other_src and other_src["prefix_key"] == pk:
+        if other_src and other_src["prefix_key"] == cand_src["prefix_key"]:
             return str(pid_str).strip()
     return None
 
@@ -156,10 +167,7 @@ def find_product_by_listing_source_prefix(
     pk = (source_prefix or {}).get("prefix_key")
     if not pk:
         return None
-    ex = exclude_product_pk_ids or set()
-    for row_id, pid_str in db.query(Product.id, Product.product_id).filter(Product.product_id.isnot(None)).all():
-        if row_id in ex:
-            continue
+    for row_id, pid_str in _listing_prefix_rows(db, pk, exclude_product_pk_ids or set()):
         other_src = _listing_source_prefix_from_product_id(pid_str)
         if other_src and other_src["prefix_key"] == pk:
             return db.query(Product).filter(Product.id == row_id).first()

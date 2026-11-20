@@ -14,7 +14,7 @@ from app.core.security import (
     require_privileged_admin,
 )
 from app.crud import sale_calendar as crud_sale_calendar
-from app.db.session import get_db, release_read_transaction
+from app.db.session import SessionLocal, get_db, release_read_transaction
 from app.models.admin import AdminUser
 from app.models.user import User
 from app.schemas.sale_calendar import (
@@ -113,13 +113,21 @@ def _build_admin_settings_out(db: Session) -> SaleCalendarSettingsOut:
 
 @router.get("/current", response_model=SaleCalendarPublicResponse)
 def get_current_sale_calendar(
-    db: Session = Depends(get_db),
     current_user: User | None = Depends(get_current_user_optional),
 ):
-    state = sale_calendar_svc.resolve_sale_calendar_state(db, user=current_user)
-    payload = state.to_public_dict()
-    release_read_transaction(db)
-    return SaleCalendarPublicResponse(**payload)
+    """Khách không đăng nhập dùng bản trong RAM của ngày hôm nay, không mở database."""
+    if current_user is None:
+        cached = sale_calendar_svc.public_sale_state_if_fresh()
+        if cached is not None:
+            return SaleCalendarPublicResponse(**cached.to_public_dict())
+    db = SessionLocal()
+    try:
+        state = sale_calendar_svc.resolve_sale_calendar_state(db, user=current_user)
+        payload = state.to_public_dict()
+        release_read_transaction(db)
+        return SaleCalendarPublicResponse(**payload)
+    finally:
+        db.close()
 
 
 @router.get("/admin/test-settings")
