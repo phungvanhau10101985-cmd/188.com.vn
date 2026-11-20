@@ -254,7 +254,7 @@ def _persist_job_to_db(job_id: str) -> None:
         logger.exception("persist image localization job %s failed", job_id)
         db.rollback()
     finally:
-        db.close()
+        release_db_session(db)
 
 
 def _job_update(job_id: str, **kwargs: Any) -> None:
@@ -307,8 +307,13 @@ def _job_cancel_signal(job_id: str) -> bool:
         if (row.status or "").strip().lower() == "cancelled":
             return True
         return bool(row.cancel_requested)
+    except Exception as exc:
+        if not is_transient_db_error(exc):
+            raise
+        logger.warning("Đọc hủy job %s lỗi DB tạm, coi như chưa hủy: %s", job_id, exc)
+        return False
     finally:
-        db.close()
+        release_db_session(db)
 
 
 def _job_get(job_id: str) -> Dict[str, Any]:
@@ -320,8 +325,14 @@ def _job_get(job_id: str) -> Dict[str, Any]:
         if row:
             db_data = image_loc_job_crud.row_to_job_dict(row)
             db_data["processed_product_ids"] = _unique_product_ids(row.processed_product_ids or [])
+    except Exception as exc:
+        if not is_transient_db_error(exc):
+            raise
+        logger.warning("Đọc job %s lỗi DB tạm, dùng snapshot trong RAM: %s", job_id, exc)
+        with _jobs_lock:
+            return dict(_jobs.get(job_id) or {})
     finally:
-        db.close()
+        release_db_session(db)
 
     with _jobs_lock:
         mem = dict(_jobs.get(job_id) or {})
@@ -645,6 +656,14 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             )
             return
 
+        product_ids_to_run = [
+            str(p.product_id).strip() for p in products if str(getattr(p, "product_id", "")).strip()
+        ]
+        products = []
+        # Chờ RAM, CPU hoặc giờ DeepSeek có thể lâu hơn idle_in_transaction 30 giây.
+        # Giữ session lúc chờ thì Postgres cắt connection và cả job chết với lỗi SSL.
+        release_db_session(db)
+
         if not _wait_for_deepseek_off_peak_if_enabled(
             job_id,
             should_cancel=lambda: _job_cancel_signal(job_id),
@@ -686,8 +705,8 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
         def should_cancel() -> bool:
             return _job_cancel_signal(job_id)
 
-        product_ids_to_run = [str(p.product_id).strip() for p in products if str(getattr(p, "product_id", "")).strip()]
         for product_id in product_ids_to_run:
+            release_db_session(db)
             # Mỗi sản phẩm kiểm tra lại dung lượng, dừng sớm nếu ổ đĩa xuống ngưỡng nguy hiểm.
             guard_runtime_disk_space()
             if _job_is_cancelled(job_id):
@@ -761,10 +780,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     message="Đã hủy job trong lúc chờ giờ thấp điểm DeepSeek.",
                 )
                 return
-            # Dùng session ngắn cho từng sản phẩm:
-            # - tránh giữ 1 PostgreSQL connection quá lâu trong job lớn
-            # - giúp pool_pre_ping hoạt động hiệu quả hơn (checkout lại mỗi vòng)
-            db.close()
+            # Session chọn sản phẩm đã nhả trước lúc chờ. Mở session mới cho đúng một sản phẩm.
             db = SessionLocal()
             product = db.query(Product).filter(Product.product_id == product_id).first()
             product_db_id: Optional[int] = product.id if product is not None else None
@@ -1123,7 +1139,7 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             cleanup_stale_image_localization_temp()
         except Exception:
             logger.exception("Dọn temp image localization sau job lỗi")
-        db.close()
+        release_db_session(db)
 
 
 def _deepseek_pricing_for_admin() -> Dict[str, Any]:
