@@ -39,6 +39,16 @@ def test_blocks_at_85_and_resumes_at_80():
     assert pressure.decide_blocked(True, None, 70.0) is False
 
 
+def test_host_blocks_background_can_read_previous_state(monkeypatch):
+    pressure.reset_for_tests()
+    monkeypatch.setattr(pressure, "pressure_enabled", lambda: True)
+    monkeypatch.setattr(pressure, "_linux_proc", lambda: True)
+    monkeypatch.setattr(pressure, "_ensure_sampler", lambda: None)
+    monkeypatch.setattr(pressure, "_read_ram_used_pct", lambda: 10.0)
+    assert pressure.host_blocks_background() is False
+    assert pressure.host_blocks_background() is False
+
+
 def test_missing_sample_does_not_block_by_itself():
     assert pressure.decide_blocked(False, None, 10.0) is False
     assert pressure.decide_blocked(False, None, None) is False

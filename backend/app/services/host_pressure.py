@@ -120,6 +120,7 @@ def decide_blocked(
 
 def host_blocks_background() -> bool:
     """True = khách đang chiếm máy, việc nền chưa bắt đầu phải chờ."""
+    global _blocked
     if not pressure_enabled():
         return False
     if not _linux_proc():
