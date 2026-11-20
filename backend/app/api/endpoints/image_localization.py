@@ -25,7 +25,9 @@ from app.services.image_localization_job_abort import (
 )
 from app.services.image_localization_job_runtime import (
     image_localization_embedded_in_api,
+    job_awaits_product_selection,
     payload_from_stored,
+    wait_for_imgloc_memory,
     start_job_process,
     start_resume_daemon,
 )
@@ -548,6 +550,16 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             stored = payload_from_stored(row.payload, StartImageLocalizationPayload)
             if stored is not None:
                 payload = stored
+            if job_awaits_product_selection(row):
+                # Job mới chưa chọn SP. Resume danh sách rỗng sẽ báo hết hàng đợi dù catalog còn pending.
+                resume = False
+        if resume:
+            row = image_loc_job_crud.get_job(db, job_id)
+            if not row:
+                return
+            stored = payload_from_stored(row.payload, StartImageLocalizationPayload)
+            if stored is not None:
+                payload = stored
             processed_ids = _unique_product_ids(row.processed_product_ids or [])
             processed_set = set(processed_ids)
             done = int(row.done or 0)
@@ -695,6 +707,27 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 return
             from app.services.host_pressure import wait_while_host_busy
 
+            def _note_ram_wait(detail: str) -> None:
+                _job_update(
+                    job_id,
+                    phase="waiting_ram",
+                    message=f"Tạm chờ RAM rồi xử lý sản phẩm tiếp ({detail})."[:500],
+                    current_product_id=product_id,
+                )
+
+            if not wait_for_imgloc_memory(should_cancel, notify=_note_ram_wait):
+                _finalize_job_cancelled(
+                    job_id,
+                    done=done,
+                    failed=failed,
+                    skipped=skipped,
+                    total=total,
+                    processed_ids=processed_ids,
+                    results=results,
+                    skipped_reports=skipped_reports,
+                    message="Đã hủy job trong lúc chờ RAM trống.",
+                )
+                return
             if not wait_while_host_busy(should_stop=should_cancel):
                 _finalize_job_cancelled(
                     job_id,

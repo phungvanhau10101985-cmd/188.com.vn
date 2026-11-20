@@ -2,12 +2,61 @@
 
 from datetime import datetime, timedelta, timezone
 
+from types import SimpleNamespace
+
 from app.services.image_localization_job_runtime import (
     cmdline_looks_like_imgloc_worker,
+    job_awaits_product_selection,
     job_updated_at_is_stalled,
     should_abort_auto_resume,
+    wait_for_imgloc_memory,
     worker_process_title,
 )
+
+
+def test_new_job_with_empty_queue_must_select_products():
+    fresh = SimpleNamespace(queue_product_ids=[], processed_product_ids=[], started_at=None)
+    assert job_awaits_product_selection(fresh) is True
+    started = SimpleNamespace(
+        queue_product_ids=["p1"],
+        processed_product_ids=[],
+        started_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+    )
+    assert job_awaits_product_selection(started) is False
+    resumed_empty = SimpleNamespace(
+        queue_product_ids=[],
+        processed_product_ids=["p1"],
+        started_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+    )
+    assert job_awaits_product_selection(resumed_empty) is False
+
+
+def test_wait_for_memory_continues_when_ram_is_enough(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.image_localization_job_runtime.memory_pressure_blocks_imgloc",
+        lambda: (False, "MemAvailable=2200MB"),
+    )
+    monkeypatch.setattr(
+        "app.services.image_localization_job_runtime.release_imgloc_heap",
+        lambda: None,
+    )
+    assert wait_for_imgloc_memory() is True
+
+
+def test_wait_for_memory_stops_when_cancelled(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.image_localization_job_runtime.memory_pressure_blocks_imgloc",
+        lambda: (True, "MemAvailable=1500MB < min=2000MB"),
+    )
+    monkeypatch.setattr(
+        "app.services.image_localization_job_runtime.release_imgloc_heap",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "app.services.image_localization_job_runtime.time.sleep",
+        lambda _seconds: None,
+    )
+    assert wait_for_imgloc_memory(lambda: True) is False
 
 
 def test_worker_process_title_fits_prctl():

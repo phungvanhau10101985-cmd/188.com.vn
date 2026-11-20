@@ -27,9 +27,9 @@ module.exports = {
         RUN_DB_INIT_ON_STARTUP: '0',
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'false',
         IMAGE_LOCALIZATION_EMBEDDED_IN_API: 'false',
-        // Chặn vòng OOM: worker ảnh ≤3.2GB AS; không resume khi MemAvailable < 2.8GB.
-        IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: '3200',
-        IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: '2800',
+        // Chặn vòng OOM: worker ảnh ≤1.5GB AS; không chạy khi MemAvailable < 2GB.
+        IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: '1500',
+        IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: '2000',
         IMAGE_LOCALIZATION_MAX_AUTO_RESUME_COUNT: '6',
         // 25MP/batch thay 70MP — giảm spike RAM khi OCR merge trên VPS 11GB.
         IMAGE_LOCALIZATION_MERGE_MAX_PIXELS: '25000000',
@@ -132,6 +132,8 @@ module.exports = {
         // Script cũng ép resume=true. Pool nhỏ: job OCR không được chiếm pool 35 của API.
         IMAGE_LOCALIZATION_JOB_RESUME_ON_STARTUP: 'true',
         IMAGE_LOCALIZATION_EMBEDDED_IN_API: 'false',
+        IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: '1500',
+        IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB: '2000',
         DATABASE_POOL_SIZE: '2',
         DATABASE_MAX_OVERFLOW: '2',
         DATABASE_POOL_TIMEOUT: '8',

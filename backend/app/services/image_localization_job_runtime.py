@@ -227,7 +227,7 @@ def memory_pressure_blocks_imgloc() -> Tuple[bool, str]:
     """
     True = không nên start/resume job ảnh (RAM trống thấp).
     """
-    min_mb = int(getattr(settings, "IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB", 2800) or 0)
+    min_mb = int(getattr(settings, "IMAGE_LOCALIZATION_RESUME_MIN_AVAILABLE_MB", 2000) or 0)
     if min_mb <= 0:
         return False, ""
     avail = _mem_available_mb()
@@ -236,6 +236,38 @@ def memory_pressure_blocks_imgloc() -> Tuple[bool, str]:
     if avail < min_mb:
         return True, f"MemAvailable={avail}MB < min={min_mb}MB"
     return False, f"MemAvailable={avail}MB"
+
+
+def release_imgloc_heap() -> None:
+    """Trả bộ nhớ ảnh vừa xong về OS trước khi đo RAM cho sản phẩm kế."""
+    import gc
+
+    gc.collect()
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        return
+
+
+def wait_for_imgloc_memory(should_stop=None, notify=None) -> bool:
+    """Chờ đến khi RAM trống đạt ngưỡng. False nếu should_stop bảo dừng."""
+    release_imgloc_heap()
+    ticks = 0
+    while True:
+        blocked, detail = memory_pressure_blocks_imgloc()
+        if not blocked:
+            return True
+        if should_stop is not None and should_stop():
+            return False
+        if notify is not None and ticks % 12 == 0:
+            try:
+                notify(detail)
+            except Exception:
+                logger.debug("imgloc memory wait notify failed", exc_info=True)
+        ticks += 1
+        time.sleep(5)
 
 
 def _multiprocess_job_entry(job_id: str, payload_dict: dict, resume: bool) -> None:
@@ -473,6 +505,21 @@ def image_localization_embedded_in_api() -> bool:
     return bool(getattr(settings, "IMAGE_LOCALIZATION_EMBEDDED_IN_API", False))
 
 
+def job_awaits_product_selection(row) -> bool:
+    """Job bấm chạy mới: hàng đợi chưa được chọn, chưa xử lý sản phẩm nào.
+
+    Worker chỉ resume danh sách đã lưu. Danh sách đó lúc tạo job là rỗng —
+    phải quét sản phẩm pending, không được kết luận «hết hàng đợi».
+    """
+    queue = getattr(row, "queue_product_ids", None) or []
+    processed = getattr(row, "processed_product_ids", None) or []
+    if any(str(item).strip() for item in queue):
+        return False
+    if any(str(item).strip() for item in processed):
+        return False
+    return getattr(row, "started_at", None) is None
+
+
 def resume_pending_jobs(run_job, payload_cls: type) -> None:
     """Resume job queued/running trong DB nếu chưa có worker subprocess sống."""
     from app.services.heavy_work_gate import clear_camp, gate_enabled, poll_heavy_work
@@ -554,8 +601,9 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
             if st in ("cancelled", "done", "error") or bool(fresh.cancel_requested):
                 logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
                 continue
+            select_fresh = job_awaits_product_selection(fresh)
             resume_n = int(fresh.resume_count or 0)
-            if should_abort_auto_resume(resume_count=resume_n, max_resume=max_resume):
+            if not select_fresh and should_abort_auto_resume(resume_count=resume_n, max_resume=max_resume):
                 job_crud.patch_job(
                     db_check,
                     row.job_id,
@@ -607,28 +655,43 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
         try:
             db_patch = SessionLocal()
             try:
-                job_crud.patch_job(
-                    db_patch,
-                    row.job_id,
-                    {
-                        "status": "queued",
-                        "phase": "queued",
-                        "message": (
-                            f"Tiếp tục sau khởi động server "
-                            f"(resume #{(row.resume_count or 0) + 1})…"
-                        ),
-                        "resume_count": (row.resume_count or 0) + 1,
-                    },
-                )
+                if select_fresh:
+                    job_crud.patch_job(
+                        db_patch,
+                        row.job_id,
+                        {
+                            "status": "queued",
+                            "phase": "queued",
+                            "message": "Đang chọn sản phẩm chưa bản địa hóa…",
+                        },
+                    )
+                else:
+                    job_crud.patch_job(
+                        db_patch,
+                        row.job_id,
+                        {
+                            "status": "queued",
+                            "phase": "queued",
+                            "message": (
+                                f"Tiếp tục sau khởi động server "
+                                f"(resume #{(row.resume_count or 0) + 1})…"
+                            ),
+                            "resume_count": (row.resume_count or 0) + 1,
+                        },
+                    )
             finally:
                 db_patch.close()
 
-            logger.info("IMAGE_LOCALIZATION_JOB_RESUME job_id=%s", row.job_id)
+            logger.info(
+                "IMAGE_LOCALIZATION_JOB_%s job_id=%s",
+                "SELECT" if select_fresh else "RESUME",
+                row.job_id,
+            )
             started = bool(
                 start_job_process(
                     row.job_id,
                     payload.model_dump(),
-                    resume=True,
+                    resume=not select_fresh,
                     lease=lease,
                 )
             )
