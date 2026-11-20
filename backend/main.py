@@ -277,6 +277,7 @@ def load_api_routes():
         ("vps_backup_admin", "/admin/vps-backup", "admin-vps-backup"),
         ("ad_spend_admin", "/admin/ad-spend", "admin-ad-spend"),
         ("api_stats_admin", "/admin/api-stats", "admin-api-stats"),
+        ("server_status_admin", "/admin/server-status", "admin-server-status"),
         ("embed_codes", "/embed-codes", "embed-codes"),
         ("shop_video_fab", "/shop-video-fab", "shop-video-fab"),
         ("holiday_theme", "/holiday-theme", "holiday-theme"),

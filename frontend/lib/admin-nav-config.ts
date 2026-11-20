@@ -100,6 +100,12 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
         moduleKey: 'error_logs',
         privilegedOnly: true,
       },
+      {
+        href: '/admin/server-status',
+        label: 'Trạng thái máy',
+        moduleKey: 'server_status',
+        privilegedOnly: true,
+      },
     ],
   },
 ];

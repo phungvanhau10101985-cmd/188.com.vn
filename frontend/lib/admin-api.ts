@@ -6138,3 +6138,33 @@ export const ladipageAdminAPI = {
       body: JSON.stringify({ data }),
     }),
 };
+
+export type ServerStatusWarning = { level: 'warning' | 'error' | string; text: string };
+export type ServerStatusJob = {
+  key: string;
+  name: string;
+  running: boolean;
+  detail: string;
+  rss_mb?: number | null;
+};
+export type ServerStatusLog = { at: string | null; text: string; status_code?: number | null };
+export type ServerStatusSnapshot = {
+  checked_at: string;
+  host: {
+    mem_total_mb: number | null;
+    mem_available_mb: number | null;
+    ram_used_pct: number | null;
+    cpu_used_pct: number | null;
+    min_available_mb: number;
+    pressure_block_pct: number;
+    localization_rss_mb: number | null;
+  };
+  warnings: ServerStatusWarning[];
+  jobs: ServerStatusJob[];
+  logs: ServerStatusLog[];
+};
+
+export const adminServerStatusAPI = {
+  get: (signal?: AbortSignal) =>
+    fetchAdmin<ServerStatusSnapshot>('/admin/server-status', { signal, timeoutMs: 15000 }),
+};

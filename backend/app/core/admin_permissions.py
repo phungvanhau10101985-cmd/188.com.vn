@@ -41,6 +41,7 @@ ALLOWED_MODULE_KEYS: Set[str] = {
     "notifications",
     "newsletter",
     "error_logs",
+    "server_status",
     "ladipage",
 }
 
