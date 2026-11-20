@@ -3279,8 +3279,8 @@ export default function AdminShippingPage() {
           <strong>D</strong> số tiền EMS đã trả shop (vd. 5,200,000), ô <strong>E1</strong> ngày trả tiền (vd.{' '}
           <strong>Ngày trả tiền: 02/06/2026</strong>).
           Chỉ sau bước này hệ thống mới ghi <strong>COD EMS trả shop</strong> — hành trình «[COD]Đã thu tiền» là
-          bưu tá thu khách, chưa phải trả shop. Import lần 2 cùng tên file thì <strong>cập nhật</strong> đợt
-          đối soát đã lưu, không tạo đợt mới.
+          bưu tá thu khách, chưa phải trả shop. Mỗi lần import tạo một đợt mới và chỉ ghi các mã có trong
+          file. Mã đã đối soát ở đợt trước được giữ, kể cả khi file mới tải về trùng tên.
         </p>
         <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <input

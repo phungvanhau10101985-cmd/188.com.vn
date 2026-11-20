@@ -33,54 +33,6 @@ def _read_excel_rows(file_bytes: bytes, filename: str) -> list[tuple[Any, ...]]:
     return read_spreadsheet_rows(file_bytes, filename)
 
 
-def _normalize_source_filename(name: Optional[str]) -> Optional[str]:
-    text = (name or "").strip()
-    return text.casefold() if text else None
-
-
-def _find_batches_by_filename(
-    db: Session,
-    source_filename: Optional[str],
-) -> list[EmsCodSettlementBatch]:
-    norm = _normalize_source_filename(source_filename)
-    if not norm:
-        return []
-    batches = (
-        db.query(EmsCodSettlementBatch)
-        .filter(EmsCodSettlementBatch.source_filename.isnot(None))
-        .order_by(EmsCodSettlementBatch.id.asc())
-        .all()
-    )
-    return [b for b in batches if _normalize_source_filename(b.source_filename) == norm]
-
-
-def _clear_settlement_on_shipping_record(db: Session, record_id: Optional[int]) -> None:
-    if not record_id:
-        return
-    shipping = db.query(EmsShippingRecord).filter(EmsShippingRecord.id == record_id).first()
-    if not shipping:
-        return
-    if should_preserve_confirmed_full(shipping.cod_settlement_status, None):
-        return
-    shipping.cod_paid_amount = None
-    shipping.cod_paid_date = None
-    shipping.cod_settlement_status = None
-    shipping.cod_settlement_message = None
-
-
-def _clear_batch_settlements(db: Session, batch_id: int) -> None:
-    rows = (
-        db.query(EmsCodSettlementRow)
-        .filter(EmsCodSettlementRow.batch_id == batch_id)
-        .all()
-    )
-    for row in rows:
-        _clear_settlement_on_shipping_record(db, row.ems_shipping_record_id)
-    db.query(EmsCodSettlementRow).filter(EmsCodSettlementRow.batch_id == batch_id).delete(
-        synchronize_session=False
-    )
-
-
 def parse_cod_settlement_rows(
     file_bytes: bytes,
     *,
@@ -413,44 +365,27 @@ def import_cod_settlement_excel(
 
     effective_payment_date = payment_date or date.today()
 
-    matching_batches = _find_batches_by_filename(db, source_filename)
-    if matching_batches:
-        batch = matching_batches[0]
-        for dup in matching_batches[1:]:
-            _clear_batch_settlements(db, dup.id)
-            db.delete(dup)
-        _clear_batch_settlements(db, batch.id)
-        batch.payment_date = effective_payment_date
-        batch.source_filename = source_filename
-        batch.imported_by_admin_id = admin_id
-        batch.total_rows = summary["total_rows"]
-        batch.matched_count = summary["matched"]
-        batch.amount_mismatch_count = summary["amount_mismatch"]
-        batch.record_not_found_count = summary["record_not_found"]
-        batch.parse_error_count = summary["parse_error"]
-        batch.total_paid_amount = summary["total_paid_amount"]
-        batch.total_db_cod_amount = summary["total_db_cod_amount"]
-        batch.total_amount_difference = summary["total_amount_difference"]
-        db.flush()
-        warnings.append(
-            f"File «{source_filename}» đã import trước đó — cập nhật đợt #{batch.id}, không tạo đợt mới."
-        )
-    else:
-        batch = EmsCodSettlementBatch(
-            payment_date=effective_payment_date,
-            source_filename=source_filename,
-            imported_by_admin_id=admin_id,
-            total_rows=summary["total_rows"],
-            matched_count=summary["matched"],
-            amount_mismatch_count=summary["amount_mismatch"],
-            record_not_found_count=summary["record_not_found"],
-            parse_error_count=summary["parse_error"],
-            total_paid_amount=summary["total_paid_amount"],
-            total_db_cod_amount=summary["total_db_cod_amount"],
-            total_amount_difference=summary["total_amount_difference"],
-        )
-        db.add(batch)
-        db.flush()
+    # Mỗi lần import là một đợt mới. Không xóa đợt cũ khi trùng tên file:
+    # file EMS tải về hay trùng tên «Phùng Văn Hậu (Shop 188) (9).xls»,
+    # và lần ghi đè trước đây gỡ COD của những mã không có trong file mới.
+    batch = EmsCodSettlementBatch(
+        payment_date=effective_payment_date,
+        source_filename=source_filename,
+        imported_by_admin_id=admin_id,
+        total_rows=summary["total_rows"],
+        matched_count=summary["matched"],
+        amount_mismatch_count=summary["amount_mismatch"],
+        record_not_found_count=summary["record_not_found"],
+        parse_error_count=summary["parse_error"],
+        total_paid_amount=summary["total_paid_amount"],
+        total_db_cod_amount=summary["total_db_cod_amount"],
+        total_amount_difference=summary["total_amount_difference"],
+    )
+    db.add(batch)
+    db.flush()
+    warnings.append(
+        "Đã lưu đợt mới. Mã không có trong file này giữ nguyên đối soát COD đã có."
+    )
 
     saved_rows: list[dict[str, Any]] = []
     for row in reconciled:
