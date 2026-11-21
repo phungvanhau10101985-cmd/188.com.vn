@@ -368,7 +368,7 @@ class Settings:
         )
         # Giới hạn địa chỉ ảo worker subprocess (MB). 0 = tắt. Tránh 1 job ảnh phình >RAM VPS.
         self.IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: int = int(
-            os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", "2500") or "2500"
+            os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", "4000") or "4000"
         )
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"
