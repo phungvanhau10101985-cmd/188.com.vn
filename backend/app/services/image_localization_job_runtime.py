@@ -230,10 +230,22 @@ def _apply_worker_address_space_limit() -> None:
         return
     try:
         limit = max_mb * 1024 * 1024
-        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-        new_hard = hard if hard != resource.RLIM_INFINITY and hard < limit else limit
-        new_soft = min(limit, new_hard) if new_hard != resource.RLIM_INFINITY else limit
-        resource.setrlimit(resource.RLIMIT_AS, (new_soft, new_hard))
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        except (ValueError, OSError):
+            # Trần cứng hiện tại thấp hơn và process không được phép nâng.
+            _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+            allowed = hard if hard != resource.RLIM_INFINITY else limit
+            capped = min(limit, allowed)
+            resource.setrlimit(resource.RLIMIT_AS, (capped, allowed))
+        new_soft, new_hard = resource.getrlimit(resource.RLIMIT_AS)
+        stale = (os.environ.get("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB") or "").strip()
+        if stale and stale != str(max_mb):
+            logger.info(
+                "IMAGE_LOCALIZATION_WORKER cap .env=%sMB bỏ qua PM2 env=%s",
+                max_mb,
+                stale,
+            )
         logger.info(
             "IMAGE_LOCALIZATION_WORKER RLIMIT_AS soft=%sMB hard=%sMB",
             new_soft // (1024 * 1024),

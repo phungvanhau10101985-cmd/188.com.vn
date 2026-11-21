@@ -18,6 +18,55 @@ for _stream in (sys.stdout, sys.stderr):
         except (OSError, ValueError):
             pass
 
+def read_dotenv_assignment(text: str, key: str) -> Optional[str]:
+    """Lấy giá trị một khóa trong nội dung .env. Bỏ qua dòng trống và comment."""
+    prefix = key + "="
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip().strip('"').strip("'")
+    return None
+
+
+def read_dotenv_file_value(path: Path, key: str) -> Optional[str]:
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    value = read_dotenv_assignment(text, key)
+    if value is None or value == "":
+        return None
+    return value
+
+
+def resolve_image_localization_worker_max_as_mb(
+    env_file: Path,
+    env_local_file: Path,
+    *,
+    process_value: Optional[str] = None,
+    default: str = "4000",
+) -> int:
+    """Trần RAM worker lấy từ file .env, không lấy biến PM2 còn sót.
+
+    PM2 giữ IMAGE_LOCALIZATION_WORKER_MAX_AS_MB từ lần start đầu.
+    restart --update-env không đọc lại ecosystem. load_dotenv() cũng không
+    ghi đè biến đã có trong process, nên file .env phải thắng.
+    """
+    chosen = (
+        read_dotenv_file_value(env_local_file, "IMAGE_LOCALIZATION_WORKER_MAX_AS_MB")
+        or read_dotenv_file_value(env_file, "IMAGE_LOCALIZATION_WORKER_MAX_AS_MB")
+        or (process_value if process_value not in (None, "") else None)
+        or default
+    )
+    return int(chosen)
+
+
 # Load .env từ thư mục backend (luôn đúng dù chạy uvicorn từ repo root hay từ backend/)
 _backend_root = Path(__file__).resolve().parents[2]
 load_dotenv(_backend_root / ".env")
@@ -367,8 +416,11 @@ class Settings:
             os.getenv("IMAGE_LOCALIZATION_JOB_STALL_SECONDS", "1200") or "1200"
         )
         # Giới hạn địa chỉ ảo worker subprocess (MB). 0 = tắt. Tránh 1 job ảnh phình >RAM VPS.
-        self.IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: int = int(
-            os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB", "4000") or "4000"
+        # File backend/.env thắng biến PM2 cũ (2500 còn sót sau khi file đã là 4000).
+        self.IMAGE_LOCALIZATION_WORKER_MAX_AS_MB: int = resolve_image_localization_worker_max_as_mb(
+            _backend_root / ".env",
+            _backend_root / ".env.local",
+            process_value=os.getenv("IMAGE_LOCALIZATION_WORKER_MAX_AS_MB"),
         )
         self.IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT: int = int(
             os.getenv("IMAGE_LOCALIZATION_MAX_IMAGES_PER_PRODUCT", "80") or "80"

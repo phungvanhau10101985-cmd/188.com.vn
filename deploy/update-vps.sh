@@ -593,10 +593,10 @@ if ! pm2 describe "${PM2_STOCK}" &>/dev/null; then
 fi
 
 PM2_IMGLOC="${PM2_IMGLOC_WORKER_NAME:-188-imgloc-worker}"
-if ! pm2 describe "${PM2_IMGLOC}" &>/dev/null; then
-  echo "    Tạo ${PM2_IMGLOC} từ ecosystem (OCR bản địa hóa ảnh, tách khỏi API)"
-  pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_IMGLOC}" 2>/dev/null || true
-fi
+# pm2 restart --update-env không đọc lại ecosystem. Worker đang chạy giữ trần RAM cũ.
+echo "    Tạo lại ${PM2_IMGLOC} từ ecosystem để nhận trần RAM trong file cấu hình"
+pm2 delete "${PM2_IMGLOC}" >/dev/null 2>&1 || true
+pm2 start "${PROJECT_ROOT}/deploy/ecosystem.config.cjs" --only "${PM2_IMGLOC}" || true
 
 if pm2_web_needs_recreate || ! pm2 describe "${PM2_WEB}" &>/dev/null; then
   pm2_recreate_web_from_ecosystem
