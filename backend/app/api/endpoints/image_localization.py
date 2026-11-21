@@ -37,6 +37,7 @@ from app.services.image_localization_service import (
     OpenAiGptImageAdapter,
     ProductImageLocalizationService,
     is_image_localization_fatal_dependency_error,
+    is_vision_service_pause,
     products_for_job_resume,
     products_pending_localization,
     reset_stale_processing_before_fresh_job,
@@ -906,6 +907,32 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     return
                 err_tail = str(exc)[:1000]
                 release_db_session(db)
+
+                if is_vision_service_pause(exc):
+                    if product_db_id is not None:
+                        _reset_product_after_cancel_by_pk(product_db_id)
+                    current, percent = _job_progress(
+                        done=done, failed=failed, skipped=skipped, total=total
+                    )
+                    _job_update(
+                        job_id,
+                        status="queued",
+                        phase="waiting_vision",
+                        current=current,
+                        done=done,
+                        failed=failed,
+                        skipped=skipped,
+                        percent=percent,
+                        message=(
+                            "Google Vision đang từ chối tạm thời (403). "
+                            "Job giữ hàng đợi và sẽ tự chạy lại, không đánh lỗi cả lô."
+                        ),
+                        current_product_id=product_id,
+                        finished_at=None,
+                        recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
+                        processed_product_ids=processed_ids,
+                    )
+                    return
 
                 if is_transient_db_error(exc):
                     retry_n = transient_db_retries.get(product_id, 0) + 1

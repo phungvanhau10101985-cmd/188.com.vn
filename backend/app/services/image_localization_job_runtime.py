@@ -45,6 +45,26 @@ def cmdline_looks_like_imgloc_worker(comm: str, cmdline: str) -> bool:
     return "multiprocessing.spawn" in cmd or "_multiprocess_job_entry" in cmd
 
 
+VISION_PAUSE_COOLDOWN_SECONDS = 600
+
+
+def vision_pause_ready(
+    updated_at,
+    *,
+    wait_seconds: int = VISION_PAUSE_COOLDOWN_SECONDS,
+    now=None,
+) -> bool:
+    """Job vừa bị Vision 403 thì chờ thêm, không gọi lại ngay."""
+    if updated_at is None or wait_seconds <= 0:
+        return True
+    if now is None:
+        now = datetime.now(timezone.utc)
+    stamp = updated_at
+    if getattr(stamp, "tzinfo", None) is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return (now - stamp).total_seconds() >= wait_seconds
+
+
 def should_abort_auto_resume(*, resume_count: int, max_resume: int) -> bool:
     """resume_count = số lần resume liên tiếp không xong thêm SP. 0 = không giới hạn."""
     if max_resume <= 0:
@@ -602,8 +622,19 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
                 logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
                 continue
             select_fresh = job_awaits_product_selection(fresh)
+            vision_resume = (fresh.phase or "").strip().lower() == "waiting_vision"
+            if vision_resume and not vision_pause_ready(fresh.updated_at):
+                logger.debug(
+                    "IMAGE_LOCALIZATION_JOB_RESUME vision cooldown job_id=%s",
+                    row.job_id,
+                )
+                continue
             resume_n = int(fresh.resume_count or 0)
-            if not select_fresh and should_abort_auto_resume(resume_count=resume_n, max_resume=max_resume):
+            if (
+                not vision_resume
+                and not select_fresh
+                and should_abort_auto_resume(resume_count=resume_n, max_resume=max_resume)
+            ):
                 job_crud.patch_job(
                     db_check,
                     row.job_id,
@@ -663,6 +694,16 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
                             "status": "queued",
                             "phase": "queued",
                             "message": "Đang chọn sản phẩm chưa bản địa hóa…",
+                        },
+                    )
+                elif vision_resume:
+                    job_crud.patch_job(
+                        db_patch,
+                        row.job_id,
+                        {
+                            "status": "queued",
+                            "phase": "queued",
+                            "message": "Vision đã hết thời gian chờ, chạy tiếp cùng hàng đợi.",
                         },
                     )
                 else:

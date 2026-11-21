@@ -215,10 +215,10 @@ class ImageMerger:
                         self.small_images_found.add(url)
                         return None 
                     
-                    # Kiểm tra ảnh toàn một màu (có thể bị hỏng)
+                    # Mẫu thưa, không nhân cả ảnh lên float64 (ảnh 1920px tốn ~60MB và chạm trần RAM worker).
                     if img.size > 0:
-                        img_std = np.std(img)
-                        if img_std < 1.0:  # Ảnh gần như một màu
+                        sample = img[::32, ::32]
+                        if sample.size > 0 and float(np.std(sample)) < 1.0:
                             logger.warning(f"      ⚠️ Ảnh có vẻ bị hỏng (độ lệch chuẩn thấp): {fixed_url[-40:]}")
                     
                     # Tạo tên file
@@ -283,32 +283,62 @@ class ImageMerger:
         if new_h < 10: return img, 1.0
         return cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4), ratio
 
-    def estimate_merged_pixel_count(self, images: List[np.ndarray]) -> int:
-        """Ước lượng width×height canvas sau resize_if_too_wide (trước khi ghép dọc)."""
-        valid = [img for img in images if img is not None and getattr(img, "size", 0) > 0]
-        if not valid:
+    def resized_wh(self, width: int, height: int) -> Tuple[int, int]:
+        if width <= self.max_image_width:
+            return int(width), int(height)
+        ratio = self.max_image_width / float(width)
+        new_h = int(height * ratio)
+        if new_h < 10:
+            return int(width), int(height)
+        return int(self.max_image_width), new_h
+
+    def estimate_pixels_for_sizes(self, sizes: List[Tuple[int, int]]) -> int:
+        """Ước lượng canvas từ kích thước, không copy mảng ảnh."""
+        if not sizes:
             return 0
-        resized = [self.resize_if_too_wide(img)[0] for img in valid]
-        widths = [im.shape[1] for im in resized]
-        heights = [im.shape[0] for im in resized]
-        max_w = max(widths) if widths else 0
-        total_h = sum(heights) + max(0, len(heights) - 1) * MERGE_SPACING
+        resized = [self.resized_wh(w, h) for w, h in sizes]
+        max_w = max(w for w, _h in resized)
+        total_h = sum(h for _w, h in resized) + max(0, len(resized) - 1) * MERGE_SPACING
         return int(max_w) * int(total_h)
 
-    def plan_merge_batch_indices(self, images: List[np.ndarray]) -> List[List[int]]:
-        """
-        Chia indices ảnh thành các batch: không quá batch_size và không vượt merge_max_pixels.
-        """
-        if not images:
+    @staticmethod
+    def _is_allocation_error(exc: BaseException) -> bool:
+        if isinstance(exc, MemoryError):
+            return True
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "unable to allocate",
+                "insufficient memory",
+                "failed to allocate",
+                "resource temporarily unavailable",
+                "pthread_create failed",
+            )
+        )
+
+    def estimate_merged_pixel_count(self, images: List[np.ndarray]) -> int:
+        """Ước lượng width×height canvas sau resize_if_too_wide (trước khi ghép dọc)."""
+        sizes: List[Tuple[int, int]] = []
+        for img in images:
+            if img is None or getattr(img, "size", 0) == 0:
+                continue
+            h, w = img.shape[:2]
+            sizes.append((int(w), int(h)))
+        return self.estimate_pixels_for_sizes(sizes)
+
+    def plan_merge_size_indices(self, sizes: List[Optional[Tuple[int, int]]]) -> List[List[int]]:
+        """Chia theo kích thước đã biết. None = ảnh bỏ qua."""
+        if not sizes:
             return []
         batches: List[List[int]] = []
         current: List[int] = []
-        for i, img in enumerate(images):
-            if img is None or getattr(img, "size", 0) == 0:
+        for i, size in enumerate(sizes):
+            if size is None:
                 continue
             if not current:
                 current = [i]
-                solo_px = self.estimate_merged_pixel_count([img])
+                solo_px = self.estimate_pixels_for_sizes([size])
                 if solo_px > self.merge_max_pixels:
                     logger.warning(
                         "   ⚠️ Ảnh đơn lẻ ~%.1f MP vượt MERGE_MAX_PIXELS=%.1f MP — vẫn OCR riêng (có thể lỗi Vision).",
@@ -317,7 +347,7 @@ class ImageMerger:
                     )
                 continue
             trial = current + [i]
-            trial_px = self.estimate_merged_pixel_count([images[j] for j in trial])
+            trial_px = self.estimate_pixels_for_sizes([sizes[j] for j in trial])  # type: ignore[misc]
             if len(trial) > self.batch_size or trial_px > self.merge_max_pixels:
                 batches.append(current)
                 current = [i]
@@ -326,6 +356,19 @@ class ImageMerger:
         if current:
             batches.append(current)
         return batches
+
+    def plan_merge_batch_indices(self, images: List[np.ndarray]) -> List[List[int]]:
+        """
+        Chia indices ảnh thành các batch: không quá batch_size và không vượt merge_max_pixels.
+        """
+        sizes: List[Optional[Tuple[int, int]]] = []
+        for img in images:
+            if img is None or getattr(img, "size", 0) == 0:
+                sizes.append(None)
+            else:
+                h, w = img.shape[:2]
+                sizes.append((int(w), int(h)))
+        return self.plan_merge_size_indices(sizes)
 
     def merge_batch_of_images(self, images: List[np.ndarray], filenames: List[str],
                              original_urls: List[str], original_paths: List[str],
@@ -466,10 +509,7 @@ class ImageMerger:
             logger.warning("⚠️ Không có ảnh nào để xử lý")
             return {'success': False, 'message': 'No processable images', 'batches': [], 'column_mapping': {}}
              
-        all_images = []
-        all_filenames = []
-        all_original_paths = []
-        loaded_urls = []
+        saved_meta: List[Dict[str, Any]] = []
         failed_urls = []
         
         if urls_to_download:
@@ -486,71 +526,125 @@ class ImageMerger:
                 res = self.download_single_image(url)
                 if res:
                     img, fname, orig_path = res
-                    all_images.append(img)
-                    all_filenames.append(fname)
-                    all_original_paths.append(orig_path)
-                    loaded_urls.append(url)
+                    height, width = img.shape[:2]
+                    saved_meta.append(
+                        {
+                            "url": url,
+                            "fname": fname,
+                            "path": orig_path,
+                            "width": int(width),
+                            "height": int(height),
+                        }
+                    )
+                    del img
                     logger.info(f"   ✅ Thành công: {fname}")
                 else:
                     logger.warning(f"   ❌ Thất bại: {url[-50:]}")
                     failed_urls.append(url)
         
-        logger.info(f"📊 Kết quả tải: {len(loaded_urls)} thành công, {len(failed_urls)} thất bại")
+        logger.info(f"📊 Kết quả tải: {len(saved_meta)} thành công, {len(failed_urls)} thất bại")
         
-        batches_result['total_images'] = len(all_images) + len(self.small_images_found) + len(skipped_188_urls)
+        batches_result['total_images'] = len(saved_meta) + len(self.small_images_found) + len(skipped_188_urls)
         batches_result['small_images_urls'] = list(self.small_images_found)
         
-        if all_images:
-            num_images = len(all_images)
-            batch_plans = self.plan_merge_batch_indices(all_images)
+        if saved_meta:
+            import gc
+
+            gc.collect()
+            sizes: List[Optional[Tuple[int, int]]] = [
+                (int(item["width"]), int(item["height"])) for item in saved_meta
+            ]
+            batch_plans = self.plan_merge_size_indices(sizes)
             total_batches = len(batch_plans)
             logger.info(
                 "📊 Đã tải thành công %s ảnh -> Chia %s batch(es) "
                 "(tối đa %s ảnh/batch, ≤%.1f MP/batch).",
-                num_images,
+                len(saved_meta),
                 total_batches,
                 self.batch_size,
                 self.merge_max_pixels / 1e6,
             )
 
-            for batch_idx, indices in enumerate(batch_plans):
-                b_imgs = [all_images[i] for i in indices]
-                b_fnames = [all_filenames[i] for i in indices]
-                b_urls = [loaded_urls[i] for i in indices]
-                b_paths = [all_original_paths[i] for i in indices]
-                est_mp = self.estimate_merged_pixel_count(b_imgs) / 1e6
+            next_batch_index = [0]
 
+            def _record_group(group: List[Dict[str, Any]]) -> bool:
+                batch_idx = next_batch_index[0]
+                loaded_imgs: List[np.ndarray] = []
+                fnames: List[str] = []
+                urls: List[str] = []
+                paths: List[str] = []
                 try:
-                    merged_img, pos_dict = self.merge_batch_of_images(b_imgs, b_fnames, b_urls, b_paths, batch_idx)
-                    merged_path, img_hash = self.save_merged_batch(merged_img, b_urls, batch_idx)
-                    pos_file = self.save_batch_positions_info(img_hash, pos_dict, b_urls, batch_idx)
+                    for item in group:
+                        img = cv2.imread(item["path"], cv2.IMREAD_COLOR)
+                        if img is None or getattr(img, "size", 0) == 0:
+                            logger.warning("Không đọc lại được ảnh đã tải: %s", item["path"])
+                            continue
+                        loaded_imgs.append(img)
+                        fnames.append(item["fname"])
+                        urls.append(item["url"])
+                        paths.append(item["path"])
+                    if not loaded_imgs:
+                        return False
+                    est_mp = self.estimate_pixels_for_sizes(
+                        [(int(im.shape[1]), int(im.shape[0])) for im in loaded_imgs]
+                    ) / 1e6
+                    merged_img, pos_dict = self.merge_batch_of_images(
+                        loaded_imgs, fnames, urls, paths, batch_idx
+                    )
+                    merged_path, img_hash = self.save_merged_batch(merged_img, urls, batch_idx)
+                    pos_file = self.save_batch_positions_info(img_hash, pos_dict, urls, batch_idx)
+                    del merged_img
                     logger.info(
                         "   📦 Batch %s: %s ảnh, ~%.1f MP (giới hạn %.1f MP)",
                         batch_idx + 1,
-                        len(b_imgs),
+                        len(loaded_imgs),
                         est_mp,
                         self.merge_max_pixels / 1e6,
                     )
-
-                    for i, url in enumerate(b_urls):
+                    for i, url in enumerate(urls):
                         if url in url_to_columns:
-                            batches_result['column_mapping'][url] = {
-                                'batch_index': batch_idx, 'source_columns': url_to_columns[url],
-                                'original_path': b_paths[i], 'status': 'PROCESSED'
+                            batches_result["column_mapping"][url] = {
+                                "batch_index": batch_idx,
+                                "source_columns": url_to_columns[url],
+                                "original_path": paths[i],
+                                "status": "PROCESSED",
                             }
-                    
-                    batches_result['batches'].append({
-                        'batch_index': batch_idx, 'merged_path': merged_path,
-                        'positions_file': pos_file, 'image_count': len(b_imgs),
-                        'batch_size': self.batch_size,
-                        'estimated_megapixels': round(est_mp, 2),
-                    })
-                except Exception as e:
-                    logger.error(f"❌ Lỗi xử lý batch {batch_idx}: {e}")
-                    batches_result['success'] = False
-                    batches_result['error'] = str(e)
-                    # Vẫn tiếp tục với các batch khác
-                    continue
+                    batches_result["batches"].append(
+                        {
+                            "batch_index": batch_idx,
+                            "merged_path": merged_path,
+                            "positions_file": pos_file,
+                            "image_count": len(loaded_imgs),
+                            "batch_size": self.batch_size,
+                            "estimated_megapixels": round(est_mp, 2),
+                        }
+                    )
+                    next_batch_index[0] += 1
+                    return True
+                finally:
+                    loaded_imgs.clear()
+
+            def _merge_group(group: List[Dict[str, Any]]) -> None:
+                if not group:
+                    return
+                try:
+                    _record_group(group)
+                except Exception as exc:
+                    if self._is_allocation_error(exc) and len(group) > 1:
+                        mid = len(group) // 2
+                        logger.warning(
+                            "Hết bộ nhớ khi ghép %s ảnh, tách đôi rồi ghép lại.",
+                            len(group),
+                        )
+                        _merge_group(group[:mid])
+                        _merge_group(group[mid:])
+                        return
+                    logger.error("❌ Lỗi xử lý batch %s: %s", next_batch_index[0], exc)
+                    batches_result["success"] = False
+                    batches_result["error"] = str(exc)
+
+            for indices in batch_plans:
+                _merge_group([saved_meta[i] for i in indices])
             
         for url in self.small_images_found:
              if url in url_to_columns:

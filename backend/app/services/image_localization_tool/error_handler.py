@@ -17,6 +17,22 @@ class FatalDependencyError(RuntimeError):
     """A required paid dependency cannot recover by retrying this job."""
 
 
+class VisionServicePausedError(RuntimeError):
+    """Google Vision từ chối tạm thời. Job phải chờ rồi chạy tiếp, không đánh lỗi cả lô."""
+
+
+def is_transient_vision_denial(error_msg: str) -> bool:
+    """403 ACCESS_DENIED của vision.googleapis.com thường hết sau một lúc. Không phải hết key."""
+    low = (error_msg or "").lower()
+    if "403" not in low and "access_denied" not in low:
+        return False
+    return (
+        "access_denied" in low
+        or "permission denied on the service" in low
+        or "vision.googleapis.com" in low
+    )
+
+
 class ErrorHandler:
     """
     Retry OCR / mạng: mặc định chờ và thử lại lâu dài.
@@ -95,7 +111,10 @@ class ErrorHandler:
                 except Exception:
                     pass
 
-                is_fatal, error_type = self.is_fatal_error(error_msg)
+                if is_transient_vision_denial(error_msg):
+                    is_fatal, error_type = False, ""
+                else:
+                    is_fatal, error_type = self.is_fatal_error(error_msg)
                 if is_fatal:
                     print(f"\n❌ LỖI FATAL ({error_type}): {error_msg}")
                     print("🚫 Chương trình buộc phải DỪNG LẠI.")
@@ -109,6 +128,11 @@ class ErrorHandler:
                     continue
 
                 if max_slow and slow_rounds_completed >= max_slow:
+                    if is_transient_vision_denial(error_msg):
+                        raise VisionServicePausedError(
+                            "IMAGE_LOCALIZATION_VISION_PAUSED: Google Vision từ chối tạm thời "
+                            f"(403). Job sẽ chờ rồi chạy tiếp cùng hàng đợi, không đánh lỗi cả lô. {error_msg}"
+                        ) from e
                     raise FatalDependencyError(
                         f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:retry_exhausted: "
                         f"OCR/DeepSeek chờ đủ {max_slow} vòng ({long_wait_minutes} phút/vòng sau retry nhanh): {error_msg}. "

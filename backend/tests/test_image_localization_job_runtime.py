@@ -9,6 +9,7 @@ from app.services.image_localization_job_runtime import (
     job_awaits_product_selection,
     job_updated_at_is_stalled,
     should_abort_auto_resume,
+    vision_pause_ready,
     wait_for_imgloc_memory,
     worker_process_title,
 )
@@ -71,6 +72,15 @@ def test_cmdline_matches_spawn_but_not_resource_tracker():
     assert cmdline_looks_like_imgloc_worker("python", tracker) is False
     assert cmdline_looks_like_imgloc_worker("imgloc-e32ad16c", spawn) is True
     assert cmdline_looks_like_imgloc_worker("imgloc-e32ad16c", "") is True
+
+
+def test_vision_pause_waits_before_the_next_attempt():
+    stamped = datetime(2026, 11, 21, 2, 34, tzinfo=timezone.utc)
+    too_soon = stamped + timedelta(minutes=5)
+    ready = stamped + timedelta(minutes=10)
+    assert vision_pause_ready(stamped, now=too_soon) is False
+    assert vision_pause_ready(stamped, now=ready) is True
+    assert vision_pause_ready(None) is True
 
 
 def test_abort_auto_resume_only_after_consecutive_empty_resumes():

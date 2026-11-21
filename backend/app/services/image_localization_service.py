@@ -395,6 +395,10 @@ class ImageLocalizationFatalDependencyError(ImageLocalizationError):
     pass
 
 
+class ImageLocalizationVisionPausedError(ImageLocalizationError):
+    """Vision 403 tạm thời. Job quay lại hàng đợi, không đánh lỗi sản phẩm."""
+
+
 class ImageLocalizationGptStopError(ImageLocalizationFatalDependencyError):
     """Hết lần hậu kiểm hoặc GPT Image lỗi — dừng cả job."""
 
@@ -589,11 +593,29 @@ def detect_ink_bleed(image_bytes: bytes) -> Dict[str, Any]:
 
 
 def is_image_localization_fatal_dependency_error(exc: BaseException) -> bool:
+    if is_vision_service_pause(exc):
+        return False
     msg = f"{exc.__class__.__name__}: {exc}"
     return any(marker.lower() in msg.lower() for marker in _FATAL_DEPENDENCY_MARKERS)
 
 
+def is_vision_service_pause(exc: BaseException) -> bool:
+    """403 ACCESS_DENIED của Vision: chờ rồi chạy tiếp, không dừng cả lô."""
+    if isinstance(exc, ImageLocalizationVisionPausedError):
+        return True
+    if exc.__class__.__name__ == "VisionServicePausedError":
+        return True
+    text = f"{exc.__class__.__name__}: {exc}".lower()
+    if "image_localization_vision_paused" in text:
+        return True
+    return "403" in text and "access_denied" in text and "vision" in text
+
+
 def _raise_if_fatal_dependency(exc: BaseException) -> None:
+    if is_vision_service_pause(exc):
+        if isinstance(exc, ImageLocalizationVisionPausedError):
+            raise exc
+        raise ImageLocalizationVisionPausedError(str(exc)) from exc
     if is_image_localization_fatal_dependency_error(exc):
         raise ImageLocalizationFatalDependencyError(str(exc)) from exc
 
@@ -1423,6 +1445,8 @@ class LegacyImageLocalizationPipeline:
             norm_ocr = self._normalize_ocr(ocr.process_image(image_bytes))
             consult_lines = ocr_items_to_lines(norm_ocr)
         except Exception as exc:
+            if is_vision_service_pause(exc):
+                raise
             logger.warning("Fallback từng ảnh: OCR lỗi %s (%s)", normalized, exc)
             return ImageProcessResult(normalized, normalized, "error", f"OCR lỗi: {exc}")
 
@@ -1883,6 +1907,8 @@ class LegacyImageLocalizationPipeline:
                 return "processed", processed, msg
             fail_suffix = " (không nhận được bytes ảnh từ model; kiểm tra chế độ API/OpenAI và quota)"
         except Exception as exc:
+            if is_vision_service_pause(exc):
+                raise
             logger.warning("Gemini/GPT ảnh lỗi: %s", exc)
             fail_suffix = f" — {exc}"
         if preserve_rich:
@@ -1953,6 +1979,8 @@ class LegacyImageLocalizationPipeline:
         try:
             return self._normalize_ocr(self.OCRProcessor().process_image(image_bytes))
         except Exception as exc:
+            if is_vision_service_pause(exc):
+                raise
             logger.warning("Hậu kiểm OCR lỗi: %s", exc)
             return []
 
