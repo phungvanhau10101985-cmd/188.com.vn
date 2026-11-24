@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
-import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
+import AddressRegionFields from '@/components/address/AddressRegionFields';
+import { prepareAddressPayload } from '@/lib/address-form';
 import { useToast } from '@/components/ToastProvider';
 import Button from '@/components/ui/Button';
 
@@ -96,30 +97,26 @@ export default function AddressesPage() {
     setEditingId(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const prepared = prepareAddressPayload({
+      ...form,
+      full_name: String(fd.get('full_name') ?? form.full_name),
+      phone: String(fd.get('phone') ?? form.phone),
+      street_address: String(fd.get('street_address') ?? form.street_address),
+      district: undefined,
+    });
+    if (!prepared.ok) {
+      pushToast({ title: 'Không thể lưu địa chỉ', description: prepared.message, variant: 'error', durationMs: 4000 });
+      return;
+    }
     setSaving(true);
     try {
       if (editingId != null) {
-        await apiClient.updateAddress(editingId, {
-          full_name: form.full_name,
-          phone: form.phone,
-          province: form.province || undefined,
-          district: form.district || undefined,
-          ward: form.ward || undefined,
-          street_address: form.street_address,
-          is_default: form.is_default,
-        });
+        await apiClient.updateAddress(editingId, prepared.data);
       } else {
-        await apiClient.createAddress({
-          full_name: form.full_name,
-          phone: form.phone,
-          province: form.province || undefined,
-          district: form.district || undefined,
-          ward: form.ward || undefined,
-          street_address: form.street_address,
-          is_default: form.is_default,
-        });
+        await apiClient.createAddress(prepared.data);
       }
       await loadAddresses();
       closeForm();
@@ -246,7 +243,9 @@ export default function AddressesPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Họ và tên *</label>
                   <input
                     type="text"
+                    name="full_name"
                     required
+                    autoComplete="name"
                     value={form.full_name}
                     onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -257,7 +256,10 @@ export default function AddressesPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Số điện thoại *</label>
                   <input
                     type="tel"
+                    name="phone"
                     required
+                    autoComplete="tel"
+                    inputMode="tel"
                     value={form.phone}
                     onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -266,48 +268,28 @@ export default function AddressesPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Tỉnh / Thành phố</label>
-                <select
-                  value={form.province}
-                  onChange={(e) => setForm((f) => ({ ...f, province: e.target.value }))}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="">— Chọn tỉnh/thành phố —</option>
-                  {VIETNAM_PROVINCES.map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Quận / Huyện</label>
-                  <input
-                    type="text"
-                    value={form.district}
-                    onChange={(e) => setForm((f) => ({ ...f, district: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Quận 1"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Phường / Xã</label>
-                  <input
-                    type="text"
-                    value={form.ward}
-                    onChange={(e) => setForm((f) => ({ ...f, ward: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    placeholder="Phường Bến Nghé"
-                  />
-                </div>
-              </div>
+              <AddressRegionFields
+                province={form.province ?? ''}
+                ward={form.ward ?? ''}
+                selectClassName="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                onChange={({ province, ward }) =>
+                  setForm((current) => ({
+                    ...current,
+                    province,
+                    ward,
+                    district: province === current.province && ward === current.ward ? current.district : '',
+                  }))
+                }
+              />
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ cụ thể *</label>
                 <input
                   type="text"
+                  name="street_address"
                   required
+                  autoComplete="address-line1"
+                  minLength={5}
                   value={form.street_address}
                   onChange={(e) => setForm((f) => ({ ...f, street_address: e.target.value }))}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"

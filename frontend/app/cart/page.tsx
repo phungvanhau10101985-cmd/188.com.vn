@@ -11,7 +11,8 @@ import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import LoadingLink from '@/components/ui/LoadingLink';
 import type { UserAddress, AddressCreateInput } from '@/types/api';
-import { VIETNAM_PROVINCES } from '@/lib/vietnam-provinces';
+import AddressRegionFields from '@/components/address/AddressRegionFields';
+import { prepareAddressPayload } from '@/lib/address-form';
 import { getStoredReferralCode } from '@/lib/affiliate-ref';
 import { markProductTap } from '@/lib/product-tap-feedback';
 import { trackEvent } from '@/lib/analytics';
@@ -733,14 +734,23 @@ export default function CartPage() {
     setShowAddAddress(true);
   };
 
-  const handleAddAddressSubmit = async (e: React.FormEvent) => {
+  const handleAddAddressSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const prepared = prepareAddressPayload({
+      ...addressForm,
+      full_name: String(fd.get('full_name') ?? addressForm.full_name),
+      phone: String(fd.get('phone') ?? addressForm.phone),
+      street_address: String(fd.get('street_address') ?? addressForm.street_address),
+      district: undefined,
+    });
+    if (!prepared.ok) {
+      pushToast({ title: 'Không thể lưu địa chỉ', description: prepared.message, variant: 'error', durationMs: 4000 });
+      return;
+    }
     setSavingAddress(true);
     try {
-      const newAddr = await apiClient.createAddress({
-        ...addressForm,
-        is_default: addressForm.is_default,
-      });
+      const newAddr = await apiClient.createAddress(prepared.data);
       setAddresses((prev) => [...prev, newAddr]);
       setSelectedAddressId(newAddr.id);
       setShowAddAddress(false);
@@ -1821,7 +1831,9 @@ export default function CartPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Họ và tên *</label>
                     <input
                       type="text"
+                      name="full_name"
                       required
+                      autoComplete="name"
                       value={addressForm.full_name}
                       onChange={(e) => setAddressForm((f) => ({ ...f, full_name: e.target.value }))}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2"
@@ -1832,7 +1844,10 @@ export default function CartPage() {
                     <label className="block text-sm font-medium text-gray-700 mb-1">Số điện thoại *</label>
                     <input
                       type="tel"
+                      name="phone"
                       required
+                      autoComplete="tel"
+                      inputMode="tel"
                       value={addressForm.phone}
                       onChange={(e) => setAddressForm((f) => ({ ...f, phone: e.target.value }))}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2"
@@ -1840,46 +1855,27 @@ export default function CartPage() {
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tỉnh / Thành phố</label>
-                  <select
-                    value={addressForm.province}
-                    onChange={(e) => setAddressForm((f) => ({ ...f, province: e.target.value }))}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                  >
-                    <option value="">— Chọn —</option>
-                    {VIETNAM_PROVINCES.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Quận / Huyện</label>
-                    <input
-                      type="text"
-                      value={addressForm.district}
-                      onChange={(e) => setAddressForm((f) => ({ ...f, district: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                      placeholder="Quận 1"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phường / Xã</label>
-                    <input
-                      type="text"
-                      value={addressForm.ward}
-                      onChange={(e) => setAddressForm((f) => ({ ...f, ward: e.target.value }))}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                      placeholder="Phường..."
-                    />
-                  </div>
-                </div>
+                <AddressRegionFields
+                  province={addressForm.province ?? ''}
+                  ward={addressForm.ward ?? ''}
+                  selectClassName="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white"
+                  onChange={({ province, ward }) =>
+                    setAddressForm((current) => ({
+                      ...current,
+                      province,
+                      ward,
+                      district: province === current.province && ward === current.ward ? current.district : '',
+                    }))
+                  }
+                />
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Địa chỉ cụ thể *</label>
                   <input
                     type="text"
+                    name="street_address"
                     required
+                    autoComplete="address-line1"
+                    minLength={5}
                     value={addressForm.street_address}
                     onChange={(e) => setAddressForm((f) => ({ ...f, street_address: e.target.value }))}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2"

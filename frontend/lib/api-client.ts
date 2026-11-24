@@ -36,6 +36,38 @@ import { maybeNotifyRateLimitFromResponse } from '@/lib/rate-limit-notice';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+const API_FIELD_LABELS: Record<string, string> = {
+  full_name: 'Họ và tên',
+  phone: 'Số điện thoại',
+  province: 'Tỉnh / thành phố',
+  district: 'Quận / huyện',
+  ward: 'Phường / xã',
+  street_address: 'Địa chỉ cụ thể',
+};
+
+function formatApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+  if (!Array.isArray(detail)) return '';
+  const parts = detail
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const loc = Array.isArray((item as { loc?: unknown }).loc)
+        ? (item as { loc: unknown[] }).loc.filter((part) => part !== 'body' && part !== 'query').join('.')
+        : '';
+      const raw = typeof (item as { msg?: unknown }).msg === 'string' ? (item as { msg: string }).msg : '';
+      const msg = raw.replace(/^Value error,\s*/i, '');
+      if (!msg) return '';
+      const label = API_FIELD_LABELS[loc] || '';
+      return label ? `${label}: ${msg}` : msg;
+    })
+    .filter(Boolean);
+  return parts.join('. ');
+}
+
 export class ApiRequestError extends Error {
   constructor(
     message: string,
@@ -317,12 +349,7 @@ class ApiClient {
             errorData,
           );
           const detail = errorData.detail;
-          const message =
-            typeof detail === 'string'
-              ? detail
-              : typeof detail?.message === 'string'
-                ? detail.message
-                : `API Error: ${response.status}`;
+          const message = formatApiErrorDetail(detail) || `API Error: ${response.status}`;
           const code = typeof detail?.code === 'string' ? detail.code : undefined;
           throw new ApiRequestError(message, response.status, code);
         }
