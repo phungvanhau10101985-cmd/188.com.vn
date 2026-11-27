@@ -24,6 +24,14 @@ import {
   getNanoAiShopReturnPath,
   isCartAddFromNanoAiFlow,
 } from '@/lib/nanoai-hosted-chat';
+import TrustConfirmList from '@/components/conversion/TrustConfirmList';
+
+const CART_ADDED_TRUST = [
+  'Chất lượng chọn lựa kỹ càng',
+  'Chất liệu đúng cam kết',
+  'Hoàn thiện tỉ mỉ',
+  'Xem hàng trước khi nhận',
+] as const;
 
 const POPUP_Z = 'z-[2147483646]';
 
@@ -46,12 +54,25 @@ export default function CartAddedPopup() {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      hideAddToCartPopup();
+      if (pathname === '/cart' || pathname === '/cart/') {
+        markNanoAiCheckoutOnCart();
+      }
+      if (isCartAddFromNanoAiFlow()) {
+        clearCartAddFromNanoAiFlow();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+
     return () => {
       mo.disconnect();
+      document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
       releaseNanoAiClickBlockers({ mode: 'passThrough' });
     };
-  }, [showAddToCartPopup]);
+  }, [showAddToCartPopup, pathname, hideAddToCartPopup]);
 
   if (!showAddToCartPopup) return null;
 
@@ -159,7 +180,7 @@ export default function CartAddedPopup() {
           <button
             type="button"
             onClick={handleClose}
-            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
+            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
             aria-label="Đóng"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:h-6 md:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -174,11 +195,16 @@ export default function CartAddedPopup() {
             </p>
           </div>
         ) : null}
+        <div className="px-3 pt-3 md:px-4">
+          <div className="rounded-lg border border-orange-100 bg-orange-50/80 px-2.5 py-2">
+            <TrustConfirmList items={CART_ADDED_TRUST} layout="stack" label="Cam kết sản phẩm" />
+          </div>
+        </div>
         <div className="p-3 md:p-4 flex flex-col sm:flex-row gap-2">
           <Link
             href="/cart"
             onClick={handleViewCart}
-            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors"
+            className="w-full sm:w-1/2 inline-flex min-h-[44px] items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-[#ea580c] text-white hover:bg-[#c2410c] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
           >
             <span aria-hidden>🛒</span>
             <span>Vào giỏ hàng</span>
@@ -186,7 +212,7 @@ export default function CartAddedPopup() {
           <button
             type="button"
             onClick={handleContinueShopping}
-            className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors"
+            className="w-full sm:w-1/2 inline-flex min-h-[44px] items-center justify-center gap-2 px-3 py-2.5 rounded-lg font-semibold text-sm bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
           >
             <span aria-hidden>🛍️</span>
             <span>Mua sắm tiếp</span>

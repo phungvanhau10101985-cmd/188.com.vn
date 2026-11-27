@@ -41,6 +41,7 @@ import { partialPercentForGoods } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
 import { BUSINESS_ZALO } from '@/lib/business-info';
 import { fetchPublicSiteEmbeds, resolveZaloClickUrl } from '@/lib/site-embeds-public';
+import { DepositReassure, WhyDepositDisclosure } from '@/components/deposit/DepositTrust';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
@@ -846,13 +847,15 @@ export default function OrderDepositPage() {
             </div>
           </div>
 
+          <DepositReassure mode={depositOption === '100' ? 'full' : 'partial'} />
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-0 lg:divide-x lg:divide-gray-100">
             {/* Cột trái: mức cọc + chọn NH + STK + nội dung CK (lấp khoảng trắng) */}
             <div className="lg:col-span-5 p-3 md:p-4 space-y-3 order-2 lg:order-1 border-t lg:border-t-0 border-gray-100">
               <div className="rounded-lg border border-gray-200 p-3 bg-white">
                 <p className="text-gray-800 font-semibold text-sm mb-2">Chọn mức cọc</p>
                 <div className="flex flex-wrap gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex min-h-[44px] items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
                       name="deposit_option"
@@ -874,7 +877,7 @@ export default function OrderDepositPage() {
                       %
                     </span>
                   </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label className="flex min-h-[44px] items-center gap-2 cursor-pointer">
                     <input
                       type="radio"
                       name="deposit_option"
@@ -923,16 +926,16 @@ export default function OrderDepositPage() {
 
                 {sepayInfo?.enabled && sepayInfo.account_number && (
                   <div className="mb-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-950 leading-snug">
-                    QR SePay: <span className="font-mono font-semibold">{sepayInfo.bank_code} · {sepayInfo.account_number}</span>
+                    Tài khoản trên mã QR: <span className="font-mono font-semibold">{sepayInfo.bank_code} · {sepayInfo.account_number}</span>
                     {selectedAccount && selectedAccount.account_number !== sepayInfo.account_number && (
-                      <span className="block mt-0.5 text-amber-900">Chuyển đúng STK trên QR.</span>
+                      <span className="block mt-0.5 text-amber-900">Chuyển đúng số tài khoản trên QR.</span>
                     )}
                   </div>
                 )}
 
                 <div className="rounded-lg bg-blue-50/90 border border-blue-100 px-3 py-2">
                   <p className="text-blue-900 text-xs leading-snug">
-                    Quét QR bên phải → đối chiếu STK và nội dung CK ngay dưới. SePay xác nhận nhanh; không thì shop đối soát tay.
+                    Quét mã QR, đối chiếu số tài khoản và nội dung chuyển khoản. Đúng nội dung thì hệ thống xác nhận nhanh.
                   </p>
                 </div>
               </div>
@@ -965,17 +968,11 @@ export default function OrderDepositPage() {
                       </CopyButton>
                     </div>
                     <p className="text-[11px] text-gray-500 mt-1.5 leading-snug">
-                      Ghi đúng nội dung để xác nhận tự động (SePay).
+                      Ghi đúng nội dung này khi chuyển khoản để shop xác nhận tự động.
                     </p>
                   </div>
                 ) : null}
               </div>
-
-              {sepayInfo?.enabled && sepayInfo.register_webhook_url && (
-                <p className="text-[11px] text-gray-500 leading-snug">
-                  Webhook: <span className="font-mono break-all">{sepayInfo.register_webhook_url}</span>
-                </p>
-              )}
             </div>
 
             {/* Cột phải: chỉ QR */}
@@ -1000,16 +997,19 @@ export default function OrderDepositPage() {
                     type="button"
                     onClick={() => setBankPayOpen(true)}
                     disabled={depositPayTarget.amount <= 0 || !depositPayTarget.accountNumber}
-                    className="mt-3 inline-flex w-full max-w-[280px] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:opacity-60"
+                    className="mt-3 inline-flex min-h-[44px] w-full max-w-[280px] items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-orange-700 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
                   >
                     Thanh toán cọc qua ngân hàng
                   </button>
+                  <p className="mt-2 max-w-[280px] text-center text-[11px] leading-snug text-gray-500">
+                    Đúng nội dung chuyển khoản thì hệ thống xác nhận nhanh, không cần chờ tin nhắn.
+                  </p>
                   <div className="mt-2 flex w-full max-w-[280px] items-stretch gap-2">
                     <button
                       type="button"
                       onClick={() => void handleDownloadQr()}
                       disabled={qrDownloading || !qrBlobReady}
-                      className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors"
+                      className="inline-flex min-h-[44px] min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
                     >
                       {qrDownloading ? (
                         <>
@@ -1038,7 +1038,7 @@ export default function OrderDepositPage() {
                       type="button"
                       onClick={contactShopZalo}
                       aria-label="Nhắn tin Zalo shop"
-                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0068FF] px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0057d6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0068FF]"
+                      className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-1.5 rounded-xl border border-[#0068FF] bg-white px-3 py-2.5 text-sm font-semibold text-[#0068FF] shadow-sm hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0068FF]"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor" aria-hidden>
                         <path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.7 1.5 5.1 3.8 6.7L5 22l4.4-2.4c.8.2 1.7.3 2.6.3 5.5 0 10-3.8 10-8.4S17.5 3 12 3z" />
@@ -1050,20 +1050,18 @@ export default function OrderDepositPage() {
               ) : (
                 <p className="text-sm text-gray-500 text-center py-8">Chọn tài khoản để hiển thị mã QR.</p>
               )}
-              <Link
-                href={`/info/tai-sao-dat-coc?order=${order.id}&code=${encodeURIComponent(order.order_code)}`}
-                onClick={() => trackEvent('deposit_why_open', { order_id: order.id })}
-                className="mt-3 inline-flex w-full max-w-[280px] items-center justify-center rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gray-400"
-              >
-                Hỏi tại sao phải cọc?
-              </Link>
+              <WhyDepositDisclosure
+                orderId={order.id}
+                orderCode={order.order_code}
+                mode={depositOption === '100' ? 'full' : 'partial'}
+              />
             </div>
           </div>
 
-          <div className="p-3 md:p-4 bg-gray-50 border-t border-gray-100">
+          <div className="border-t border-gray-100 bg-gray-50 px-3 py-3 text-center md:px-4">
             <Link
               href="/account/orders"
-              className="block w-full max-w-md mx-auto py-2.5 text-center text-sm font-semibold rounded-lg bg-gray-800 text-white hover:bg-gray-900 transition-colors"
+              className="inline-flex min-h-[44px] items-center justify-center text-sm text-gray-500 underline underline-offset-2 hover:text-gray-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-600"
             >
               Quay lại danh sách đơn hàng
             </Link>
