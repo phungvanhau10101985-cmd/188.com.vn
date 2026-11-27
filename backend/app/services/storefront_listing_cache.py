@@ -71,6 +71,7 @@ def build_listing_filter_cache_key(
         "filter_color": _norm_opt(filter_color),
         "filter_style_tag": _norm_opt(filter_style_tag),
         "skip_total": bool(skip_total),
+        "gate": "counterfeit-checked",
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]

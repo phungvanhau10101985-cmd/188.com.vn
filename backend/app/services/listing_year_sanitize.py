@@ -8,6 +8,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
+from app.services.listing_ip_sanitize import (
+    LISTING_NO_IP_PROMPT_VI,
+    listing_text_has_ip,
+    strip_listing_ip_terms,
+)
+
 _YEAR = r"(?:19|20)\d{2}"
 
 _COMPOUND_RES: tuple[re.Pattern[str], ...] = tuple(
@@ -120,7 +126,9 @@ PHONG CÁCH / MARKETING TRUNG QUỐC (bắt buộc):
 - Vẫn được ghi xuất xứ «Trung Quốc» ở xuat_xu_vi khi có thông tin thật; vẫn dùng phong cách cụ thể khác (vd. «công sở», «casual», «thể thao»).
 """
 
-LISTING_SANITIZE_PROMPT_VI = LISTING_NO_YEAR_PROMPT_VI + LISTING_NO_CHINESE_STYLE_PROMPT_VI
+LISTING_SANITIZE_PROMPT_VI = (
+    LISTING_NO_YEAR_PROMPT_VI + LISTING_NO_CHINESE_STYLE_PROMPT_VI + LISTING_NO_IP_PROMPT_VI
+)
 
 
 def _collapse_ws(text: str) -> str:
@@ -157,15 +165,17 @@ def strip_listing_chinese_style_marketing(text: str) -> str:
 
 
 def sanitize_listing_context_for_ai(text: str) -> str:
-    """Ngữ cảnh đưa vào prompt AI — bỏ năm marketing và cụm quốc phong."""
+    """Ngữ cảnh đưa vào prompt AI — bỏ năm marketing, quốc phong và tên bản quyền."""
     t = strip_listing_year_marketing(text, remove_standalone_years=True)
-    return strip_listing_chinese_style_marketing(t)
+    t = strip_listing_chinese_style_marketing(t)
+    return strip_listing_ip_terms(t)
 
 
 def sanitize_vi_listing_field(text: str) -> str:
     """Trường tiếng Việt hiển thị web."""
     t = strip_listing_year_marketing(text, remove_standalone_years=True)
-    return strip_listing_chinese_style_marketing(t)
+    t = strip_listing_chinese_style_marketing(t)
+    return strip_listing_ip_terms(t)
 
 
 def sanitize_taxonomy_vi_fields(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,9 +190,23 @@ def apply_listing_year_sanitize_to_product_data(product_data: Dict[str, Any]) ->
     limits = {"name": 500, "description": 20000, "material": 500, "style": 500, "occasion": 500, "features": 2000}
     for key, max_len in limits.items():
         if key in product_data and product_data[key]:
-            cleaned = sanitize_vi_listing_field(str(product_data[key]))
+            original = str(product_data[key])
+            cleaned = sanitize_vi_listing_field(original)
             if cleaned:
                 product_data[key] = cleaned[:max_len]
+            elif key == "name" and listing_text_has_ip(original):
+                product_data[key] = "Sản phẩm"
+            elif listing_text_has_ip(original):
+                product_data[key] = ""
+
+    brand = product_data.get("brand_name")
+    if brand:
+        original_brand = str(brand)
+        cleaned_brand = sanitize_vi_listing_field(original_brand).strip()
+        if cleaned_brand:
+            product_data["brand_name"] = cleaned_brand[:200]
+        elif listing_text_has_ip(original_brand):
+            product_data["brand_name"] = None
 
     pi = product_data.get("product_info")
     if not isinstance(pi, dict):

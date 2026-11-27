@@ -286,6 +286,9 @@ class TextTranslator:
 
     def call_deepseek_for_translation_single(self, text: str, max_chars: int | None = None) -> str:
         if not (DEEPSEEK_API_KEY or "").strip():
+            from app.services.ai_run_alert import notify_ai_down
+
+            notify_ai_down("DeepSeek", "Thiếu DEEPSEEK_API_KEY nên không thể dịch ảnh bằng DeepSeek.")
             raise RuntimeError(
                 "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:deepseek_missing_key: "
                 "Thiếu DEEPSEEK_API_KEY nên không thể dịch ảnh bằng DeepSeek."

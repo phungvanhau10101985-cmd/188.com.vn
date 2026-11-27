@@ -94,6 +94,9 @@ def infer_gender_from_product_image_gemini(
 
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if not api_key or len(api_key) < 10:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("Gemini", "Thiếu GEMINI_API_KEY.")
         return None, "Thiếu GEMINI_API_KEY."
 
     model = (getattr(settings, "GEMINI_MODEL", "") or "gemini-2.5-flash").strip()

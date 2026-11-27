@@ -13,6 +13,24 @@ def _max_slow_waits_from_config() -> int:
         return 1
 
 
+def _notify_model_down(detail: str) -> None:
+    try:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("Google Vision", detail[:500])
+    except Exception:
+        pass
+
+
+def _mark_model_ok() -> None:
+    try:
+        from app.services.ai_run_alert import mark_ai_ok
+
+        mark_ai_ok("Google Vision")
+    except Exception:
+        pass
+
+
 class FatalDependencyError(RuntimeError):
     """A required paid dependency cannot recover by retrying this job."""
 
@@ -99,9 +117,14 @@ class ErrorHandler:
 
         while True:
             try:
-                return func(*args, **kwargs)
-
+                result = func(*args, **kwargs)
+                _mark_model_ok()
+                return result
             except Exception as e:
+                from app.services.ai_run_alert import AiApiStopped
+
+                if isinstance(e, AiApiStopped):
+                    raise
                 error_msg = str(e)
 
                 try:
@@ -112,12 +135,19 @@ class ErrorHandler:
                     pass
 
                 if is_transient_vision_denial(error_msg):
-                    is_fatal, error_type = False, ""
-                else:
-                    is_fatal, error_type = self.is_fatal_error(error_msg)
+                    print(f"\n❌ Google Vision không chạy: {error_msg}")
+                    print("🚫 Job dừng, không gọi tiếp.")
+                    _notify_model_down(error_msg)
+                    raise FatalDependencyError(
+                        "IMAGE_LOCALIZATION_FATAL_DEPENDENCY:vision_denied: "
+                        f"Google Vision không chạy. {error_msg}"
+                    ) from e
+
+                is_fatal, error_type = self.is_fatal_error(error_msg)
                 if is_fatal:
                     print(f"\n❌ LỖI FATAL ({error_type}): {error_msg}")
                     print("🚫 Chương trình buộc phải DỪNG LẠI.")
+                    _notify_model_down(error_msg)
                     raise FatalDependencyError(f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:{error_type}: {error_msg}") from e
 
                 if immediate_retry_count < max_immediate_retries:
@@ -128,11 +158,7 @@ class ErrorHandler:
                     continue
 
                 if max_slow and slow_rounds_completed >= max_slow:
-                    if is_transient_vision_denial(error_msg):
-                        raise VisionServicePausedError(
-                            "IMAGE_LOCALIZATION_VISION_PAUSED: Google Vision từ chối tạm thời "
-                            f"(403). Job sẽ chờ rồi chạy tiếp cùng hàng đợi, không đánh lỗi cả lô. {error_msg}"
-                        ) from e
+                    _notify_model_down(error_msg)
                     raise FatalDependencyError(
                         f"IMAGE_LOCALIZATION_FATAL_DEPENDENCY:retry_exhausted: "
                         f"OCR/DeepSeek chờ đủ {max_slow} vòng ({long_wait_minutes} phút/vòng sau retry nhanh): {error_msg}. "

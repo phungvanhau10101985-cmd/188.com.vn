@@ -366,6 +366,9 @@ def gpt_generate_image_from_text(prompt: str) -> bytes:
 
     key = (getattr(settings, "OPENAI_API_KEY", "") or "").strip()
     if len(key) < 10:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("OpenAI", "Thiếu OPENAI_API_KEY cho banner.")
         raise RuntimeError("Thiếu OPENAI_API_KEY cho banner.")
     model = (
         getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_MODEL", "") or "gpt-image-2"

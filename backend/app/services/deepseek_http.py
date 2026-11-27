@@ -6,12 +6,21 @@ import logging
 from typing import Any, Dict, Optional
 
 import requests
-from requests.exceptions import SSLError
+from requests.exceptions import SSLError, Timeout
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 _ssl_fallback_warned = False
+
+
+def _notify_deepseek_down(detail: str) -> None:
+    try:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("DeepSeek", detail)
+    except Exception:
+        pass
 
 
 def deepseek_ssl_verify() -> bool:
@@ -44,7 +53,10 @@ def deepseek_chat_completions(
     global _ssl_fallback_warned
     key = (api_key if api_key is not None else getattr(settings, "DEEPSEEK_API_KEY", "") or "").strip()
     if not key:
-        raise RuntimeError("Thiếu DEEPSEEK_API_KEY.")
+        _notify_deepseek_down("Thiếu DEEPSEEK_API_KEY.")
+        from app.services.ai_run_alert import AiApiStopped
+
+        raise AiApiStopped("AI_API_STOPPED DeepSeek: thiếu DEEPSEEK_API_KEY.")
     url = (
         (api_url if api_url is not None else getattr(settings, "DEEPSEEK_API_URL", "") or "")
         .strip()
@@ -62,10 +74,13 @@ def deepseek_chat_completions(
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     verify = deepseek_ssl_verify()
     try:
-        return requests.post(url, headers=headers, json=body, timeout=timeout, verify=verify)
+        response = requests.post(url, headers=headers, json=body, timeout=timeout, verify=verify)
     except SSLError:
         if not verify:
-            raise
+            from app.services.ai_run_alert import AiApiStopped
+
+            _notify_deepseek_down("DeepSeek SSL lỗi")
+            raise AiApiStopped("AI_API_STOPPED DeepSeek: SSL lỗi")
         if not _ssl_fallback_warned:
             logger.warning(
                 "DeepSeek SSL verify failed — retry verify=False (dev Windows thiếu CA). "
@@ -78,7 +93,41 @@ def deepseek_chat_completions(
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             except Exception:
                 pass
-        return requests.post(url, headers=headers, json=body, timeout=timeout, verify=False)
+        try:
+            response = requests.post(url, headers=headers, json=body, timeout=timeout, verify=False)
+        except Timeout:
+            raise
+        except Exception as exc:
+            from app.services.ai_run_alert import AiApiStopped
+
+            if isinstance(exc, AiApiStopped):
+                raise
+            _notify_deepseek_down(str(exc))
+            raise AiApiStopped(f"AI_API_STOPPED DeepSeek: {exc}") from exc
+    except Timeout:
+        raise
+    except Exception as exc:
+        from app.services.ai_run_alert import AiApiStopped
+
+        if isinstance(exc, AiApiStopped):
+            raise
+        _notify_deepseek_down(str(exc))
+        raise AiApiStopped(f"AI_API_STOPPED DeepSeek: {exc}") from exc
+    code = int(getattr(response, "status_code", 0) or 0)
+    if code in (401, 402, 403, 429) or code >= 500:
+        detail = f"HTTP {code} {(response.text or '')[:300]}"
+        _notify_deepseek_down(detail)
+        from app.services.ai_run_alert import AiApiStopped
+
+        raise AiApiStopped(f"AI_API_STOPPED DeepSeek: {detail}")
+    elif code < 400:
+        try:
+            from app.services.ai_run_alert import mark_ai_ok
+
+            mark_ai_ok("DeepSeek")
+        except Exception:
+            pass
+    return response
 
 
 def deepseek_message_text(resp_or_body: Any) -> str:

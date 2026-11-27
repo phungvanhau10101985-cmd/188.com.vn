@@ -443,6 +443,7 @@ _FATAL_DEPENDENCY_MARKERS = (
     "billing_disabled",
     "deepseek_missing_key",
     "gpt_image_failed",
+    "AI_API_STOPPED",
 )
 
 
@@ -547,7 +548,9 @@ def detect_ink_bleed(image_bytes: bytes) -> Dict[str, Any]:
     """Gemini Flash-Lite chỉ nhìn mực loang. Không vẽ lại ảnh."""
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY") or "").strip()
     if len(api_key) < 10:
-        raise ImageLocalizationGptStopError("Thiếu GEMINI_API_KEY để kiểm tra mực loang.")
+        from app.services.ai_run_alert import raise_ai_stopped
+
+        raise_ai_stopped("Gemini", "Thiếu GEMINI_API_KEY để kiểm tra mực loang.")
     model = image_loc_ink_bleed_model()
     jpeg = _preview_jpeg_for_ink_bleed(image_bytes)
     payload = {
@@ -881,7 +884,9 @@ class GeminiApiImageAdapter:
 
         api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
         if len(api_key) < 10:
-            raise ImageLocalizationError("Thiếu GEMINI_API_KEY cho chế độ Gemini API.")
+            from app.services.ai_run_alert import raise_ai_stopped
+
+            raise_ai_stopped("Gemini", "Thiếu GEMINI_API_KEY cho chế độ Gemini API.")
         model = self._image_model
         timeout = max(30, int(getattr(settings, "IMAGE_LOCALIZATION_GEMINI_API_TIMEOUT_SEC", 300) or 300))
         url = f"{_GEMINI_AI_GENERATE_BASE}/models/{model}:generateContent"
@@ -980,7 +985,9 @@ class OpenAiGptImageAdapter:
 
         key = (getattr(settings, "OPENAI_API_KEY", "") or "").strip()
         if len(key) < 10:
-            raise ImageLocalizationError("Thiếu OPENAI_API_KEY cho chế độ GPT Image.")
+            from app.services.ai_run_alert import raise_ai_stopped
+
+            raise_ai_stopped("OpenAI", "Thiếu OPENAI_API_KEY cho chế độ GPT Image.")
         model = self._model
         timeout = max(60, int(getattr(settings, "IMAGE_LOCALIZATION_OPENAI_IMAGE_TIMEOUT_SEC", 300) or 300))
         mime = _mime_for_image_filename(filename)
@@ -1907,6 +1914,7 @@ class LegacyImageLocalizationPipeline:
                 return "processed", processed, msg
             fail_suffix = " (không nhận được bytes ảnh từ model; kiểm tra chế độ API/OpenAI và quota)"
         except Exception as exc:
+            _raise_if_fatal_dependency(exc)
             if is_vision_service_pause(exc):
                 raise
             logger.warning("Gemini/GPT ảnh lỗi: %s", exc)
@@ -2164,6 +2172,15 @@ class ProductImageLocalizationService:
     ) -> Dict[str, Any]:
         self._should_cancel = should_cancel
         self._abort_if_requested(should_cancel)
+
+        from app.services.consult_image_text import image_counterfeit_risk
+
+        if image_counterfeit_risk(getattr(product, "consult_image_text", None)):
+            return {
+                "status": "skipped",
+                "processed_images": 0,
+                "message": "Nghi hàng giả. Không bản địa hóa.",
+            }
 
         if not self._claim_product_for_processing(db, product):
             current_status = (product.image_localization_status or "").strip() or "pending"

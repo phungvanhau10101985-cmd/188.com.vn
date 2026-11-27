@@ -633,6 +633,8 @@ def resume_pending_jobs(run_job, payload_cls: type) -> None:
             if st in ("cancelled", "done", "error") or bool(fresh.cancel_requested):
                 logger.info("IMAGE_LOCALIZATION_JOB_RESUME skip job_id=%s status=%s", row.job_id, st)
                 continue
+            if (fresh.phase or "") == "counterfeit_check":
+                continue
             select_fresh = job_awaits_product_selection(fresh)
             vision_resume = (fresh.phase or "").strip().lower() == "waiting_vision"
             if vision_resume and not vision_pause_ready(fresh.updated_at):

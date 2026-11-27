@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
+from requests.exceptions import SSLError, Timeout
 
 GEMINI_API_KEY_HEADER = "x-goog-api-key"
 _GEMINI_HOST = "generativelanguage.googleapis.com"
@@ -58,6 +59,31 @@ def relocate_gemini_api_key(url: str, kwargs: dict[str, Any]) -> tuple[str, dict
     return clean, kwargs
 
 
+def _ai_label(url: str) -> str:
+    raw = str(url or "").lower()
+    if "generativelanguage.googleapis.com" in raw:
+        marker = "models/"
+        if marker in raw:
+            name = raw.split(marker, 1)[1].split(":", 1)[0].split("/", 1)[0]
+            if name:
+                return name
+        return "Gemini"
+    if "api.openai.com" in raw:
+        return "OpenAI"
+    if "api.deepseek.com" in raw:
+        return "DeepSeek"
+    return ""
+
+
+def _notify_gemini_down(url: str, detail: str) -> None:
+    try:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down(_ai_label(url) or "Gemini", detail)
+    except Exception:
+        pass
+
+
 def install_gemini_key_header_transport() -> None:
     """Lưới an toàn: mọi requests.post tới Gemini đều bị gỡ key khỏi URL trước khi gửi."""
     global _installed
@@ -70,7 +96,49 @@ def install_gemini_key_header_transport() -> None:
             url, kwargs = relocate_gemini_api_key(url, kwargs)
         except Exception:
             pass
-        return original(self, method, url, **kwargs)
+        label = _ai_label(url)
+        verb = str(method or "GET").upper()
+        writing = verb not in {"GET", "HEAD"}
+        if label and writing:
+            from app.services.ai_run_alert import AiApiStopped, ai_is_paused
+
+            if ai_is_paused(label):
+                raise AiApiStopped(f"AI_API_STOPPED {label}: đang dừng vì lần gọi trước không chạy")
+        try:
+            response = original(self, method, url, **kwargs)
+        except Exception as exc:
+            if label and not isinstance(exc, (SSLError, Timeout)):
+                from app.services.ai_run_alert import AiApiStopped
+
+                if isinstance(exc, AiApiStopped):
+                    raise
+                _notify_gemini_down(url, str(exc))
+                raise AiApiStopped(f"AI_API_STOPPED {label}: {exc}") from exc
+            raise
+        if label:
+            code = int(getattr(response, "status_code", 0) or 0)
+            if code in (401, 402, 403, 429) or code >= 500:
+                body = ""
+                try:
+                    body = (response.text or "")[:300]
+                except Exception:
+                    body = ""
+                detail = f"HTTP {code} {body}"
+                _notify_gemini_down(url, detail)
+                from app.services.ai_run_alert import AiApiStopped
+
+                raise AiApiStopped(f"AI_API_STOPPED {label}: {detail}")
+            if writing and code < 400:
+                try:
+                    from app.services.ai_run_alert import mark_ai_ok
+
+                    mark_ai_ok(label)
+                except Exception:
+                    pass
+        return response
 
     requests.sessions.Session.request = wrapped  # type: ignore[method-assign]
     _installed = True
+
+
+install_gemini_key_header_transport()

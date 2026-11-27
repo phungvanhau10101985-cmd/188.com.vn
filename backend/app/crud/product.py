@@ -1571,6 +1571,7 @@ def get_storefront_products_by_ids(
     is_active: bool = True,
 ) -> List[Product]:
     """Trả SP theo thứ tự ids yêu cầu — bỏ id không tồn tại / không active."""
+    from app.services.consult_image_text import storefront_may_show_product
     from app.services.product_image_visibility import product_has_storefront_image
 
     ordered_unique: List[int] = []
@@ -1598,6 +1599,8 @@ def get_storefront_products_by_ids(
         if is_active and not getattr(row, "is_active", True):
             continue
         if not product_has_storefront_image(row):
+            continue
+        if not storefront_may_show_product(getattr(row, "consult_image_text", None)):
             continue
         out.append(row)
     return out
@@ -4358,6 +4361,7 @@ def get_products(
     admin_list_query: bool = False,
     search_refresh: Optional[str] = None,
     card_listing: bool = False,
+    distribution_ready_only: bool = False,
 ):
     query = db.query(Product)
     if card_listing and not admin_list_query:
@@ -4419,6 +4423,10 @@ def get_products(
         warehouse_clearance_only=warehouse_clearance_only,
         has_text_search=has_q,
     )
+    if distribution_ready_only:
+        from app.services.consult_image_text import distribution_ready_clause
+
+        query = query.filter(distribution_ready_clause())
     sort_norm = normalize_product_list_sort(sort)
     use_random_order = bool(order_random and not has_q)
     if use_random_order:
@@ -5816,18 +5824,18 @@ def get_products_for_incremental_sync(
     """
     Trả thay đổi catalog cho cổng NanoAI.
 
-    Chỉ sản phẩm ``image_localization_status == localized`` được upsert.
-    Sản phẩm đổi trong cửa sổ nhưng chưa bản địa hóa (pending/failed/skipped/trống)
-    trả về dạng ``excluded`` để đối tác xóa bản đã kéo trước đó.
-    Trạng thái ``processing`` bị bỏ qua: job đang chạy, chưa có kết quả cuối.
+    Chỉ sản phẩm đã kiểm hàng giả sạch và đã bản địa hóa được upsert.
+    Sản phẩm đổi trong cửa sổ nhưng chưa xong hai bước đó trả ``excluded``
+    để đối tác xóa bản đã kéo. ``processing`` bị bỏ qua đến khi job chốt.
     Tombstone hard-delete vẫn gửi đủ.
     `updated_since` được so sánh inclusive để client dùng mốc lần chạy thành công
     mà không làm mất thay đổi có cùng timestamp (client cần upsert idempotent).
     """
+    from app.services.consult_image_text import distribution_ready_clause
+
     changed_at = sql_func.coalesce(Product.updated_at, Product.created_at)
-    # processing = đang bản địa hóa, chưa chốt — không upsert, cũng không báo xóa.
     sync_kind = case(
-        (Product.image_localization_status == "localized", literal("product")),
+        (distribution_ready_clause(), literal("product")),
         else_=literal("excluded"),
     )
     events = union_all(

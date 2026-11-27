@@ -150,6 +150,9 @@ def gemini_generate_image_from_text(
     """
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if len(api_key) < 10:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("Gemini", "Thiếu GEMINI_API_KEY.")
         raise RuntimeError("Thiếu GEMINI_API_KEY.")
     dm = (
         (image_model or getattr(settings, "IMAGE_LOCALIZATION_GEMINI_IMAGE_MODEL", "") or "gemini-3-pro-image-preview")

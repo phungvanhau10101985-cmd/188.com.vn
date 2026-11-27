@@ -78,6 +78,10 @@ def _apply_storefront_image_gate(db: Session, row):
     if not product_has_storefront_image(row):
         deactivate_product_without_storefront_image(db, row)
         return None
+    from app.services.consult_image_text import storefront_may_show_product
+
+    if not storefront_may_show_product(getattr(row, "consult_image_text", None)):
+        return None
     return row
 
 
@@ -680,6 +684,7 @@ def _read_products_list_impl(
     warehouse_clearance_only: bool = False,
     admin_list: bool = False,
     full_schema: bool = False,
+    distribution_ready_only: bool = False,
 ) -> dict:
     from app.services import sale_calendar as sale_calendar_svc
 
@@ -907,6 +912,7 @@ def _read_products_list_impl(
         warehouse_clearance_only=warehouse_clearance_only,
         admin_list_query=admin_list,
         card_listing=card_listing,
+        distribution_ready_only=distribution_ready_only,
     )
 
     if listing_filter_cache_key:
@@ -980,10 +986,9 @@ def _read_products_incremental_sync(
     """
     Wire contract NanoAI: trả các thay đổi kể từ mốc UTC, gồm tombstone hard-delete.
 
-    Chỉ sản phẩm đã bản địa hóa (``image_localization_status=localized``) được upsert.
-    Sản phẩm chưa bản địa hóa trong cùng cửa sổ thời gian trả ``is_deleted=true`` để
-    nền tảng kia gỡ bản đã đồng bộ trước đó. SP đang ``processing`` không có trong trang
-    này cho đến khi job bản địa hóa chốt trạng thái.
+    Chỉ sản phẩm đã kiểm hàng giả sạch và đã bản địa hóa được upsert.
+    Sản phẩm chưa xong hai bước đó trả ``is_deleted=true`` để nền tảng kia gỡ bản đã kéo.
+    SP đang ``processing`` không có trong trang cho đến khi job chốt.
 
     Endpoint này cố ý không dùng listing cache/enrich sale để response ổn định, nhẹ hơn và
     không lọc mất `is_active=false` hoặc `is_deleted=true`.
@@ -1009,7 +1014,7 @@ def _read_products_incremental_sync(
     data: List[dict] = []
     for event_type, item in events:
         if event_type in ("deleted", "excluded"):
-            # excluded: SP còn trong kho nhưng chưa «đã bản địa hóa» — đối tác phải gỡ.
+            # excluded: còn trong kho nhưng chưa kiểm sạch và bản địa hóa — đối tác phải gỡ.
             stamp = item.deleted_at if event_type == "deleted" else item.changed_at
             data.append(
                 {
@@ -1332,6 +1337,7 @@ def read_products_full_list(
             search_refresh=search_refresh,
             user=current_user,
             full_schema=True,
+            distribution_ready_only=True,
         )
     except Exception as e:
         return {"error": str(e), "status": "serialization_error"}

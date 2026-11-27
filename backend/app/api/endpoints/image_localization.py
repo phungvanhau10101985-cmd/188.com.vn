@@ -661,6 +661,63 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
             str(p.product_id).strip() for p in products if str(getattr(p, "product_id", "")).strip()
         ]
         products = []
+        from app.services.counterfeit_gemini_batch import enqueue_products, split_localization_ids
+
+        blocked_ids, ready_ids, waiting_ids = split_localization_ids(db, product_ids_to_run)
+        if blocked_ids:
+            for product_id in blocked_ids:
+                if product_id in processed_set:
+                    continue
+                skipped += 1
+                _mark_processed_product(processed_ids, processed_set, product_id)
+                skipped_reports.append(
+                    {"product_id": product_id, "message": "Nghi hàng giả. Không bản địa hóa."}
+                )
+                row = db.query(Product).filter(Product.product_id == product_id).first()
+                if row is not None:
+                    row.image_localization_status = "skipped"
+                    row.image_localization_error = "Nghi hàng giả. Không bản địa hóa."
+            db.commit()
+            current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
+            _job_update(
+                job_id,
+                done=done,
+                failed=failed,
+                skipped=skipped,
+                current=current,
+                percent=percent,
+                processed_product_ids=processed_ids,
+                skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+            )
+        if waiting_ids:
+            enqueue_products(waiting_ids, resume_job_id=job_id)
+            _job_update(
+                job_id,
+                status="queued",
+                phase="counterfeit_check",
+                message="Đang chờ Gemini 3.8 Flash kiểm hàng giả trước khi bản địa hóa. Kết quả trong vòng 24 giờ.",
+                current_product_id=None,
+            )
+            return
+        product_ids_to_run = ready_ids
+        if not product_ids_to_run:
+            current, percent = _job_progress(done=done, failed=failed, skipped=skipped, total=total)
+            _job_update(
+                job_id,
+                status="done",
+                phase="done",
+                message="Không bản địa hóa: sản phẩm trong đợt đều nghi hàng giả hoặc không còn ảnh.",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                percent=100.0 if total else percent,
+                current=current,
+                done=done,
+                failed=failed,
+                skipped=skipped,
+                current_product_id=None,
+                processed_product_ids=processed_ids,
+                skipped_product_reports=skipped_reports[-_JOB_SKIPPED_REPORT_MAX:],
+            )
+            return
         # Chờ RAM, CPU hoặc giờ DeepSeek có thể lâu hơn idle_in_transaction 30 giây.
         # Giữ session lúc chờ thì Postgres cắt connection và cả job chết với lỗi SSL.
         release_db_session(db)
@@ -909,6 +966,9 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                 release_db_session(db)
 
                 if is_vision_service_pause(exc):
+                    from app.services.ai_run_alert import notify_ai_down
+
+                    notify_ai_down("Google Vision", err_tail)
                     if product_db_id is not None:
                         _reset_product_after_cancel_by_pk(product_db_id)
                     current, percent = _job_progress(
@@ -916,19 +976,16 @@ def _run_job(job_id: str, payload: StartImageLocalizationPayload, *, resume: boo
                     )
                     _job_update(
                         job_id,
-                        status="queued",
-                        phase="waiting_vision",
+                        status="error",
+                        phase="error",
                         current=current,
                         done=done,
                         failed=failed,
                         skipped=skipped,
                         percent=percent,
-                        message=(
-                            "Google Vision đang từ chối tạm thời (403). "
-                            "Job giữ hàng đợi và sẽ tự chạy lại, không đánh lỗi cả lô."
-                        ),
-                        current_product_id=product_id,
-                        finished_at=None,
+                        message=f"Dừng job: Google Vision không chạy. {err_tail[:700]}",
+                        current_product_id=None,
+                        finished_at=datetime.now(timezone.utc).isoformat(),
                         recent_results=results[-_JOB_RECENT_RESULTS_MAX:],
                         processed_product_ids=processed_ids,
                     )

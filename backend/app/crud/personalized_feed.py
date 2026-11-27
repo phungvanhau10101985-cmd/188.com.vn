@@ -59,7 +59,9 @@ def _signal_ids_for_guest(db: Session, guest_session_id: str) -> List[int]:
 
 
 def _fallback_popularity(db: Session, skip: int, limit: int) -> Tuple[List[Product], int, bool]:
-    base = db.query(Product).filter(Product.is_active == True)  # noqa: E712
+    from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+    base = apply_catalog_visibility_filter(db.query(Product).filter(Product.is_active == True))  # noqa: E712
     products = (
         base.order_by(Product.purchases.desc().nullslast(), Product.id)
         .offset(skip)
@@ -143,7 +145,9 @@ def get_personalized_home_products(
 
         tier_col = case(*whens, else_=0)
 
-        base = db.query(Product).filter(Product.is_active == True)  # noqa: E712
+        from app.services.warehouse_clearance import apply_catalog_visibility_filter
+
+        base = apply_catalog_visibility_filter(db.query(Product).filter(Product.is_active == True))  # noqa: E712
         total = base.count()
         products = (
             base.order_by(

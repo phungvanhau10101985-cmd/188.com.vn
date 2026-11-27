@@ -960,6 +960,9 @@ def _gemini_edit_image_from_url(
     """
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if len(api_key) < 10:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("Gemini", "Thiếu GEMINI_API_KEY.")
         raise RuntimeError("Thiếu GEMINI_API_KEY.")
     img_resp = requests.get(image_url, timeout=30)
     img_resp.raise_for_status()

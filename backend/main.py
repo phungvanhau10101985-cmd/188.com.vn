@@ -382,6 +382,10 @@ def load_api_routes():
             app.include_router(module.router, prefix="/api/v1/products", tags=["products"])
             loaded.append(("products", "/api/v1/products"))
             print(f"  ✅ products: /api/v1/products")
+            from app.api.endpoints import counterfeit_report as _counterfeit_report
+
+            app.include_router(_counterfeit_report.router, prefix="/api/v1/products", tags=["products"])
+            print("  ✅ counterfeit report: /api/v1/products/admin/counterfeit-report")
         else:
             print(f"  ⚠️  products: No router attribute")
             failed.append(("products", "No router attribute"))
@@ -669,6 +673,14 @@ def _start_api_singleton_daemons() -> None:
             )
     except Exception as _e_ilr:
         print(f"   ⚠️  image localization job resume startup: {_e_ilr}")
+
+    try:
+        from app.services.counterfeit_gemini_batch import start_counterfeit_batch_poller
+
+        start_counterfeit_batch_poller()
+        print("   🔎 Kiểm hàng giả: một file batch Gemini 3.8 Flash, đối soát mỗi 3 phút.")
+    except Exception as _e_cf:
+        print(f"   ⚠️  counterfeit gemini batch poller: {_e_cf}")
 
     try:
         from app.services.listing_import_queue import reconcile_all_queues_on_startup

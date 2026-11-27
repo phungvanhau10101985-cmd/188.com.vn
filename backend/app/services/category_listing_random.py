@@ -50,7 +50,7 @@ def build_category_listing_ids_cache_key(
     warehouse_clearance_only: bool = False,
 ) -> str:
     payload = {
-        "v": 1,
+        "v": 2,
         "category": _norm_opt(category),
         "subcategory": _norm_opt(subcategory),
         "sub_subcategory": _norm_opt(sub_subcategory),

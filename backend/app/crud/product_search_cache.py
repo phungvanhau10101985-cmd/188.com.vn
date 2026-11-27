@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Legacy: TTL > 0 bật hết hạn theo giây; 0 = vĩnh viễn đến khi refresh.
 DEFAULT_TTL_SECONDS = 0
-_CACHE_QUERY_PAYLOAD_VERSION = 18
+_CACHE_QUERY_PAYLOAD_VERSION = 19
 # Một dòng cache / từ khóa + filter — lưu danh sách SP; phân trang chỉ khi trả response.
 SEARCH_LIST_CACHE_MAX_PRODUCTS = 5000
 # Một request tìm kiếm không được nạp hàng nghìn dòng đầy cột vào RAM/GIL.

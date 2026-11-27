@@ -305,6 +305,9 @@ def _gemini_edit_from_urls(
     """Gemini image-edit với 1..N ảnh tham chiếu (inline_data)."""
     api_key = (getattr(settings, "GEMINI_API_KEY", "") or "").strip()
     if len(api_key) < 10:
+        from app.services.ai_run_alert import notify_ai_down
+
+        notify_ai_down("Gemini", "Thiếu GEMINI_API_KEY.")
         raise RuntimeError("Thiếu GEMINI_API_KEY.")
     urls = [u.strip() for u in image_urls if (u or "").strip()]
     if not urls:
@@ -3393,7 +3396,10 @@ def name_product_from_reference_images(
         "- 45–90 ký tự, tự nhiên, có loại SP + đặc điểm bán (đối tượng, họa tiết, form).\n"
         "- Không mã SKU, không emoji, không dấu ngoặc thừa.\n"
         "- Không liệt kê hết size/màu ở cuối tên.\n"
-        "- Có thể nêu motif/nhân vật in trên áo nếu nhìn thấy vì khách hay search.\n"
+        "- KHÔNG ghi tên thương hiệu, nhà mốt, logo, nhân vật, phim, game, CLB/đội có bản quyền "
+        "(Nike, Adidas, Gucci, Louis Vuitton, Chanel, Dior, Disney, Hello Kitty, Labubu, Pokemon, MLB…).\n"
+        "- Ảnh có logo/nhân vật: mô tả trung tính (loại hàng + form + chất liệu + họa tiết), "
+        "không «phong cách + tên hãng», không replica / like auth / 1:1 / super fake.\n"
         f"{extra_rule}"
         f"Gợi ý admin — Giới tính: {gender_txt}; Chất liệu/thành phần: {material_txt}; "
         f"Phong cách: {style_txt}; Màu gợi ý: {colors_txt}; Ghi chú: {notes_txt}.\n"
@@ -3476,7 +3482,15 @@ def name_product_from_reference_images(
     if not name:
         warnings.append("vision_name: thiếu ten_san_pham trong JSON.")
         return "", analysis, colors_out, ten_mau, warnings
-    return name, analysis, colors_out, ten_mau, warnings
+    from app.services.listing_year_sanitize import sanitize_vi_listing_field
+
+    cleaned_name = sanitize_vi_listing_field(name)
+    if cleaned_name != name.strip():
+        warnings.append("vision_name: đã bỏ tên thương hiệu/nhân vật bản quyền khỏi tên sản phẩm.")
+    if not cleaned_name:
+        warnings.append("vision_name: tên chỉ còn thương hiệu/bản quyền — bỏ qua.")
+        return "", analysis, colors_out, ten_mau, warnings
+    return cleaned_name, analysis, colors_out, ten_mau, warnings
 
 
 def name_product_from_reference_image(
@@ -3987,7 +4001,10 @@ def _finalize_product_from_media(
         if color_names:
             brief = f"{brief}\nMàu đã chọn: {', '.join(color_names)}"
 
-        locked_name = (admin_name or vision_name or "").strip()
+        from app.services.listing_year_sanitize import sanitize_vi_listing_field
+
+        raw_locked = (admin_name or vision_name or "").strip()
+        locked_name = sanitize_vi_listing_field(raw_locked) if raw_locked else ""
         _job_update(
             job_id,
             status="publishing",
@@ -4017,7 +4034,7 @@ def _finalize_product_from_media(
             "style": style,
             "available": available,
             "origin": "manual" if mode == "manual" else "manual_ai",
-            "brand_name": (payload.get("brand_name") or "").strip() or None,
+            "brand_name": sanitize_vi_listing_field((payload.get("brand_name") or "").strip()) or None,
             "shop_name": (payload.get("shop_name") or "").strip() or "188.com.vn",
             "product_info": {
                 "manual_create": {

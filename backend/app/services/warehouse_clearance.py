@@ -296,8 +296,10 @@ def apply_catalog_visibility_filter(
             or_(Product.is_warehouse_clearance == False, Product.is_warehouse_clearance.is_(None))  # noqa: E712
         )
     query = query.filter(storefront_sellable_expr())
+    from app.services.consult_image_text import storefront_counterfeit_cleared_clause
     from app.services.product_image_visibility import apply_storefront_image_filter
 
+    query = query.filter(storefront_counterfeit_cleared_clause())
     return apply_storefront_image_filter(query)
 
 

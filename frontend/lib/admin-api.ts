@@ -2614,6 +2614,41 @@ export const adminProductAPI = {
   },
 };
 
+export type AdminCounterfeitReportItem = {
+  id: number;
+  product_id: string;
+  code: string;
+  name: string;
+  price: number;
+  is_active: boolean;
+  slug: string;
+  main_image: string;
+  hits: string[];
+  images: { url: string; hits: string[] }[];
+};
+
+export type AdminCounterfeitReport = {
+  total: number;
+  page: number;
+  page_size: number;
+  items: AdminCounterfeitReportItem[];
+};
+
+export const adminCounterfeitReportAPI = {
+  list: (params: { page?: number; q?: string } = {}) => {
+    const sp = new URLSearchParams();
+    sp.set('page', String(params.page || 1));
+    sp.set('page_size', '50');
+    if (params.q) sp.set('q', params.q);
+    return fetchAdmin<AdminCounterfeitReport>(`/products/admin/counterfeit-report?${sp.toString()}`);
+  },
+  exportFile: (q = '') =>
+    downloadAdminGetXlsx(
+      `/products/admin/counterfeit-report/export?q=${encodeURIComponent(q)}`,
+      'bao-cao-hang-gia.xlsx',
+    ),
+};
+
 export const adminSearchMappingAPI = {
   getMappings: (params?: { skip?: number; limit?: number; keyword?: string; mapping_type?: string }) => {
     const sp = new URLSearchParams();

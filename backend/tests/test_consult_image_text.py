@@ -1,12 +1,18 @@
 """Lọc chữ OCR cho ngữ cảnh tư vấn NanoAI."""
 from app.services.consult_image_text import (
+    COUNTERFEIT_IMAGE_KEY,
     build_image_consult_context,
     consult_updates_from_results,
+    counterfeit_hit_fingerprint,
     filter_ocr_line,
     filter_ocr_lines,
+    image_counterfeit_risk,
+    storefront_may_show_product,
     merge_consult_image_text,
+    set_gemini_counterfeit,
     translate_consult_lines,
 )
+from app.services.counterfeit_gemini_batch import parse_brand_json
 
 
 class _Res:
@@ -144,3 +150,32 @@ def test_image_consult_context_shape_and_limits():
     capped = build_image_consult_context(many)
     assert len(capped["lines"]) == 40
     assert "image_consult_context" not in ProductSchema.model_fields
+
+
+def test_gemini_counterfeit_flag_stays_out_of_consult_context():
+    assert parse_brand_json('{"brands":["Nike"]}') == ["Nike"]
+    assert parse_brand_json('{"brands":[]}') == []
+    stored = set_gemini_counterfeit(
+        {"https://img/a.jpg": [{"src": "纯棉", "vi": "cotton"}]},
+        ["Nike"],
+        "https://img/a.jpg",
+    )
+    assert image_counterfeit_risk(stored) is True
+    assert counterfeit_hit_fingerprint(stored) == ("nike",)
+    context = build_image_consult_context(stored)
+    assert context is not None
+    assert COUNTERFEIT_IMAGE_KEY not in context
+    kept = merge_consult_image_text(stored, {"https://img/a.jpg": [{"src": "棉", "vi": "cotton"}]})
+    assert kept[COUNTERFEIT_IMAGE_KEY]["by_url"]["https://img/a.jpg"] == ["Nike"]
+    cleared = set_gemini_counterfeit(kept, [], "https://img/a.jpg")
+    assert not image_counterfeit_risk(cleared)
+    assert cleared[COUNTERFEIT_IMAGE_KEY]["checked"] is True
+    assert storefront_may_show_product(cleared) is True
+    assert storefront_may_show_product(stored) is False
+    assert storefront_may_show_product(None) is True
+    from app.services.consult_image_text import distribution_ready
+
+    assert distribution_ready(None, "localized") is False
+    assert distribution_ready(cleared, "pending") is False
+    assert distribution_ready(cleared, "localized") is True
+    assert distribution_ready(stored, "localized") is False

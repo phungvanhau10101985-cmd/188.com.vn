@@ -317,10 +317,11 @@ QUY TẮC PHÂN LOẠI (bắt buộc — áp dụng khi đọc TÊN sản phẩm
   • **Túi xách / ví / ba lô / clutch**: nếu có **kích thước** (dài × rộng × cao, hoặc một cạnh cm), ghép gọn (vd. «25×18×10 cm», «khổ ~25 cm»); **không** bịa.
   • **Hàng khác** (vali, balô laptop…): nếu có kích thước/dung tích trong NGỮ CẢNH, có thể thêm cụm ngắn tương ứng.
   • **KHÔNG** dịch cụm marketing phong cách Trung Quốc (国风, 国潮, 新中式, 中国风, 中式, 汉风, 汉服, 古风, 唐装, 民国风, 宫廷风, 禅意, 东方美学, 国粹, 华夏, 水墨风, 武侠风…) — bỏ hẳn, không ghi «phong cách quốc gia/Trung Quốc/Trung Hoa/tân trung thức/đông phương/Hán phục».
+  • **KHÔNG** ghi tên thương hiệu, nhân vật, phim, game, CLB có bản quyền (Nike, Gucci, Louis Vuitton, Disney, Hello Kitty, Labubu, MLB…). Mô tả trung tính theo loại hàng; không «phong cách + tên hãng», không replica / like auth / 1:1.
 """ + LISTING_SANITIZE_PROMPT_VI + """
 - chat_lieu_vi: **chất liệu** tiếng Việt ngắn gọn (tối đa ~100 ký tự), chỉ điền khi suy ra được từ TÊN hoặc NGỮ CẢNH (vd. cotton, polyester, da PU, lụa…); có nhãn tiếng Anh «Material» trong thông số thì dịch/ghi lại bằng tiếng Việt; **không** đoán bừa — không có thông tin thì để chuỗi rỗng "".
 - mo_ta_vi: **mô tả sản phẩm** tiếng Việt để đăng bán (plain text), khoảng 350–1200 ký tự, 2–5 đoạn (xuống dòng \\n giữa đoạn); dựa trên TÊN + NGỮ CẢNH: đặc điểm nổi bật, phom/form (nếu rõ), phù hợp ai/mùa (nếu suy ra được), chất liệu đã biết; có thể nhắc lại ngắn kích thước/gót nếu hữu ích nhưng **không** copy nguyên khối dài những gì đã gói trong ten_tieng_viet; **không** spam từ khóa, **không** liệt kê đầy đủ mọi màu/size đặt hàng (đã có biến thể); không HTML; không nhét JSON/markdown trong chuỗi.
-- thuong_hieu_vi: thương hiệu / nhà cung (tiếng Việt hoặc phiên âm ngắn) nếu NGỮ CẢNH có; không có thì "".
+- thuong_hieu_vi: để "" nếu chỉ nhận ra thương hiệu/nhân vật bên thứ ba có bản quyền. Chỉ điền nhà cung không nổi tiếng khi NGỮ CẢNH có; không bịa, không điền hãng thời trang/nhân vật.
 - xuat_xu_vi: xuất xứ / nơi sản xuất tiếng Việt (vd «Trung Quốc», «Việt Nam») nếu suy ra được; không bịa — không có thì "".
 - phong_cach_vi: kiểu dáng / phong cách tiếng Việt ngắn (vd «công sở», «casual», «cổ điển») khi có trong NGỮ CẢNH; không có thì "".
 - dip_vi: dịp sử dụng tiếng Việt ngắn (vd «đi làm», «dự tiệc», «hằng ngày») khi có; không có thì "".

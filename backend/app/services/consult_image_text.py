@@ -1,18 +1,21 @@
 """Chữ OCR trên ảnh gốc — chỉ để NanoAI tư vấn, không ghi vào trường web.
 
 Lọc cơ học trước khi lưu. Không tóm tắt bằng AI. Dịch từng dòng; lỗi dịch thì giữ chữ gốc.
+Khóa `_counterfeit` cùng cột do batch Gemini 3.8 Flash ghi. Không gửi NanoAI.
 """
 from __future__ import annotations
 
 import logging
 import re
 import unicodedata
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 CONSULT_IMAGE_TEXT_KEY = "consult_image_text"
 IMAGE_CONSULT_CONTEXT_FIELD = "image_consult_context"
+COUNTERFEIT_IMAGE_KEY = "_counterfeit"
+_MAX_COUNTERFEIT_HITS = 12
 _MAX_CONTEXT_LINES = 40
 _MAX_LINE_CHARS = 200
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
@@ -150,22 +153,144 @@ def translate_consult_lines(
 def merge_consult_image_text(
     existing: Any,
     updates: Dict[str, List[Dict[str, str]]],
-) -> Optional[Dict[str, List[Dict[str, str]]]]:
-    """Chỉ thay URL có trong updates. Danh sách rỗng thì xóa khóa URL đó."""
-    base: Dict[str, List[Dict[str, str]]] = {}
+) -> Optional[Dict[str, Any]]:
+    """Chỉ thay URL có trong updates. Danh sách rỗng thì xóa khóa URL đó. Giữ cờ hàng giả."""
+    base: Dict[str, Any] = {}
     if isinstance(existing, dict):
+        flag = existing.get(COUNTERFEIT_IMAGE_KEY)
+        if isinstance(flag, dict) and (flag.get("checked") or (isinstance(flag.get("by_url"), dict) and flag.get("by_url"))):
+            base[COUNTERFEIT_IMAGE_KEY] = flag
         for url, rows in existing.items():
+            if url == COUNTERFEIT_IMAGE_KEY:
+                continue
             if isinstance(url, str) and url.strip() and isinstance(rows, list) and rows:
                 base[url] = rows
     for url, rows in updates.items():
         key = str(url or "").strip()
-        if not key:
+        if not key or key == COUNTERFEIT_IMAGE_KEY:
             continue
         if rows:
             base[key] = rows
         else:
             base.pop(key, None)
     return base or None
+
+
+def set_gemini_counterfeit(stored: Any, brands: Iterable[str], image_url: str = "") -> Optional[Dict[str, Any]]:
+    """Ghi hoặc xóa cờ hàng giả theo tên logo Gemini đọc được."""
+    base: Dict[str, Any] = dict(stored) if isinstance(stored, dict) else {}
+    base.pop(COUNTERFEIT_IMAGE_KEY, None)
+    found: List[str] = []
+    seen: set[str] = set()
+    for raw in brands:
+        token = str(raw or "").strip()
+        key = token.casefold()
+        if not token or key in seen:
+            continue
+        seen.add(key)
+        found.append(token)
+        if len(found) >= _MAX_COUNTERFEIT_HITS:
+            break
+    url = (image_url or "").strip() or "gemini"
+    base[COUNTERFEIT_IMAGE_KEY] = {
+        "risk": bool(found),
+        "by_url": {url: found} if found else {},
+        "source": "gemini-3.8-flash",
+        "checked": True,
+    }
+    return base or None
+
+
+def counterfeit_was_checked(stored: Any) -> bool:
+    """Gemini đã trả kết quả cho sản phẩm này, kể cả khi không thấy logo."""
+    if not isinstance(stored, dict):
+        return False
+    flag = stored.get(COUNTERFEIT_IMAGE_KEY)
+    return isinstance(flag, dict) and bool(flag.get("checked"))
+
+
+def image_counterfeit_risk(stored: Any) -> bool:
+    if not isinstance(stored, dict):
+        return False
+    flag = stored.get(COUNTERFEIT_IMAGE_KEY)
+    return isinstance(flag, dict) and bool(flag.get("risk")) and bool(flag.get("by_url"))
+
+
+def storefront_may_show_product(stored: Any) -> bool:
+    """Web vẫn hiện sản phẩm đã đăng. Chỉ ẩn khi đã thấy logo hàng giả."""
+    return not image_counterfeit_risk(stored)
+
+
+def _counterfeit_checked_and_risk():
+    from sqlalchemy import String, cast
+
+    from app.models.product import Product
+
+    flag = Product.consult_image_text[COUNTERFEIT_IMAGE_KEY]
+    checked = flag["checked"]
+    risk = flag["risk"]
+    if hasattr(checked, "astext"):
+        checked_ok = checked.astext.in_(("true", "True"))
+        risk_text = risk.astext
+    else:
+        checked_ok = cast(checked, String).in_(("true", "True"))
+        risk_text = cast(risk, String)
+    return checked_ok, risk_text
+
+
+def storefront_counterfeit_cleared_clause():
+    from sqlalchemy import func
+
+    _checked_ok, risk_text = _counterfeit_checked_and_risk()
+    risk_on = func.coalesce(risk_text, "false").in_(("true", "True"))
+    return ~risk_on
+
+
+_DISTRIBUTION_LOCALIZED = ("localized", "skipped")
+
+
+def distribution_ready(stored: Any, localization_status: Any) -> bool:
+    """Nguồn cấp và web nền tảng khác chỉ nhận hàng đã kiểm sạch và đã bản địa hóa."""
+    status = str(localization_status or "").strip().lower()
+    return (
+        counterfeit_was_checked(stored)
+        and not image_counterfeit_risk(stored)
+        and status in _DISTRIBUTION_LOCALIZED
+    )
+
+
+def distribution_ready_clause():
+    from sqlalchemy import and_, func
+
+    from app.models.product import Product
+
+    checked_ok, risk_text = _counterfeit_checked_and_risk()
+    risk_on = func.coalesce(risk_text, "false").in_(("true", "True"))
+    localized = func.lower(func.coalesce(Product.image_localization_status, "")).in_(_DISTRIBUTION_LOCALIZED)
+    return and_(checked_ok, ~risk_on, localized)
+
+
+def counterfeit_hit_labels(stored: Any) -> List[str]:
+    if not image_counterfeit_risk(stored):
+        return []
+    flag = stored.get(COUNTERFEIT_IMAGE_KEY) or {}
+    found: List[str] = []
+    seen: set[str] = set()
+    for hits in (flag.get("by_url") or {}).values():
+        if not isinstance(hits, list):
+            continue
+        for hit in hits:
+            token = str(hit or "").strip()
+            key = token.casefold()
+            if not token or key in seen:
+                continue
+            seen.add(key)
+            found.append(token)
+    return found
+
+
+def counterfeit_hit_fingerprint(stored: Any) -> Tuple[str, ...]:
+    return tuple(sorted(label.casefold() for label in counterfeit_hit_labels(stored)))
 
 
 def consult_updates_from_results(results: Dict[str, Any]) -> Dict[str, List[Dict[str, str]]]:
@@ -193,6 +318,8 @@ def build_image_consult_context(stored: Any) -> Optional[Dict[str, Any]]:
     for url, rows in stored.items():
         if len(flat) >= _MAX_CONTEXT_LINES:
             break
+        if url == COUNTERFEIT_IMAGE_KEY:
+            continue
         if not isinstance(url, str) or not url.strip() or not isinstance(rows, list):
             continue
         image_lines: List[Dict[str, str]] = []

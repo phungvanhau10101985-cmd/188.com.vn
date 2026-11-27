@@ -79,6 +79,47 @@ def test_strip_more_vietnamese_china_style_terms():
         assert sanitize_vi_listing_field(src) == expected
 
 
+def test_strip_brand_and_character_from_default_name():
+    cases = [
+        ("Giày Nike Air Force 1 nam trắng", "Giày nam trắng"),
+        ("Túi xách Louis Vuitton nữ", "Túi xách nữ"),
+        ("Áo thun MLB Yankees form rộng", "Áo thun form rộng"),
+        ("Áo in Hello Kitty nữ", "Áo in nữ"),
+        ("Giày replica like auth 1:1", "Giày"),
+        ("Túi LV nữ", "Túi nữ"),
+    ]
+    for src, expected in cases:
+        assert sanitize_vi_listing_field(src) == expected
+
+
+def test_strip_chinese_brand_from_source_context():
+    raw = "耐克女鞋厚底老爹鞋Air Force"
+    out = sanitize_listing_context_for_ai(raw)
+    assert "耐克" not in out
+    assert "Air Force" not in out
+    assert "女鞋" in out
+    assert "老爹鞋" in out
+
+
+def test_brand_only_name_falls_back_and_clears_brand():
+    pd = {
+        "name": "Nike",
+        "description": "Hàng replica like auth",
+        "brand_name": "Louis Vuitton",
+        "chinese_name": "耐克女鞋",
+    }
+    apply_listing_year_sanitize_to_product_data(pd)
+    assert pd["name"] == "Sản phẩm"
+    assert pd["description"] == ""
+    assert pd["brand_name"] is None
+    assert pd["chinese_name"] == "耐克女鞋"
+
+
+def test_keep_generic_name_without_trademark():
+    name = "Váy maxi nữ thắt eo dáng dài"
+    assert sanitize_vi_listing_field(name) == name
+
+
 def test_keep_origin_trung_quoc_in_description():
     desc = "Sản phẩm xuất xứ Trung Quốc, chất liệu cotton cao cấp"
     assert sanitize_vi_listing_field(desc) == desc

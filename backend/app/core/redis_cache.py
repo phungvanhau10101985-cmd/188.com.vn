@@ -22,7 +22,7 @@ _client_init_attempted = False
 _client_init_failed = False
 
 # Namespace/version — tăng khi đổi shape payload cache để tự invalidate toàn bộ.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 PDP_CACHE_PREFIX = f"v{CACHE_VERSION}:pdp"
 LISTING_CACHE_PREFIX = f"v{CACHE_VERSION}:listing"
 MENU_CACHE_PREFIX = f"v{CACHE_VERSION}:menu"

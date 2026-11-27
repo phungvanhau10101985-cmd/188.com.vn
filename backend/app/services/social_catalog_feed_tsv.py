@@ -249,6 +249,9 @@ def iter_meta_catalog_lines(
     if only_active:
         q = q.filter(Product.is_active.is_(True))
     q = apply_catalog_visibility_filter(q, include_warehouse_in_catalog=True)
+    from app.services.consult_image_text import distribution_ready_clause
+
+    q = q.filter(distribution_ready_clause())
     for p in q.yield_per(max(50, yield_per)):
         vals = meta_row_values(
             p,
@@ -288,6 +291,9 @@ def iter_tiktok_catalog_lines(
     if only_active:
         q = q.filter(Product.is_active.is_(True))
     q = apply_catalog_visibility_filter(q, include_warehouse_in_catalog=True)
+    from app.services.consult_image_text import distribution_ready_clause
+
+    q = q.filter(distribution_ready_clause())
     for p in q.yield_per(max(50, yield_per)):
         vals = tiktok_row_values(
             p,
