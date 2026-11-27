@@ -379,13 +379,15 @@ def load_api_routes():
     try:
         module = __import__("app.api.endpoints.products", fromlist=["router"])
         if hasattr(module, 'router'):
-            app.include_router(module.router, prefix="/api/v1/products", tags=["products"])
-            loaded.append(("products", "/api/v1/products"))
-            print(f"  ✅ products: /api/v1/products")
+            # Catch-all GET /{product_id:path} trên products nuốt mọi path sau prefix.
+            # Route tĩnh (báo cáo hàng giả) phải đăng ký TRƯỚC router products.
             from app.api.endpoints import counterfeit_report as _counterfeit_report
 
             app.include_router(_counterfeit_report.router, prefix="/api/v1/products", tags=["products"])
             print("  ✅ counterfeit report: /api/v1/products/admin/counterfeit-report")
+            app.include_router(module.router, prefix="/api/v1/products", tags=["products"])
+            loaded.append(("products", "/api/v1/products"))
+            print(f"  ✅ products: /api/v1/products")
         else:
             print(f"  ⚠️  products: No router attribute")
             failed.append(("products", "No router attribute"))
