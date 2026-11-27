@@ -79,7 +79,7 @@ export async function fetchPublicSiteEmbeds(): Promise<PublicSiteEmbeds> {
   publicEmbedsInflight = (async () => {
     try {
       const res = await fetch(`${base}/embed-codes/public`, {
-        next: { revalidate: 120 },
+        ...(typeof window === 'undefined' ? { next: { revalidate: 120 } } : { cache: 'no-store' as const }),
         signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) return empty;

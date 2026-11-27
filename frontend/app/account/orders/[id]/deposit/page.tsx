@@ -39,6 +39,8 @@ import { markGoogleCustomerReviewsForOrder } from '@/lib/google-customer-reviews
 import { useGoogleCustomerReviewsMerchantId } from '@/lib/use-google-customer-reviews-merchant-id';
 import { partialPercentForGoods } from '@/lib/order-deposit';
 import { useDepositPolicy } from '@/lib/use-deposit-percent';
+import { BUSINESS_ZALO } from '@/lib/business-info';
+import { fetchPublicSiteEmbeds, resolveZaloClickUrl } from '@/lib/site-embeds-public';
 
 const META_OD_AWAITING_LS = (orderId: number) => `meta_order_awaiting_deposit_${orderId}`;
 
@@ -180,6 +182,7 @@ export default function OrderDepositPage() {
   const [qrBlobReady, setQrBlobReady] = useState(false);
   const [inAppKind, setInAppKind] = useState<InAppBrowserKind | null>(null);
   const [bankPayOpen, setBankPayOpen] = useState(false);
+  const [zaloUrl, setZaloUrl] = useState(BUSINESS_ZALO);
   const inAppBrowser = inAppKind != null;
 
   const formatVnd = (n: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
@@ -220,6 +223,60 @@ export default function OrderDepositPage() {
   useEffect(() => {
     setInAppKind(detectInAppBrowser());
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPublicSiteEmbeds()
+      .then((embeds) => {
+        if (!cancelled) setZaloUrl(resolveZaloClickUrl(embeds));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const contactShopZalo = () => {
+    const orderCode = order?.order_code || '';
+    const message = orderCode
+      ? `Em cần nhắn shop về đặt cọc đơn #${orderCode} trên 188.com.vn.`
+      : 'Em cần nhắn shop về đặt cọc trên 188.com.vn.';
+    trackEvent('deposit_zalo_click', {
+      order_id: order?.id,
+      has_order_code: Boolean(orderCode),
+    });
+    window.open(zaloUrl, '_blank', 'noopener,noreferrer');
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+    if (!clipboard?.writeText) {
+      pushToast({
+        title: 'Đã mở Zalo',
+        description: message,
+        variant: 'info',
+        durationMs: 6000,
+      });
+      return;
+    }
+    void clipboard.writeText(message).then(
+      () => {
+        pushToast({
+          title: 'Đã chép tin nhắn',
+          description: orderCode
+            ? 'Dán vào ô chat Zalo rồi gửi. Tin đã kèm mã đơn.'
+            : 'Dán vào ô chat Zalo rồi gửi.',
+          variant: 'success',
+          durationMs: 4000,
+        });
+      },
+      () => {
+        pushToast({
+          title: 'Đã mở Zalo',
+          description: message,
+          variant: 'info',
+          durationMs: 6000,
+        });
+      },
+    );
+  };
 
   useEffect(() => {
     return () => {
@@ -947,35 +1004,48 @@ export default function OrderDepositPage() {
                   >
                     Thanh toán cọc qua ngân hàng
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadQr()}
-                    disabled={qrDownloading || !qrBlobReady}
-                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors w-full max-w-[280px]"
-                  >
-                    {qrDownloading ? (
-                      <>
-                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
-                        Đang tải…
-                      </>
-                    ) : !qrBlobReady ? (
-                      <>
-                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
-                        Đang chuẩn bị…
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                          <path
-                            fillRule="evenodd"
-                            d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        {inAppBrowser ? 'Lưu mã QR' : 'Tải mã QR'}
-                      </>
-                    )}
-                  </button>
+                  <div className="mt-2 flex w-full max-w-[280px] items-stretch gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleDownloadQr()}
+                      disabled={qrDownloading || !qrBlobReady}
+                      className="inline-flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50 disabled:opacity-60 transition-colors"
+                    >
+                      {qrDownloading ? (
+                        <>
+                          <span className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                          <span className="truncate">Đang tải…</span>
+                        </>
+                      ) : !qrBlobReady ? (
+                        <>
+                          <span className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                          <span className="truncate">Đang chuẩn bị…</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                            <path
+                              fillRule="evenodd"
+                              d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <span className="truncate">{inAppBrowser ? 'Lưu mã QR' : 'Tải mã QR'}</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={contactShopZalo}
+                      aria-label="Nhắn tin Zalo shop"
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#0068FF] px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#0057d6] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0068FF]"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="currentColor" aria-hidden>
+                        <path d="M12 3C6.5 3 2 6.8 2 11.5c0 2.7 1.5 5.1 3.8 6.7L5 22l4.4-2.4c.8.2 1.7.3 2.6.3 5.5 0 10-3.8 10-8.4S17.5 3 12 3z" />
+                      </svg>
+                      <span className="whitespace-nowrap">Nhắn Zalo</span>
+                    </button>
+                  </div>
                 </>
               ) : (
                 <p className="text-sm text-gray-500 text-center py-8">Chọn tài khoản để hiển thị mã QR.</p>
